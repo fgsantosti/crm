@@ -12,16 +12,18 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self): return self.request.user.companies.all()
     @action(detail=True, methods=["post"])
     def incoming(self, request, pk=None):
+        company = self.get_object()
         data = IncomingSerializer(data=request.data)
         data.is_valid(raise_exception=True)
-        return Response(receive(self.get_object(), data.validated_data))
+        return Response(receive(company, data.validated_data))
     @action(detail=True, methods=["post"])
     def delivery(self, request, pk=None):
         from django.db import transaction
+        authorized_company = self.get_object()
         payload = DeliverySerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         with transaction.atomic():
-            company = Company.objects.select_for_update().get(pk=self.get_object().pk)
+            company = Company.objects.select_for_update().get(pk=authorized_company.pk)
             event = get_object_or_404(Event.objects.select_for_update(), pk=payload.validated_data["event_id"], lead__company=company)
             value = payload.validated_data["status"]
             if value not in ["SENT", "FAILED"]: return Response({"detail": "status deve ser SENT ou FAILED"}, status=400)

@@ -76,3 +76,14 @@ Volumes preservam banco, Redis e arquivos estáticos. Rode apenas uma instância
 A configuração usa HTTP em localhost para desenvolvimento. Publicação externa requer configurar o domínio e HTTPS no Caddy, cookies seguros e origens CSRF correspondentes. As permissões por papel, novo modelo de requisições, outbox, adaptador OpenClaw e eventos em tempo real serão implementados nas etapas seguintes.
 
 Referências de configuração: [integração Django com Celery](https://github.com/celery/celery/blob/main/docs/django/first-steps-with-django.rst), [Channels](https://channels.readthedocs.io/en/latest/index.html) e [camada Redis](https://github.com/django/channels_redis/blob/main/README.rst).
+
+## Validação realizada nesta entrega
+
+* Compilação TypeScript e Vite concluída.
+* Django check sem problemas e migrações sem alterações pendentes.
+* Dez testes existentes passaram com SQLite e Python 3.13 disponíveis no ambiente local.
+* ASGI, Celery e Channels importados e configurações básicas verificadas.
+* Dependências Python sem conflitos pelo pip check.
+* YAML lido e dependências e portas verificadas. Esta verificação não substitui docker compose config.
+
+Docker não está instalado neste ambiente. Build das imagens, proxy, estáticos, worker, beat e comunicação com PostgreSQL e Redis ainda precisam ser validados com os comandos acima. A imagem configurada usa Python 3.12, cuja execução também depende dessa validação.

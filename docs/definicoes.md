@@ -63,10 +63,10 @@ O estado de qualificação, o modo de atendimento e o status da requisição sã
 
 ## Infraestrutura preparada
 
-Foram adicionados Dockerfiles, Compose com PostgreSQL, Redis, setup, web, worker, beat, frontend e proxy, além das configurações ASGI, Celery e Channels. Os comandos e limites estão em infraestrutura.md. A disponibilidade do Docker e os resultados das verificações serão registrados ao concluir esta etapa.
+Foram adicionados Dockerfiles, Compose com PostgreSQL, Redis, setup, web, worker, beat, frontend e proxy, além das configurações ASGI, Celery e Channels. Os comandos e limites estão em infraestrutura.md. Docker não está disponível neste ambiente, portanto os containers ainda não foram executados. As verificações locais e seus limites estão registrados em infraestrutura.md.
 
 ## Próxima entrega
 
 Implementar modelos e permissões em uma etapa separada, conforme as decisões deste documento.
 
-Cada entrega deve informar o que foi implementado e os testes executados. A base atual possui compilação do frontend e verificação de sintaxe Python; os testes Django ainda não foram executados porque a instalação das dependências não foi autorizada na etapa anterior.
+Cada entrega deve informar o que foi implementado e os testes executados. Nesta etapa, passaram os 10 testes Django com SQLite, a compilação do frontend, a verificação das migrações, a configuração Django e as importações ASGI e Celery. A execução completa com Python 3.12, PostgreSQL e Redis via Docker permanece pendente.

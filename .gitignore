@@ -6,3 +6,6 @@ node_modules/
 dist/
 *.sqlite3
 *.tsbuildinfo
+staticfiles/
+celerybeat.pid
+celerybeat-schedule*
