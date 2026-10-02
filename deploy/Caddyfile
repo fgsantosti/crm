@@ -1,0 +1,13 @@
+http://localhost {
+    handle /static/* {
+        root * /srv
+        file_server
+    }
+    @backend path /api/* /admin/* /ws/* /health/*
+    handle @backend {
+        reverse_proxy web:8000
+    }
+    handle {
+        reverse_proxy frontend:80
+    }
+}

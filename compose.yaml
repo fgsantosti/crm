@@ -1,0 +1,101 @@
+x-backend: &backend
+  build: ./backend
+  environment: &backend-env
+    DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Configure DJANGO_SECRET_KEY no ambiente protegido}
+    POSTGRES_DB: crm
+    POSTGRES_USER: crm
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD no ambiente protegido}
+    POSTGRES_HOST: db
+    ALLOWED_HOSTS: localhost,127.0.0.1,web
+    CELERY_BROKER_URL: redis://redis:6379/0
+    CELERY_RESULT_BACKEND: redis://redis:6379/1
+    CHANNEL_REDIS_URL: redis://redis:6379/2
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: crm
+      POSTGRES_USER: crm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD no ambiente protegido}
+    volumes:
+      - crm_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U crm -d crm]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: [redis-server, --appendonly, 'yes', --maxmemory-policy, noeviction]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  setup:
+    <<: *backend
+    restart: 'no'
+    command: [sh, -c, 'python manage.py migrate --noinput && python manage.py collectstatic --noinput']
+    volumes:
+      - static_data:/app/staticfiles
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    <<: *backend
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready/', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  worker:
+    <<: *backend
+    command: [celery, -A, config, worker, --loglevel=info]
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+  beat:
+    <<: *backend
+    command: [celery, -A, config, beat, --loglevel=info, --scheduler, django_celery_beat.schedulers:DatabaseScheduler]
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      - '127.0.0.1:8080:80'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - static_data:/srv/static:ro
+    depends_on:
+      web:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  crm_data:
+  redis_data:
+  static_data:
