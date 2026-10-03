@@ -200,6 +200,13 @@ tr:hover td { background: #FBF1E7; }
 .chip { padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-deep); font-size: 12px; font-weight: 600; }
 .chip-neutral { background: var(--panel-muted); color: #5C4E3F; }
 .chip-terminal { background: var(--success-soft); color: var(--success); }
+.token-tag {
+  display: inline-block; font-family: 'DM Mono', monospace; font-size: 0.9em; font-weight: 600;
+  padding: 1px 6px; border-radius: 6px; border: 1.5px solid transparent; margin: 0 1px; white-space: nowrap;
+}
+.token-tag-empresa { background: var(--accent-soft); color: var(--accent-deep); border-color: var(--accent); }
+.token-tag-dado { background: var(--success-soft); color: var(--success); border-color: var(--success); }
+.token-tag-html { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
 
 .empty { padding: 60px 25px; text-align: center; color: var(--muted); }
 .error { padding: 12px; background: #ffe9e4; color: #9b3222; border-radius: 9px; }
