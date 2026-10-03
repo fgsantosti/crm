@@ -5,13 +5,50 @@
 ## Configuração por empresa
 
 - Empresa: `[NOME DA EMPRESA]`
-- Canal: `[WHATSAPP / OUTRO]`
-- CRM oficial: `[NOME DA PLANILHA OU SISTEMA]`
-- Aba/tabela principal: `[NOME DA ABA]`
-- Chave única do contato: `[WHATSAPP / TELEFONE / ID]`
+- Canal: `WhatsApp`
+- CRM oficial: **Conecta CRM** (API REST — nunca planilha; ver seção seguinte)
+- `company_id` no Conecta CRM: `[ID NUMÉRICO DA EMPRESA]`
+- Chave única do contato: WhatsApp em formato E.164 (`+55...`)
 - Canal de saída padrão: `[TEXTO / AUDIO_GRAVADO]`
 - Responsável humano padrão: `[NOME OU FILA]`
 - Canal privado de controle: `[DESCREVER]`
+
+## Autenticação e comunicação com a API
+
+O agente nunca fala com uma planilha nem guarda roteiro/dados da empresa na
+própria configuração — tudo isso mora no Conecta CRM e é resolvido pela API a
+cada mensagem. O plugin que liga este agente ao WhatsApp precisa de:
+
+1. **Um token de serviço exclusivo desta empresa.** Esse token é gerado pela
+   equipe da Axioma no Django Admin do Conecta CRM (`/admin/` → usuário de
+   serviço vinculado só a esta empresa em `Companies → members`, token gerado
+   em `Tokens`) e entregue à empresa fora deste repositório (nunca em texto
+   neste arquivo, em planilha ou em chat). **O agente deve pedir esse token
+   antes de operar em produção** — sem ele, nenhuma chamada funciona.
+2. **A URL base da API** (ex.: `https://crm.axiomaia.com.br/api`), também
+   fornecida pela Axioma.
+
+Com os dois em mãos, toda interação com um lead vira **uma chamada HTTP por
+marcador emitido** (`[[AXIOMA:Q:...]]`, `REPETIR`, `ATUALIZAR`, `VALIDAR`,
+`CLASSIFICADO`) para `POST /{base}/companies/{company_id}/incoming/`, com
+`Authorization: Token <token>` — e uma confirmação em
+`POST /{base}/companies/{company_id}/delivery/` depois de efetivamente enviar
+a mensagem. O contrato completo (payloads, campos aceitos, exemplos testados
+de ponta a ponta) está em `docs/integracao-agente.md` — quem implementa o
+plugin de integração deve seguir aquele documento à risca, não inventar o
+formato aqui.
+
+**O agente nunca mantém roteiro nem dados da empresa localmente.** A própria
+empresa alimenta os dois pelo painel do Conecta CRM:
+
+- **"Roteiro aprovado"** — o texto/áudio de cada `question_id` que o agente
+  pode pedir. O agente só decide *qual* `question_id` vem a seguir (via os
+  marcadores); o CRM resolve esse id para o conteúdo aprovado e devolve pronto
+  na resposta de `/incoming/` — o agente nunca escreve esse texto por conta
+  própria.
+- **"Dados da empresa"** — base de consulta livre (horário, endereço,
+  serviços, formas de pagamento etc.) para responder perguntas fora do
+  roteiro fixo de qualificação, sem inventar informação.
 
 ## Antes de cada mensagem de lead
 
