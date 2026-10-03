@@ -24,6 +24,18 @@ class Question(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=["company", "question_id"], name="unique_company_question")]
 
+class CompanyInfo(models.Model):
+    """Entrada de 'Dados da empresa': título + texto que o agente pode consultar
+    para responder perguntas livres sobre a empresa (horário, endereço, serviços,
+    formas de pagamento etc.), fora do roteiro fixo de qualificação.
+    """
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="info_entries")
+    title = models.CharField(max_length=160)
+    content = models.TextField()
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        ordering = ["title"]
+
 class Lead(models.Model):
     ESPECIALIDADE_CHOICES = [("Previdenciário", "Previdenciário"), ("Consumidor", "Consumidor"), ("Trabalhista", "Trabalhista"), ("Fora de escopo", "Fora de escopo")]
     TEMPERATURA_CHOICES = [("Qualificado", "Qualificado"), ("Quente", "Quente"), ("Desconfiado", "Desconfiado"), ("Remarketing", "Remarketing"), ("Desqualificado", "Desqualificado")]

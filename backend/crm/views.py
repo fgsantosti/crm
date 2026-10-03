@@ -3,8 +3,8 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
-from .models import Company, Lead, Question, Event
-from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, IncomingSerializer, EventSerializer, DeliverySerializer
+from .models import Company, Lead, Question, CompanyInfo, Event
+from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer
 from .services import receive, escalate
 
 class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
@@ -54,6 +54,13 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
 class QuestionViewSet(TenantMixin, viewsets.ModelViewSet):
     queryset = Question.objects.all().order_by("id")
     serializer_class = QuestionSerializer
+    def get_permissions(self):
+        return [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
+    def perform_create(self, serializer): serializer.save(company=self.company())
+
+class CompanyInfoViewSet(TenantMixin, viewsets.ModelViewSet):
+    queryset = CompanyInfo.objects.all()
+    serializer_class = CompanyInfoSerializer
     def get_permissions(self):
         return [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
     def perform_create(self, serializer): serializer.save(company=self.company())

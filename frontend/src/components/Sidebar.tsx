@@ -1,7 +1,7 @@
 import { Logo } from './Logo';
 import type { Company } from '../types';
 
-export type View = 'dashboard' | 'leads' | 'pendencias' | 'humano' | 'roteiro';
+export type View = 'dashboard' | 'leads' | 'pendencias' | 'humano' | 'roteiro' | 'dados-empresa';
 
 export function Sidebar({
   role,
@@ -32,7 +32,10 @@ export function Sidebar({
     { key: 'pendencias', label: 'Pendências', count: pendingCount },
     { key: 'humano', label: 'Atendimento humano', count: humanCount },
   ];
-  if (role === 'empresa') items.push({ key: 'roteiro', label: 'Roteiro do agente' });
+  if (role === 'empresa') {
+    items.push({ key: 'roteiro', label: 'Roteiro do agente' });
+    items.push({ key: 'dados-empresa', label: 'Dados da empresa' });
+  }
 
   return (
     <aside className="sidebar">

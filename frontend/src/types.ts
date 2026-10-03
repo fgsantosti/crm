@@ -49,6 +49,14 @@ export type Question = {
   audio_asset: string;
 };
 
+export type CompanyInfoEntry = {
+  id: number;
+  company: number;
+  title: string;
+  content: string;
+  updated_at: string;
+};
+
 export type Paginated<T> = { count: number; next: string | null; previous: string | null; results: T[] };
 
 export type Role = 'atendente' | 'empresa' | 'admin';

@@ -96,3 +96,11 @@ class QualificationTests(TestCase):
         self.assertEqual(self.client.get("/api/companies/").status_code, 401)
     def test_staff_required_for_script_edit(self):
         self.assertEqual(self.client.post(f"/api/questions/?company={self.company.pk}", {}).status_code, 403)
+    def test_company_info_tenant_isolation_and_staff_required(self):
+        from .models import CompanyInfo
+        CompanyInfo.objects.create(company=self.company, title="Horário", content="Seg a sex, 9h às 18h.")
+        CompanyInfo.objects.create(company=self.other, title="Horário", content="24h.")
+        response = self.client.get(f"/api/company-info/?company={self.company.pk}")
+        self.assertEqual(len(response.json()["results"]), 1)
+        self.assertEqual(self.client.get(f"/api/company-info/?company={self.other.pk}").status_code, 404)
+        self.assertEqual(self.client.post(f"/api/company-info/?company={self.company.pk}", {"title": "Endereço", "content": "Rua X, 123"}, format="json").status_code, 403)

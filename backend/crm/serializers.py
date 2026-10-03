@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Company, Lead, Question, Event
+from .models import Company, Lead, Question, CompanyInfo, Event
 
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
@@ -22,6 +22,12 @@ class QuestionSerializer(serializers.ModelSerializer):
         model = Question
         fields = "__all__"
         read_only_fields = ["company"]
+
+class CompanyInfoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompanyInfo
+        fields = "__all__"
+        read_only_fields = ["company", "updated_at"]
 
 class EventSerializer(serializers.ModelSerializer):
     class Meta:

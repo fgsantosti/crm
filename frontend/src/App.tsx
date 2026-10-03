@@ -9,6 +9,7 @@ import { Leads } from './views/Leads';
 import { Pendencias } from './views/Pendencias';
 import { AtendimentoHumano } from './views/AtendimentoHumano';
 import { Roteiro } from './views/Roteiro';
+import { DadosEmpresa } from './views/DadosEmpresa';
 import { Admin } from './views/Admin';
 
 export function App() {
@@ -60,7 +61,7 @@ export function App() {
   }, [company?.id]);
 
   useEffect(() => {
-    if (role !== 'empresa' && view === 'roteiro') setView('dashboard');
+    if (role !== 'empresa' && (view === 'roteiro' || view === 'dados-empresa')) setView('dashboard');
   }, [role, view]);
 
   function logout() {
@@ -109,6 +110,7 @@ export function App() {
           {view === 'pendencias' && <Pendencias api={api} company={company} />}
           {view === 'humano' && <AtendimentoHumano api={api} company={company} />}
           {view === 'roteiro' && <Roteiro api={api} company={company} canEdit={role === 'empresa'} />}
+          {view === 'dados-empresa' && <DadosEmpresa api={api} company={company} />}
         </div>
       </main>
     </div>
