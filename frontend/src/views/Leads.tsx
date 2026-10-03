@@ -15,6 +15,7 @@ export function Leads({ api, company }: { api: Api; company: Company }) {
     let active = true;
     setBusy(true);
     setSelected(null);
+    setError('');
     api(`/leads/?company=${company.id}`)
       .then((d: Paginated<Lead>) => {
         if (active) setLeads(d.results);
@@ -103,7 +104,20 @@ export function Leads({ api, company }: { api: Api; company: Company }) {
             <tbody>
               {busy && !visible.length && <SkeletonRows rows={4} cols={5} />}
               {visible.map((l) => (
-                <tr key={l.id} onClick={() => setSelected(l)} style={{ cursor: 'pointer' }}>
+                <tr
+                  key={l.id}
+                  onClick={() => setSelected(l)}
+                  style={{ cursor: 'pointer' }}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`Ver detalhes de ${l.name || l.contact}`}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelected(l);
+                    }
+                  }}
+                >
                   <td>
                     <div style={{ fontWeight: 600 }}>{l.name || 'Sem nome informado'}</div>
                     <small>{l.contact}</small>
@@ -164,6 +178,14 @@ export function Leads({ api, company }: { api: Api; company: Company }) {
               <label>
                 Demanda
                 <input name="demand" defaultValue={selected.demand} />
+              </label>
+              <label>
+                Especialidade
+                <input readOnly value={selected.especialidade || '—'} />
+              </label>
+              <label>
+                Temperatura
+                <input readOnly value={selected.temperature || '—'} />
               </label>
             </div>
             <label>

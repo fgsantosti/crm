@@ -22,6 +22,7 @@ export function App() {
   const [leadsCount, setLeadsCount] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
   const [humanCount, setHumanCount] = useState(0);
+  const [companiesRetry, setCompaniesRetry] = useState(0);
 
   const api = useMemo(() => apiFactory(token), [token]);
   const company = companies.find((c) => String(c.id) === companyId) || null;
@@ -29,6 +30,7 @@ export function App() {
   useEffect(() => {
     if (!token) return;
     let active = true;
+    setError('');
     api('/companies/')
       .then((d) => {
         if (active) {
@@ -42,7 +44,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [token]);
+  }, [token, companiesRetry]);
 
   useEffect(() => {
     if (!company) return;
@@ -77,8 +79,27 @@ export function App() {
 
   if (!company) {
     return (
-      <div className="empty">
-        {error || (companies.length ? 'Carregando empresa…' : 'Nenhuma empresa vinculada. Solicite o vínculo ao administrador.')}
+      <div className="shell">
+        <main className="main">
+          {error && (
+            <p role="alert" className="error">
+              {error}
+            </p>
+          )}
+          <div className="empty">
+            {error ? 'Não foi possível carregar suas empresas.' : companies.length ? 'Carregando empresa…' : 'Nenhuma empresa vinculada. Solicite o vínculo ao administrador.'}
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+            {error && (
+              <button type="button" onClick={() => setCompaniesRetry((n) => n + 1)}>
+                Tentar novamente
+              </button>
+            )}
+            <button type="button" className="secondary" onClick={logout}>
+              Sair
+            </button>
+          </div>
+        </main>
       </div>
     );
   }

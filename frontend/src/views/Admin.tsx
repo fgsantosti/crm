@@ -91,7 +91,7 @@ export function Admin({ role, onRoleChange, onLogout }: { role: Role; onRoleChan
             </div>
           </section>
 
-          <p style={{ fontSize: '12.5px', color: 'var(--muted-soft)' }}>
+          <p style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
             Dados estáticos — a lista real depende de um endpoint de empresas no backend (hoje a criação é só pelo Django Admin).
           </p>
         </main>
@@ -138,7 +138,7 @@ export function Admin({ role, onRoleChange, onLogout }: { role: Role; onRoleChan
                 Revogar
               </button>
             </div>
-            <p style={{ fontSize: 12, marginTop: 14, color: 'var(--muted-soft)' }}>
+            <p style={{ fontSize: 12, marginTop: 14, color: 'var(--muted)' }}>
               Protótipo visual: requer um campo de chave por empresa e um endpoint de rotação no backend antes de funcionar de verdade.
             </p>
           </div>

@@ -11,6 +11,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
   useEffect(() => {
     let active = true;
     setBusy(true);
+    setError('');
     api(`/questions/?company=${company.id}`)
       .then((d: Paginated<Question> | Question[]) => {
         if (active) setQuestions(Array.isArray(d) ? d : d.results);
@@ -37,7 +38,11 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
             quando houver) de cada <code>question_id</code> que ele pode pedir. {canEdit ? 'Você edita este conteúdo.' : 'Somente a empresa edita.'}
           </p>
         </div>
-        {canEdit && <button>Nova pergunta</button>}
+        {canEdit && (
+          <button disabled title="Em breve">
+            Nova pergunta
+          </button>
+        )}
       </header>
 
       {error && (

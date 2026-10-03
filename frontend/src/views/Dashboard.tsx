@@ -17,6 +17,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   useEffect(() => {
     let active = true;
     setBusy(true);
+    setError('');
     api(`/leads/?company=${company.id}`)
       .then((d: Paginated<Lead>) => {
         if (active) setLeads(d.results);
@@ -94,7 +95,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
       <section className="section">
         <div className="section-head">
           <h2>Filtros</h2>
-          <span style={{ fontSize: 12, color: 'var(--muted-soft)' }}>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>
             {total} atendimento{total === 1 ? '' : 's'} no período selecionado
           </span>
         </div>
@@ -231,7 +232,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
               ))}
               {!byArea.length && <p style={{ fontSize: 13 }}>Sem dados para o período.</p>}
             </div>
-            <p style={{ marginTop: 'auto', fontSize: 12, color: 'var(--muted-soft)' }}>Área vem da especialidade classificada pelo agente — ainda sem área quer dizer que a triagem não chegou lá.</p>
+            <p style={{ marginTop: 'auto', fontSize: 12, color: 'var(--muted)' }}>Área vem da especialidade classificada pelo agente — ainda sem área quer dizer que a triagem não chegou lá.</p>
           </article>
         </div>
       </section>

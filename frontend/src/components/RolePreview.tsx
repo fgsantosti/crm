@@ -14,7 +14,7 @@ const ROLES: { key: Role; label: string }[] = [
  */
 export function RolePreview({ role, onChange }: { role: Role; onChange: (r: Role) => void }) {
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--muted-soft)' }}>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: 'var(--muted)' }}>
       <span>Pré-visualizar como:</span>
       {ROLES.map((r) => (
         <button

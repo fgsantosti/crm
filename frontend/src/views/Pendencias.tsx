@@ -12,6 +12,7 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
   useEffect(() => {
     let active = true;
     setBusy(true);
+    setError('');
     api(`/leads/?company=${company.id}&pending=1`)
       .then((d: Paginated<Lead>) => {
         if (active) setLeads(d.results);

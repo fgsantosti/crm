@@ -62,6 +62,7 @@ export function DadosEmpresa({ api, company }: { api: Api; company: Company }) {
   }
 
   async function remove(entry: CompanyInfoEntry) {
+    if (!window.confirm(`Excluir "${entry.title}"? Essa ação não pode ser desfeita.`)) return;
     setSavingId(entry.id);
     setError('');
     try {
