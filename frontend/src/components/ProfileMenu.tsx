@@ -211,12 +211,14 @@ export function ProfileMenu({
 
               {section === 'menu' && (
                 <>
-                  {/* Coluna esquerda: laranja */}
+                  {/* Coluna esquerda: mesmo tratamento de fundo das telas comuns (ink + glow + pontilhado), não laranja chapado */}
                   <div
                     style={{
                       width: 240,
                       flex: 'none',
-                      background: 'var(--accent)',
+                      position: 'relative',
+                      overflow: 'hidden',
+                      background: 'var(--ink)',
                       padding: '44px 26px 28px',
                       boxSizing: 'border-box',
                       display: 'flex',
@@ -224,32 +226,53 @@ export function ProfileMenu({
                       alignItems: 'center',
                     }}
                   >
-                    <div style={{ marginBottom: 16 }}>
-                      <Avatar me={me} size={104} />
-                    </div>
-                    <div style={{ color: '#fff', fontWeight: 600, fontSize: 15.5, textAlign: 'center', marginBottom: 20 }}>
-                      {me.display_name || me.username}
-                    </div>
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      style={{ display: 'none' }}
-                      onChange={(e) => e.target.files?.[0] && uploadAvatar(e.target.files[0])}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        pointerEvents: 'none',
+                        background:
+                          'radial-gradient(260px 260px at 90% -10%, rgba(217,83,26,.35), transparent 60%), radial-gradient(200px 200px at -10% 70%, rgba(217,83,26,.20), transparent 65%)',
+                      }}
                     />
-                    <button type="button" style={ghostLightBtn} onClick={() => fileRef.current?.click()} disabled={busy}>
-                      {busy && <Spinner />}
-                      Trocar foto
-                    </button>
-                    {me.avatar_url && (
-                      <button type="button" style={ghostLightBtn} onClick={removeAvatar} disabled={busy}>
-                        Remover foto
+                    <div
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        opacity: 0.5,
+                        pointerEvents: 'none',
+                        backgroundImage: 'radial-gradient(rgba(255,255,255,.06) 1px, transparent 1px)',
+                        backgroundSize: '14px 14px',
+                      }}
+                    />
+                    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, width: '100%' }}>
+                      <div style={{ marginBottom: 16 }}>
+                        <Avatar me={me} size={104} />
+                      </div>
+                      <div style={{ color: '#fff', fontWeight: 600, fontSize: 15.5, textAlign: 'center', marginBottom: 20 }}>
+                        {me.display_name || me.username}
+                      </div>
+                      <input
+                        ref={fileRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        style={{ display: 'none' }}
+                        onChange={(e) => e.target.files?.[0] && uploadAvatar(e.target.files[0])}
+                      />
+                      <button type="button" style={ghostLightBtn} onClick={() => fileRef.current?.click()} disabled={busy}>
+                        {busy && <Spinner />}
+                        Trocar foto
                       </button>
-                    )}
-                    <div style={{ flex: 1 }} />
-                    <button type="button" style={{ ...ghostLightBtn, marginBottom: 0 }} onClick={onLogout}>
-                      Sair da conta
-                    </button>
+                      {me.avatar_url && (
+                        <button type="button" style={ghostLightBtn} onClick={removeAvatar} disabled={busy}>
+                          Remover foto
+                        </button>
+                      )}
+                      <div style={{ flex: 1 }} />
+                      <button type="button" style={{ ...ghostLightBtn, marginBottom: 0 }} onClick={onLogout}>
+                        Sair da conta
+                      </button>
+                    </div>
                   </div>
 
                   {/* Coluna direita: campos */}
