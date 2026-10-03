@@ -101,6 +101,7 @@ export function Sidebar({
           onAccountDeleted={onAccountDeleted}
           onOpenTrocarEmail={onOpenTrocarEmail}
           onOpenTrocarSenha={onOpenTrocarSenha}
+          onLogout={onLogout}
         />
         <button type="button" className="logout" style={{ flex: 1 }} onClick={onLogout}>
           Sair
