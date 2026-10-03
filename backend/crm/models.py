@@ -57,7 +57,12 @@ class AtendenteInvite(models.Model):
     O código nunca é armazenado em texto puro (code_hash via make_password).
     Ao validar, o convite cria a conta do atendente e dispara um segundo
     e-mail com e-mail/senha provisória (ver services.validar_convite).
+
+    O id é UUID (não sequencial) porque ele vai na URL pública do link de
+    validação enviado por e-mail -- um id incremental deixaria convites de
+    outras empresas adivinháveis só por tentativa.
     """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="invites")
     name = models.CharField(max_length=160)
     email = models.EmailField()

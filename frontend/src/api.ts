@@ -85,7 +85,7 @@ export async function logoutRequest(): Promise<void> {
 }
 
 // Sem token: o atendente ainda não tem conta nesse ponto do fluxo de convite.
-export async function validarConvite(inviteId: number, code: string): Promise<{ detail: string }> {
+export async function validarConvite(inviteId: string, code: string): Promise<{ detail: string }> {
   const response = await fetch(`${base}/convites/${inviteId}/validar/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

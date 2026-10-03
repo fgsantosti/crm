@@ -32,7 +32,7 @@ urlpatterns = [
     path("api/me/email/confirmar/", trocar_email_confirmar),
     path("api/me/excluir/", excluir_conta),
     path("api/trocar-senha/", trocar_senha),
-    path("api/convites/<int:pk>/validar/", validar_convite),
+    path("api/convites/<uuid:pk>/validar/", validar_convite),
     path("api/companies/<int:company_id>/equipe/<int:user_id>/redefinir-senha/", redefinir_senha_atendente_view),
     path("api/companies/<int:company_id>/equipe/<int:user_id>/", desligar_atendente),
     path("api/", include(router.urls)),

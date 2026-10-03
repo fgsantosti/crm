@@ -3,7 +3,7 @@ import { Logo } from '../components/Logo';
 import { Spinner } from '../components/Skeleton';
 import { validarConvite } from '../api';
 
-export function ValidarAtendente({ inviteId }: { inviteId: number }) {
+export function ValidarAtendente({ inviteId }: { inviteId: string }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
