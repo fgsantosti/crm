@@ -9,6 +9,7 @@ const DAY = 24 * 60 * 60 * 1000;
 export function Dashboard({ api, company, role }: { api: Api; company: Company; role: 'atendente' | 'empresa' }) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [search, setSearch] = useState('');
+  const [area, setArea] = useState('');
   const [periodo, setPeriodo] = useState<'30' | 'all'>('30');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -35,10 +36,11 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
     const now = Date.now();
     return leads.filter((l) => {
       if (search && !`${l.name} ${l.contact} ${l.owner}`.toLowerCase().includes(search.toLowerCase())) return false;
+      if (area && l.especialidade !== area) return false;
       if (periodo === '30' && now - new Date(l.created_at).getTime() > 30 * DAY) return false;
       return true;
     });
-  }, [leads, search, periodo]);
+  }, [leads, search, area, periodo]);
 
   const total = filtered.length;
   const concluidos = filtered.filter((l) => l.bot_closed).length;
@@ -62,6 +64,15 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
       buckets.set(key, (buckets.get(key) || 0) + 1);
     });
     return Array.from(buckets.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  }, [filtered]);
+
+  const byArea = useMemo(() => {
+    const buckets = new Map<string, number>();
+    filtered.forEach((l) => {
+      const key = l.especialidade || 'Sem especialidade';
+      buckets.set(key, (buckets.get(key) || 0) + 1);
+    });
+    return Array.from(buckets.entries()).sort((a, b) => b[1] - a[1]);
   }, [filtered]);
 
   const pct = (n: number) => (total ? ` · ${Math.round((n / total) * 100)}%` : '');
@@ -95,9 +106,13 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
             </svg>
             <input placeholder="Buscar lead, contato ou responsável" aria-label="Buscar atendimentos" value={search} onChange={(e) => setSearch(e.target.value)} />
           </label>
-          <label className="select-field" title="Depende do modelo de Área por empresa, ainda não implementado no backend.">
-            <select disabled defaultValue="">
+          <label className="select-field">
+            <select value={area} onChange={(e) => setArea(e.target.value)}>
               <option value="">Todas as áreas</option>
+              <option value="Previdenciário">Previdenciário</option>
+              <option value="Consumidor">Consumidor</option>
+              <option value="Trabalhista">Trabalhista</option>
+              <option value="Fora de escopo">Fora de escopo</option>
             </select>
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
               <path d="M4 6l4 4 4-4" stroke="#8A7A68" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -118,6 +133,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
             style={{ marginLeft: 'auto' }}
             onClick={() => {
               setSearch('');
+              setArea('');
               setPeriodo('30');
             }}
           >
@@ -197,9 +213,9 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
           </article>
 
           <article className="card">
-            <h3>Atendimentos por responsável</h3>
+            <h3>Atendimentos por área</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {byOwner.map(([name, count]) => (
+              {byArea.map(([name, count]) => (
                 <div key={name} className="bar-row">
                   <div className="bar-labels">
                     <span>{name}</span>
@@ -213,9 +229,9 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                   </div>
                 </div>
               ))}
-              {!byOwner.length && <p style={{ fontSize: 13 }}>Sem dados para o período.</p>}
+              {!byArea.length && <p style={{ fontSize: 13 }}>Sem dados para o período.</p>}
             </div>
-            <p style={{ marginTop: 'auto', fontSize: 12, color: 'var(--muted-soft)' }}>Distribuição por área chega com o cadastro de áreas por empresa.</p>
+            <p style={{ marginTop: 'auto', fontSize: 12, color: 'var(--muted-soft)' }}>Área vem da especialidade classificada pelo agente — ainda sem área quer dizer que a triagem não chegou lá.</p>
           </article>
         </div>
       </section>
