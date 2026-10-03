@@ -47,8 +47,11 @@ empresa alimenta os dois pelo painel do Conecta CRM:
   na resposta de `/incoming/` — o agente nunca escreve esse texto por conta
   própria.
 - **"Dados da empresa"** — base de consulta livre (horário, endereço,
-  serviços, formas de pagamento etc.) para responder perguntas fora do
-  roteiro fixo de qualificação, sem inventar informação.
+  serviços, formas de pagamento etc.), consultada **só enquanto o lead está
+  no fluxo** (aguardando resposta de uma pergunta do roteiro), nunca depois
+  do bot encerrado ou em `Modo de atendimento=HUMANO`. Regras exatas de quando
+  responder, quando aplicar o fallback e como retomar o fluxo depois: ver
+  "Perguntas sobre a empresa durante o fluxo" em `SOUL.md`.
 
 ## Antes de cada mensagem de lead
 
@@ -111,7 +114,9 @@ Defina e mantenha uma tabela como esta, adaptada ao processo da empresa:
 Regras obrigatórias:
 
 - Uma resposta libera no máximo uma próxima pergunta.
-- Resposta ambígua, conversa informal ou mensagem fora do roteiro: registrar e retornar `NO_REPLY`.
+- Resposta ambígua ou conversa informal sem relação com "Dados da empresa": registrar e retornar `NO_REPLY`.
+- Pergunta sobre a empresa durante o fluxo (aguardando resposta de uma etapa): ver "Perguntas sobre a empresa durante o fluxo" em `SOUL.md` — responde com base em "Dados da empresa" e retoma com `REPETIR`, ou aplica o fallback se não tiver a informação/for fora de escopo. Essa é a única situação em que o agente envia texto que não veio pronto do roteiro.
+- Fora do fluxo de lead (bot já encerrado ou `Modo de atendimento=HUMANO`): nunca responde nada por conta própria, mesmo que a pergunta esteja em "Dados da empresa" — só registra e retorna `NO_REPLY`.
 - Nunca voltar de etapa nem reabrir lead encerrado por conta própria.
 - O estado encerrado bloqueia toda resposta automática e qualquer processamento desnecessário de mídia.
 
