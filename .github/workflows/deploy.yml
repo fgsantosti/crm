@@ -1,0 +1,29 @@
+name: Deploy para produção
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configurar SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy na VPS
+        run: |
+          ssh -i ~/.ssh/deploy_key "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" '
+            set -e
+            cd /opt/conecta-crm
+            git fetch origin main
+            git reset --hard origin/main
+            docker compose -f compose.prod.yaml --env-file /etc/conecta-crm/prod.env build setup web worker beat frontend
+            docker compose -f compose.prod.yaml --env-file /etc/conecta-crm/prod.env up -d setup web worker beat frontend proxy
+            docker image prune -f
+          '
