@@ -1,5 +1,5 @@
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import Client, TestCase
 from rest_framework.test import APIClient
 from .models import Company, Question, Lead, Event
 from .services import receive
@@ -153,6 +153,17 @@ class QualificationTests(TestCase):
         )
         self.assertEqual(incoming_response.status_code, 200)
         self.assertEqual(incoming_response.json()["action"], "TEXTO")
+    def test_api_login_does_not_403_with_active_django_session(self):
+        # Reproduz o bug real de produção: um usuário logado no /admin/ (sessão
+        # Django ativa no navegador) que também chama /api/login/ não pode ser
+        # bloqueado por exigência de CSRF -- o frontend só usa token, nunca
+        # sessão, então SessionAuthentication nunca deveria entrar em jogo aqui.
+        user = get_user_model().objects.create_user(username="empresa-teste", password="senha-123", is_staff=True)
+        client = Client(enforce_csrf_checks=True)
+        self.assertTrue(client.login(username="empresa-teste", password="senha-123"))
+        response = client.post("/api/login/", {"username": "empresa-teste", "password": "senha-123"}, content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("token", response.json())
     def test_me_reflects_real_staff_flag(self):
         response = self.client.get("/api/me/")
         self.assertEqual(response.status_code, 200)
