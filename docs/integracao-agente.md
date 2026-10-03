@@ -28,12 +28,12 @@ contrato neste ambiente de desenvolvimento local:
 | --- | --- |
 | Empresa | Rufus Advocacia (`company_id = 1`) |
 | Usuário | `agente.rufus-advocacia` |
-| Token | `1ff60c93797b5f9ac0e5be2e3dc8c49a61180e95` |
+| Token | `<TOKEN_DO_AGENTE>` |
 
 Esse token vai em todo request como header:
 
 ```
-Authorization: Token 1ff60c93797b5f9ac0e5be2e3dc8c49a61180e95
+Authorization: Token <TOKEN_DO_AGENTE>
 ```
 
 **Importante:** este token é do ambiente local (`http://localhost:8080`), só
@@ -165,7 +165,7 @@ retorna `NO_REPLY` (trava de segurança contra duplicidade).
 ## 4. Exemplo de conversa completa (testado de ponta a ponta)
 
 ```bash
-TOKEN=1ff60c93797b5f9ac0e5be2e3dc8c49a61180e95
+TOKEN=<TOKEN_DO_AGENTE>
 BASE=http://localhost:8080/api/companies/1
 
 # 1) primeira mensagem

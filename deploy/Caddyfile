@@ -1,3 +1,10 @@
+# Em produção, troque o bloco ":80" abaixo por um domínio real, ex.:
+#   crm.suaempresa.com {
+#       ...
+#   }
+# para que o Caddy emita e renove TLS automático via Let's Encrypt (HTTPS real).
+# Nesse momento, também defina DJANGO_HTTPS=true no ambiente do serviço backend
+# para habilitar SECURE_SSL_REDIRECT, cookies seguros e HSTS no Django.
 :80 {
     handle /static/* {
         root * /srv
