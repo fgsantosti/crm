@@ -20,7 +20,12 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunPython(apagar_convites_pendentes, migrations.RunPython.noop),
-        migrations.AlterField(
+        # Postgres não converte bigint->uuid (nem com ::uuid), então em vez de
+        # AlterField (que tenta preservar os valores existentes), removemos a
+        # coluna antiga e criamos a nova -- seguro porque a tabela já está
+        # vazia pelo RunPython acima.
+        migrations.RemoveField(model_name='atendenteinvite', name='id'),
+        migrations.AddField(
             model_name='atendenteinvite',
             name='id',
             field=models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False),
