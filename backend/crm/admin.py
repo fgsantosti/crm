@@ -3,7 +3,7 @@ from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
 from rest_framework.authtoken.models import TokenProxy
 from rest_framework.authtoken.admin import TokenAdmin
-from .models import Company, Lead, Question, CompanyInfo, Event
+from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, PasswordChangeRequired
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
@@ -47,6 +47,24 @@ class EventAdmin(admin.ModelAdmin):
     list_filter = ["delivery"]
     search_fields = ["message_id", "summary"]
     readonly_fields = ["lead", "message_id", "created_at", "summary", "result", "delivery"]
+
+@admin.register(Area)
+class AreaAdmin(admin.ModelAdmin):
+    list_display = ["name", "company"]
+    list_filter = ["company"]
+    search_fields = ["name"]
+
+@admin.register(AtendenteInvite)
+class AtendenteInviteAdmin(admin.ModelAdmin):
+    list_display = ["name", "email", "company", "created_at", "expires_at", "verified_at", "attempts"]
+    list_filter = ["company"]
+    search_fields = ["name", "email"]
+    readonly_fields = ["company", "name", "email", "code_hash", "created_at", "expires_at", "attempts", "verified_at"]
+
+@admin.register(PasswordChangeRequired)
+class PasswordChangeRequiredAdmin(admin.ModelAdmin):
+    list_display = ["user"]
+    search_fields = ["user__username"]
 
 # --- Usuários e tokens: reforça na UI a mesma restrição que já existe no backend
 # (grupo "agente" só acessa /incoming/ e /delivery/ — ver crm/views.py NotAgentAccount) ---

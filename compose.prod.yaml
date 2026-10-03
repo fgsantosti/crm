@@ -17,6 +17,17 @@ x-backend: &backend
     CELERY_BROKER_URL: redis://redis:6379/0
     CELERY_RESULT_BACKEND: redis://redis:6379/1
     CHANNEL_REDIS_URL: redis://redis:6379/2
+    # Convite de atendente (código de 6 dígitos) e credenciais provisórias.
+    # Sem EMAIL_HOST_USER/PASSWORD configurados em prod.env, cai no backend
+    # console (só loga, não envia de verdade) -- ver docs/integracao-equipe.md.
+    EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}
+    EMAIL_HOST: ${EMAIL_HOST:-smtp.gmail.com}
+    EMAIL_PORT: ${EMAIL_PORT:-587}
+    EMAIL_USE_TLS: ${EMAIL_USE_TLS:-true}
+    EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+    EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+    DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-}
+    FRONTEND_BASE_URL: https://crm.axiomaia.com.br
   restart: unless-stopped
 
 services:

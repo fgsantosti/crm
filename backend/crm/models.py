@@ -36,6 +36,48 @@ class CompanyInfo(models.Model):
     class Meta:
         ordering = ["title"]
 
+class Area(models.Model):
+    """Área de atendimento cadastrada pela própria empresa (tela "Equipe").
+
+    Substitui o antigo choices fixo e global de Lead.especialidade: cada
+    empresa define suas próprias áreas, e o roteiro/agente só pode classificar
+    um lead numa área que já exista para aquela empresa (validado em
+    services.apply_fields).
+    """
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="areas")
+    name = models.CharField(max_length=80)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["company", "name"], name="unique_company_area")]
+        ordering = ["name"]
+    def __str__(self): return self.name
+
+class AtendenteInvite(models.Model):
+    """Convite de um novo atendente, validado por código de 6 dígitos enviado por e-mail.
+
+    O código nunca é armazenado em texto puro (code_hash via make_password).
+    Ao validar, o convite cria a conta do atendente e dispara um segundo
+    e-mail com e-mail/senha provisória (ver services.validar_convite).
+    """
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="invites")
+    name = models.CharField(max_length=160)
+    email = models.EmailField()
+    code_hash = models.CharField(max_length=128)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    class Meta:
+        ordering = ["-created_at"]
+
+class PasswordChangeRequired(models.Model):
+    """Presença de uma linha para um usuário força a troca de senha no próximo login.
+
+    Criada quando um convite de atendente é validado (a senha provisória
+    enviada por e-mail só deve valer até o primeiro acesso). Removida por
+    services.trocar_senha ao definir a senha definitiva.
+    """
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="password_change_required")
+
 class Lead(models.Model):
     ESPECIALIDADE_CHOICES = [("Previdenciário", "Previdenciário"), ("Consumidor", "Consumidor"), ("Trabalhista", "Trabalhista"), ("Fora de escopo", "Fora de escopo")]
     TEMPERATURA_CHOICES = [("Qualificado", "Qualificado"), ("Quente", "Quente"), ("Desconfiado", "Desconfiado"), ("Remarketing", "Remarketing"), ("Desqualificado", "Desqualificado")]
@@ -48,7 +90,7 @@ class Lead(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     funnel_stage = models.CharField(max_length=40, default="Novo lead")
     state = models.CharField(max_length=80, help_text="question_id atual (apresentacao, nome, situacao, ... ou ENCERRADO_CLASSIFICADO).")
-    especialidade = models.CharField(max_length=20, choices=ESPECIALIDADE_CHOICES, blank=True)
+    especialidade = models.CharField(max_length=80, blank=True, help_text="Nome de uma Area cadastrada pela empresa; validado em services.apply_fields, não é mais um choices fixo.")
     demand = models.CharField(max_length=300, blank=True, help_text="Campo 'tema' do protocolo Axioma.")
     impacto = models.CharField(max_length=300, blank=True)
     interesse = models.CharField(max_length=10, choices=INTERESSE_CHOICES, blank=True)

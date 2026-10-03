@@ -24,3 +24,15 @@ export async function login(username: string, password: string): Promise<string>
   if (!response.ok) throw new Error('Confira seu usuário e senha.');
   return (await response.json()).token;
 }
+
+// Sem token: o atendente ainda não tem conta nesse ponto do fluxo de convite.
+export async function validarConvite(inviteId: number, code: string): Promise<{ detail: string }> {
+  const response = await fetch(`${base}/convites/${inviteId}/validar/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.detail || 'Não foi possível confirmar o código.');
+  return data;
+}

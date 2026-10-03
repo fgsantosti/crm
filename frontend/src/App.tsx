@@ -9,7 +9,9 @@ import { Pendencias } from './views/Pendencias';
 import { AtendimentoHumano } from './views/AtendimentoHumano';
 import { Roteiro } from './views/Roteiro';
 import { DadosEmpresa } from './views/DadosEmpresa';
+import { Equipe } from './views/Equipe';
 import { Admin } from './views/Admin';
+import { TrocarSenhaObrigatoria } from './views/TrocarSenhaObrigatoria';
 
 export function App() {
   const [token, setToken] = useState('');
@@ -84,7 +86,7 @@ export function App() {
   }, [company?.id]);
 
   useEffect(() => {
-    if (role !== 'empresa' && (view === 'roteiro' || view === 'dados-empresa')) setView('dashboard');
+    if (role !== 'empresa' && (view === 'roteiro' || view === 'dados-empresa' || view === 'equipe')) setView('dashboard');
   }, [role, view]);
 
   function logout() {
@@ -98,6 +100,7 @@ export function App() {
 
   if (!token) return <Login onLogin={setToken} />;
   if (!me) return <div className="shell" />;
+  if (me.must_change_password) return <TrocarSenhaObrigatoria api={api} onDone={() => setMe({ ...me, must_change_password: false })} onLogout={logout} />;
   if (role === 'admin') return <Admin onLogout={logout} />;
 
   if (!company) {
@@ -154,6 +157,7 @@ export function App() {
           {view === 'humano' && <AtendimentoHumano api={api} company={company} />}
           {view === 'roteiro' && <Roteiro api={api} company={company} canEdit={role === 'empresa'} />}
           {view === 'dados-empresa' && <DadosEmpresa api={api} company={company} />}
+          {view === 'equipe' && <Equipe api={api} company={company} />}
         </div>
       </main>
     </div>

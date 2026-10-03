@@ -1,7 +1,8 @@
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.test import Client, TestCase
 from rest_framework.test import APIClient
-from .models import Company, Question, Lead, Event
+from .models import Company, Question, Lead, Event, Area, AtendenteInvite, PasswordChangeRequired
 from .services import receive
 
 class QualificationTests(TestCase):
@@ -16,6 +17,8 @@ class QualificationTests(TestCase):
         Question.objects.create(company=self.company, question_id="nome", text="Qual é o seu nome?")
         Question.objects.create(company=self.company, question_id="validar", text="Posso confirmar seus dados?")
         Question.objects.create(company=self.company, question_id="encerramento", text="Perfeito, nossa equipe entra em contato.")
+        for area_name in ["Previdenciário", "Consumidor", "Trabalhista", "Fora de escopo"]:
+            Area.objects.create(company=self.company, name=area_name)
     def send(self, mid="1", **kwargs):
         data = {"contact": "+5585999999999", "message_id": mid, "kind": "text", "marker": "Q", "question_id": "apresentacao",
                 "fields": {}, "human_required": False, "reason": "pedido humano", **kwargs}
@@ -136,6 +139,88 @@ class QualificationTests(TestCase):
         self.assertEqual(len(response.json()["results"]), 1)
         self.assertEqual(self.client.get(f"/api/company-info/?company={self.other.pk}").status_code, 404)
         self.assertEqual(self.client.post(f"/api/company-info/?company={self.company.pk}", {"title": "Endereço", "content": "Rua X, 123"}, format="json").status_code, 403)
+    def test_atualizar_rejects_especialidade_not_registered_as_area(self):
+        self.delivered(self.send())
+        result = self.send("2", marker="ATUALIZAR", fields={"especialidade": "Área Inventada", "proxima": "nome"})
+        self.assertEqual(result["action"], "NO_REPLY")
+        lead = Lead.objects.get()
+        self.assertEqual(lead.mode, "HUMANO")
+        self.assertIn("Área desconhecida", lead.next_action)
+        self.assertEqual(lead.especialidade, "")
+    def test_atualizar_accepts_especialidade_registered_as_area(self):
+        self.delivered(self.send())
+        result = self.send("2", marker="ATUALIZAR", fields={"especialidade": "Trabalhista", "proxima": "nome"})
+        self.assertEqual(result["action"], "TEXTO")
+        self.assertEqual(Lead.objects.get().especialidade, "Trabalhista")
+    def test_area_crud_is_tenant_isolated_and_staff_required(self):
+        Area.objects.create(company=self.other, name="Área da outra empresa")
+        response = self.client.get(f"/api/areas/?company={self.company.pk}")
+        self.assertEqual({a["name"] for a in response.json()["results"]}, {"Previdenciário", "Consumidor", "Trabalhista", "Fora de escopo"})
+        self.assertEqual(self.client.get(f"/api/areas/?company={self.other.pk}").status_code, 404)
+        self.assertEqual(self.client.post(f"/api/areas/?company={self.company.pk}", {"name": "Imobiliário"}, format="json").status_code, 403)
+        staff = get_user_model().objects.create_user(username="empresa-staff", is_staff=True)
+        self.company.members.add(staff)
+        staff_client = APIClient()
+        staff_client.force_authenticate(staff)
+        created = staff_client.post(f"/api/areas/?company={self.company.pk}", {"name": "Imobiliário"}, format="json")
+        self.assertEqual(created.status_code, 201)
+        self.assertTrue(Area.objects.filter(company=self.company, name="Imobiliário").exists())
+    def test_convite_flow_creates_account_and_sends_credentials_email(self):
+        staff = get_user_model().objects.create_user(username="empresa-staff", is_staff=True)
+        self.company.members.add(staff)
+        staff_client = APIClient()
+        staff_client.force_authenticate(staff)
+        response = staff_client.post(f"/api/convites/?company={self.company.pk}", {"name": "Novo Atendente", "email": "novo@example.com"}, format="json")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["status"], "pendente")
+        self.assertNotIn("code", response.json())
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Código de verificação", mail.outbox[0].body)
+        code = mail.outbox[0].body.split("Código de verificação: ")[1].split("\n")[0]
+        invite = AtendenteInvite.objects.get(email="novo@example.com")
+
+        wrong = self.client.post(f"/api/convites/{invite.pk}/validar/", {"code": "000000"}, format="json")
+        self.assertEqual(wrong.status_code, 400)
+        self.assertEqual(AtendenteInvite.objects.get(pk=invite.pk).attempts, 1)
+
+        ok = self.client.post(f"/api/convites/{invite.pk}/validar/", {"code": code}, format="json")
+        self.assertEqual(ok.status_code, 200)
+        new_user = get_user_model().objects.get(username="novo@example.com")
+        self.assertTrue(self.company.members.filter(pk=new_user.pk).exists())
+        self.assertTrue(PasswordChangeRequired.objects.filter(user=new_user).exists())
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertIn("Senha provisória", mail.outbox[1].body)
+
+        again = self.client.post(f"/api/convites/{invite.pk}/validar/", {"code": code}, format="json")
+        self.assertEqual(again.status_code, 400)
+    def test_convite_validar_blocks_after_max_attempts(self):
+        staff = get_user_model().objects.create_user(username="empresa-staff", is_staff=True)
+        self.company.members.add(staff)
+        staff_client = APIClient()
+        staff_client.force_authenticate(staff)
+        staff_client.post(f"/api/convites/?company={self.company.pk}", {"name": "X", "email": "x@example.com"}, format="json")
+        invite = AtendenteInvite.objects.get(email="x@example.com")
+        for _ in range(5):
+            self.client.post(f"/api/convites/{invite.pk}/validar/", {"code": "000000"}, format="json")
+        blocked = self.client.post(f"/api/convites/{invite.pk}/validar/", {"code": "000000"}, format="json")
+        self.assertEqual(blocked.status_code, 400)
+        self.assertIn("tentativas", blocked.json()["detail"])
+    def test_me_reports_must_change_password_and_trocar_senha_clears_it(self):
+        user = get_user_model().objects.create_user(username="pendente@example.com", password="provisoria-123")
+        PasswordChangeRequired.objects.create(user=user)
+        pending_client = APIClient()
+        pending_client.force_authenticate(user)
+        self.assertTrue(pending_client.get("/api/me/").json()["must_change_password"])
+        resp = pending_client.post("/api/trocar-senha/", {"password": "nova-senha-forte-123"}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        # force_authenticate reaproveita o mesmo objeto Python entre chamadas do
+        # teste, e o Django cacheia a relação reversa OneToOne no primeiro acesso
+        # -- numa requisição real isso nunca acontece (TokenAuthentication busca
+        # um User novo do banco a cada request). Buscamos de novo pra simular isso.
+        user.refresh_from_db()
+        self.assertTrue(user.check_password("nova-senha-forte-123"))
+        pending_client.force_authenticate(user)
+        self.assertFalse(pending_client.get("/api/me/").json()["must_change_password"])
     def test_agent_service_account_is_restricted_to_incoming_and_delivery(self):
         from django.contrib.auth.models import Group
         agent_group, _ = Group.objects.get_or_create(name="agente")

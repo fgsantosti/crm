@@ -31,6 +31,20 @@ ASGI_APPLICATION = "config.asgi.application"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "http://localhost:8080").split(",")
 
+# E-mail (convite de atendente e credenciais provisórias). Backend padrão é o
+# console (aparece no log, sem precisar de SMTP real) — em produção, setar
+# EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend e as credenciais
+# reais via variável de ambiente protegida, nunca no código.
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "true").lower() == "true"
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "naoresponda@axiomaia.com.br")
+# Base do frontend usada para montar o link de validação de convite enviado por e-mail.
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
+
 # Em produção, setar DJANGO_HTTPS=true no ambiente do backend (quando o Caddy já estiver
 # emitindo TLS para um domínio real) para forçar redirecionamento HTTPS e cookies seguros.
 DJANGO_HTTPS = os.getenv("DJANGO_HTTPS") == "true"

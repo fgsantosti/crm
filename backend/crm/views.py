@@ -4,9 +4,9 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from django.shortcuts import get_object_or_404
-from .models import Company, Lead, Question, CompanyInfo, Event
-from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer
-from .services import receive, escalate
+from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite
+from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer
+from .services import receive, escalate, create_invite, validar_convite as validar_convite_service, trocar_senha as trocar_senha_service
 
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
@@ -17,7 +17,24 @@ def me(request):
         "is_staff": user.is_staff,
         "is_superuser": user.is_superuser,
         "is_agent": user.groups.filter(name="agente").exists(),
+        "must_change_password": hasattr(user, "password_change_required"),
     })
+
+@api_view(["POST"])
+@permission_classes([permissions.AllowAny])
+def validar_convite(request, pk):
+    code = str(request.data.get("code") or "").strip()
+    result = validar_convite_service(pk, code)
+    return Response({"detail": result["detail"]}, status=200 if result["ok"] else 400)
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def trocar_senha(request):
+    password = str(request.data.get("password") or "")
+    if len(password) < 8:
+        return Response({"detail": "A senha deve ter ao menos 8 caracteres."}, status=400)
+    trocar_senha_service(request.user, password)
+    return Response({"detail": "Senha atualizada."})
 
 class NotAgentAccount(permissions.BasePermission):
     """Nega acesso a contas de serviço do agente de IA (membros do grupo "agente").
@@ -37,6 +54,14 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "agent-incoming"
     def get_queryset(self): return self.request.user.companies.all()
+    @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated, NotAgentAccount])
+    def equipe(self, request, pk=None):
+        company = self.get_object()
+        members = company.members.exclude(groups__name="agente").order_by("username")
+        return Response([
+            {"id": u.id, "username": u.username, "email": u.email or u.username, "is_staff": u.is_staff, "is_superuser": u.is_superuser, "date_joined": u.date_joined}
+            for u in members
+        ])
     @action(detail=True, methods=["post"])
     def incoming(self, request, pk=None):
         company = self.get_object()
@@ -99,3 +124,32 @@ class CompanyInfoViewSet(TenantMixin, viewsets.ModelViewSet):
             return [permissions.IsAuthenticated()]
         return [permissions.IsAdminUser(), NotAgentAccount()]
     def perform_create(self, serializer): serializer.save(company=self.company())
+
+class AreaViewSet(TenantMixin, viewsets.ModelViewSet):
+    """Áreas de atendimento cadastradas pela empresa (tela "Equipe")."""
+    queryset = Area.objects.all()
+    serializer_class = AreaSerializer
+    http_method_names = ["get", "post", "delete", "head", "options"]
+    def get_permissions(self):
+        base = [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
+        return base + [NotAgentAccount()]
+    def perform_create(self, serializer): serializer.save(company=self.company())
+
+class AtendenteInviteViewSet(TenantMixin, viewsets.ModelViewSet):
+    """Convites de novo atendente (tela "Equipe"): só a empresa cria/cancela;
+    a validação do código em si é feita pelo atendente, sem conta ainda, na
+    view pública `validar_convite` -- não passa por este ViewSet autenticado."""
+    queryset = AtendenteInvite.objects.all()
+    serializer_class = AtendenteInviteSerializer
+    http_method_names = ["get", "post", "delete", "head", "options"]
+    def get_permissions(self):
+        base = [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
+        return base + [NotAgentAccount()]
+    def perform_create(self, serializer):
+        company = self.company()
+        try:
+            invite = create_invite(company, serializer.validated_data["name"], serializer.validated_data["email"])
+        except ValueError as exc:
+            from rest_framework import serializers as drf_serializers
+            raise drf_serializers.ValidationError({"email": str(exc)})
+        serializer.instance = invite

@@ -122,7 +122,7 @@ Campos aceitos dentro de `fields` (nomes exatamente como o Axioma emite):
 | Campo em `fields` | Vai para o quê no Lead | Valores aceitos |
 | --- | --- | --- |
 | `nome` | Nome do lead | texto livre |
-| `especialidade` | Área/especialidade (isso é o que o dashboard chama de "área") | `Previdenciário` \| `Consumidor` \| `Trabalhista` \| `Fora de escopo` |
+| `especialidade` | Área/especialidade (isso é o que o dashboard chama de "área") | texto livre, mas precisa bater exatamente com uma área já cadastrada pela empresa na tela "Equipe" (`GET /api/areas/?company={id}`). Valor que não exista nas áreas da empresa transfere o lead para atendimento humano em vez de ser aceito — o agente nunca inventa área nova. |
 | `tema` | Resumo da demanda | texto livre |
 | `impacto` | Impacto relatado | texto livre |
 | `interesse` | Interesse em seguir | `sim` \| `nao` \| `depois` |

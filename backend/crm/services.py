@@ -1,7 +1,12 @@
 import re
+import secrets
+from datetime import timedelta
+from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import make_password, check_password
 from django.db import transaction
 from django.utils import timezone
-from .models import Lead, Question, Event, Company
+from .emails import send_credentials_email, send_invite_email
+from .models import Lead, Question, Event, Company, Area, AtendenteInvite, PasswordChangeRequired
 
 NO_REPLY = {"action": "NO_REPLY"}
 
@@ -24,10 +29,21 @@ def escalate(lead, reason):
     lead.next_action = reason
     lead.save()
 
-def apply_fields(lead, fields):
+def apply_fields(lead, company, fields):
+    """Grava os campos recebidos no lead; retorna uma mensagem de erro (str) se
+    `especialidade` não for uma Area cadastrada para a empresa, ou None se ok.
+
+    `especialidade` deixou de ser um choices fixo e global: agora é validada
+    contra as áreas que a própria empresa cadastrou na tela "Equipe"
+    (Area.objects.filter(company=...)). O agente nunca pode inventar uma área.
+    """
+    especialidade = fields.get("especialidade")
+    if especialidade and not company.areas.filter(name=especialidade).exists():
+        return f"Área desconhecida: '{especialidade}' não está cadastrada em Equipe"
     for key, model_field in FIELD_MAP.items():
         if key in fields and fields[key]:
             setattr(lead, model_field, fields[key])
+    return None
 
 PLACEHOLDER_RE = re.compile(r"\{(" + "|".join(re.escape(p) for p in ["empresa", *FIELD_MAP.keys()]) + r")\}")
 
@@ -90,29 +106,41 @@ def receive(company, data):
             question_id = lead.state
             event.summary = "Entrada ambígua ou fora do roteiro; repetindo pergunta atual"
         elif marker == "ATUALIZAR":
-            apply_fields(lead, fields)
-            question_id = fields.get("proxima", "")
-            if not question_id:
-                escalate(lead, "ATUALIZAR sem 'proxima': configurar roteiro aprovado")
+            field_error = apply_fields(lead, company, fields)
+            if field_error:
+                escalate(lead, field_error)
                 question_id = None
             else:
-                lead.state = question_id
-                lead.funnel_stage = "Triagem"
+                question_id = fields.get("proxima", "")
+                if not question_id:
+                    escalate(lead, "ATUALIZAR sem 'proxima': configurar roteiro aprovado")
+                    question_id = None
+                else:
+                    lead.state = question_id
+                    lead.funnel_stage = "Triagem"
         elif marker == "VALIDAR":
-            apply_fields(lead, fields)
-            question_id = "validar"
-            lead.state = "VALIDANDO"
+            field_error = apply_fields(lead, company, fields)
+            if field_error:
+                escalate(lead, field_error)
+                question_id = None
+            else:
+                question_id = "validar"
+                lead.state = "VALIDANDO"
         elif marker == "CLASSIFICADO":
             if lead.state != "VALIDANDO":
                 escalate(lead, "CLASSIFICADO recebido sem VALIDAR anterior: revisar fluxo do agente")
                 question_id = None
             else:
-                apply_fields(lead, fields)
-                lead.bot_closed = True
-                lead.state = "ENCERRADO_CLASSIFICADO"
-                lead.funnel_stage = "Triagem concluída"
-                lead.next_action = "Revisar classificação e dar continuidade humana"
-                question_id = "encerramento"
+                field_error = apply_fields(lead, company, fields)
+                if field_error:
+                    escalate(lead, field_error)
+                    question_id = None
+                else:
+                    lead.bot_closed = True
+                    lead.state = "ENCERRADO_CLASSIFICADO"
+                    lead.funnel_stage = "Triagem concluída"
+                    lead.next_action = "Revisar classificação e dar continuidade humana"
+                    question_id = "encerramento"
         else:
             escalate(lead, f"Marcador desconhecido: {marker}")
             question_id = None
@@ -137,3 +165,61 @@ def receive(company, data):
     event.result = result
     event.save()
     return result
+
+INVITE_TTL = timedelta(minutes=15)
+MAX_INVITE_ATTEMPTS = 5
+
+def create_invite(company, name, email):
+    """Cria o convite, gera o código de 6 dígitos e dispara o e-mail com código + link.
+
+    O código em si nunca é persistido em texto puro (code_hash via make_password,
+    o mesmo hasher usado para senha) nem retornado pela API -- só vai no e-mail.
+    """
+    User = get_user_model()
+    if User.objects.filter(username=email).exists():
+        raise ValueError("Já existe uma conta com este e-mail.")
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    invite = AtendenteInvite.objects.create(
+        company=company, name=name, email=email,
+        code_hash=make_password(code), expires_at=timezone.now() + INVITE_TTL,
+    )
+    send_invite_email(invite, code)
+    return invite
+
+@transaction.atomic
+def validar_convite(invite_id, code):
+    """Confere o código do convite e, se válido, cria a conta do atendente.
+
+    Tudo protegido por select_for_update: duas tentativas concorrentes para o
+    mesmo convite nunca criam duas contas nem passam ambas com o mesmo código.
+    """
+    invite = AtendenteInvite.objects.select_for_update().filter(pk=invite_id).first()
+    if not invite:
+        return {"ok": False, "detail": "Convite não encontrado."}
+    if invite.verified_at:
+        return {"ok": False, "detail": "Este convite já foi validado."}
+    if invite.expires_at < timezone.now():
+        return {"ok": False, "detail": "Código expirado. Peça um novo convite à empresa."}
+    if invite.attempts >= MAX_INVITE_ATTEMPTS:
+        return {"ok": False, "detail": "Número de tentativas excedido. Peça um novo convite à empresa."}
+    invite.attempts += 1
+    if not check_password(code, invite.code_hash):
+        invite.save(update_fields=["attempts"])
+        return {"ok": False, "detail": "Código incorreto."}
+    User = get_user_model()
+    if User.objects.filter(username=invite.email).exists():
+        invite.save(update_fields=["attempts"])
+        return {"ok": False, "detail": "Já existe uma conta com este e-mail."}
+    provisional_password = secrets.token_urlsafe(9)
+    user = User.objects.create_user(username=invite.email, email=invite.email, password=provisional_password, first_name=invite.name[:150])
+    invite.company.members.add(user)
+    PasswordChangeRequired.objects.create(user=user)
+    invite.verified_at = timezone.now()
+    invite.save(update_fields=["attempts", "verified_at"])
+    send_credentials_email(invite.email, invite.name, provisional_password)
+    return {"ok": True, "detail": "Conta criada. As credenciais de acesso foram enviadas para o seu e-mail."}
+
+def trocar_senha(user, new_password):
+    user.set_password(new_password)
+    user.save()
+    PasswordChangeRequired.objects.filter(user=user).delete()

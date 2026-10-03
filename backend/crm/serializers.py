@@ -1,5 +1,6 @@
+from django.utils import timezone
 from rest_framework import serializers
-from .models import Company, Lead, Question, CompanyInfo, Event
+from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite
 
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
@@ -36,7 +37,10 @@ class EventSerializer(serializers.ModelSerializer):
 
 class AgentFieldsSerializer(serializers.Serializer):
     nome = serializers.CharField(max_length=160, required=False, allow_blank=True)
-    especialidade = serializers.ChoiceField(choices=[c[0] for c in Lead.ESPECIALIDADE_CHOICES], required=False, allow_blank=True)
+    # Antes era um ChoiceField fixo e global. Agora cada empresa cadastra suas
+    # próprias áreas (tela "Equipe"), então a validação de que o valor é uma
+    # área real da empresa acontece em services.apply_fields, não aqui.
+    especialidade = serializers.CharField(max_length=80, required=False, allow_blank=True)
     tema = serializers.CharField(max_length=300, required=False, allow_blank=True)
     impacto = serializers.CharField(max_length=300, required=False, allow_blank=True)
     interesse = serializers.ChoiceField(choices=[c[0] for c in Lead.INTERESSE_CHOICES], required=False, allow_blank=True)
@@ -77,3 +81,22 @@ class IncomingSerializer(serializers.Serializer):
 class DeliverySerializer(serializers.Serializer):
     event_id = serializers.IntegerField(min_value=1)
     status = serializers.ChoiceField(choices=["SENT", "FAILED"])
+
+class AreaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Area
+        fields = ["id", "name"]
+        read_only_fields = ["id"]
+
+class AtendenteInviteSerializer(serializers.ModelSerializer):
+    status = serializers.SerializerMethodField()
+    class Meta:
+        model = AtendenteInvite
+        fields = ["id", "name", "email", "created_at", "expires_at", "verified_at", "attempts", "status"]
+        read_only_fields = ["id", "created_at", "expires_at", "verified_at", "attempts", "status"]
+    def get_status(self, obj):
+        if obj.verified_at:
+            return "verificado"
+        if obj.expires_at < timezone.now():
+            return "expirado"
+        return "pendente"

@@ -1,7 +1,7 @@
 import { Logo } from './Logo';
 import type { Company } from '../types';
 
-export type View = 'dashboard' | 'leads' | 'pendencias' | 'humano' | 'roteiro' | 'dados-empresa';
+export type View = 'dashboard' | 'leads' | 'pendencias' | 'humano' | 'roteiro' | 'dados-empresa' | 'equipe';
 
 export function Sidebar({
   role,
@@ -35,6 +35,7 @@ export function Sidebar({
   if (role === 'empresa') {
     items.push({ key: 'roteiro', label: 'Roteiro do agente' });
     items.push({ key: 'dados-empresa', label: 'Dados da empresa' });
+    items.push({ key: 'equipe', label: 'Equipe' });
   }
 
   return (
@@ -63,11 +64,6 @@ export function Sidebar({
             {it.count !== undefined && <span className="nav-count">{it.count}</span>}
           </button>
         ))}
-        {role === 'empresa' && (
-          <button type="button" className="nav-secondary" disabled title="Em breve">
-            Equipe e áreas
-          </button>
-        )}
       </nav>
       <p className="sidebar-note">
         {role === 'empresa'

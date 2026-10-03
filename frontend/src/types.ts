@@ -17,7 +17,8 @@ export type Lead = {
   state: string;
   /** Campo "tema" do protocolo Axioma. */
   demand: string;
-  especialidade: 'Previdenciário' | 'Consumidor' | 'Trabalhista' | 'Fora de escopo' | '';
+  /** Nome de uma Area cadastrada pela empresa (tela Equipe) — texto livre, não é mais um enum fixo. */
+  especialidade: string;
   impacto: string;
   interesse: 'sim' | 'nao' | 'depois' | '';
   /** Campo "temperatura" do protocolo Axioma. */
@@ -66,4 +67,30 @@ export type Me = {
   is_staff: boolean;
   is_superuser: boolean;
   is_agent: boolean;
+  must_change_password: boolean;
+};
+
+export type Area = {
+  id: number;
+  name: string;
+};
+
+export type AtendenteInvite = {
+  id: number;
+  name: string;
+  email: string;
+  created_at: string;
+  expires_at: string;
+  verified_at: string | null;
+  attempts: number;
+  status: 'pendente' | 'expirado' | 'verificado';
+};
+
+export type EquipeMembro = {
+  id: number;
+  username: string;
+  email: string;
+  is_staff: boolean;
+  is_superuser: boolean;
+  date_joined: string;
 };
