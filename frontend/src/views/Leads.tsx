@@ -89,7 +89,6 @@ export function Leads({ api, company }: { api: Api; company: Company }) {
           <h1>Seus leads, próximos passos claros.</h1>
           <p>Acompanhe a qualificação de cada contato, etapa por etapa.</p>
         </div>
-        <span className="tag-pill">CRM multiempresa</span>
       </header>
 
       {error && (
