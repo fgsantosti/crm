@@ -211,7 +211,9 @@ class QualificationTests(TestCase):
         pending_client = APIClient()
         pending_client.force_authenticate(user)
         self.assertTrue(pending_client.get("/api/me/").json()["must_change_password"])
-        resp = pending_client.post("/api/trocar-senha/", {"password": "nova-senha-forte-123"}, format="json")
+        wrong_current = pending_client.post("/api/trocar-senha/", {"current_password": "errada", "password": "nova-senha-forte-123"}, format="json")
+        self.assertEqual(wrong_current.status_code, 400)
+        resp = pending_client.post("/api/trocar-senha/", {"current_password": "provisoria-123", "password": "nova-senha-forte-123"}, format="json")
         self.assertEqual(resp.status_code, 200)
         # force_authenticate reaproveita o mesmo objeto Python entre chamadas do
         # teste, e o Django cacheia a relação reversa OneToOne no primeiro acesso
@@ -221,6 +223,66 @@ class QualificationTests(TestCase):
         self.assertTrue(user.check_password("nova-senha-forte-123"))
         pending_client.force_authenticate(user)
         self.assertFalse(pending_client.get("/api/me/").json()["must_change_password"])
+    def test_me_patch_updates_display_name(self):
+        resp = self.client.patch("/api/me/", {"display_name": "Operador Teste"}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["display_name"], "Operador Teste")
+        self.assertEqual(self.client.get("/api/me/").json()["display_name"], "Operador Teste")
+    def test_trocar_email_requires_code_sent_to_new_address(self):
+        user = get_user_model().objects.create_user(username="dono-conta", password="senha-atual-123", email="antigo@example.com")
+        c = APIClient()
+        c.force_authenticate(user)
+        resp = c.post("/api/me/email/", {"email": "novo@example.com"}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Código de confirmação", mail.outbox[0].body)
+        code = mail.outbox[0].body.split("Código de confirmação: ")[1].split("\n")[0]
+
+        wrong = c.post("/api/me/email/confirmar/", {"code": "000000"}, format="json")
+        self.assertEqual(wrong.status_code, 400)
+        self.assertEqual(get_user_model().objects.get(pk=user.pk).email, "antigo@example.com")
+
+        ok = c.post("/api/me/email/confirmar/", {"code": code}, format="json")
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(get_user_model().objects.get(pk=user.pk).email, "novo@example.com")
+    def test_trocar_email_rejects_address_already_in_use(self):
+        get_user_model().objects.create_user(username="ja-existe", email="ocupado@example.com")
+        user = get_user_model().objects.create_user(username="dono-conta-2", password="x", email="meu@example.com")
+        c = APIClient()
+        c.force_authenticate(user)
+        resp = c.post("/api/me/email/", {"email": "ocupado@example.com"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(len(mail.outbox), 0)
+    def test_excluir_conta_requires_correct_password(self):
+        user = get_user_model().objects.create_user(username="quer-sair", password="senha-certa-123")
+        c = APIClient()
+        c.force_authenticate(user)
+        denied = c.delete("/api/me/excluir/", {"password": "senha-errada"}, format="json")
+        self.assertEqual(denied.status_code, 400)
+        self.assertTrue(get_user_model().objects.filter(pk=user.pk).exists())
+        ok = c.delete("/api/me/excluir/", {"password": "senha-certa-123"}, format="json")
+        self.assertEqual(ok.status_code, 200)
+        self.assertFalse(get_user_model().objects.filter(pk=user.pk).exists())
+    def test_login_returns_jwt_pair_and_refresh_rotates_access_token(self):
+        get_user_model().objects.create_user(username="login-jwt", password="senha-forte-123")
+        login_resp = self.client.post("/api/login/", {"username": "login-jwt", "password": "senha-forte-123"}, format="json")
+        self.assertEqual(login_resp.status_code, 200)
+        body = login_resp.json()
+        self.assertIn("access", body)
+        self.assertIn("refresh", body)
+        refresh_resp = self.client.post("/api/login/refresh/", {"refresh": body["refresh"]}, format="json")
+        self.assertEqual(refresh_resp.status_code, 200)
+        self.assertIn("access", refresh_resp.json())
+    def test_logout_blacklists_refresh_token(self):
+        user = get_user_model().objects.create_user(username="logout-jwt", password="senha-forte-123")
+        login_resp = self.client.post("/api/login/", {"username": "logout-jwt", "password": "senha-forte-123"}, format="json")
+        refresh = login_resp.json()["refresh"]
+        c = APIClient()
+        c.force_authenticate(user)
+        logout_resp = c.post("/api/logout/", {"refresh": refresh}, format="json")
+        self.assertEqual(logout_resp.status_code, 200)
+        blocked = self.client.post("/api/login/refresh/", {"refresh": refresh}, format="json")
+        self.assertEqual(blocked.status_code, 401)
     def test_agent_service_account_is_restricted_to_incoming_and_delivery(self):
         from django.contrib.auth.models import Group
         agent_group, _ = Group.objects.get_or_create(name="agente")
@@ -248,7 +310,8 @@ class QualificationTests(TestCase):
         self.assertTrue(client.login(username="empresa-teste", password="senha-123"))
         response = client.post("/api/login/", {"username": "empresa-teste", "password": "senha-123"}, content_type="application/json")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("token", response.json())
+        self.assertIn("access", response.json())
+        self.assertIn("refresh", response.json())
     def test_me_reflects_real_staff_flag(self):
         response = self.client.get("/api/me/")
         self.assertEqual(response.status_code, 200)

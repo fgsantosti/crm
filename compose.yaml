@@ -54,6 +54,8 @@ services:
 
   web:
     <<: *backend
+    volumes:
+      - media_data:/app/media
     depends_on:
       setup:
         condition: service_completed_successfully
@@ -88,6 +90,7 @@ services:
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - static_data:/srv/static:ro
+      - media_data:/srv/media:ro
     depends_on:
       web:
         condition: service_healthy
@@ -99,3 +102,4 @@ volumes:
   crm_data:
   redis_data:
   static_data:
+  media_data:

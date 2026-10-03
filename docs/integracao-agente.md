@@ -59,9 +59,10 @@ print(token.key)
 ```
 
 Alternativa sem shell: criar o usuário pelo Django Admin (`/admin/`), vincular
-à empresa em `Companies → members`, e pegar o token chamando
-`POST /api/login/` com usuário/senha (o token retornado é o mesmo de sempre,
-DRF Token não expira sozinho).
+à empresa em `Companies → members`, e gerar o token na própria tela do Admin
+(`Tokens`). **`POST /api/login/` não serve mais para isso** — esse endpoint
+agora é exclusivo do frontend humano e devolve um par de tokens JWT de curta
+duração (`access`/`refresh`), não o token fixo que o agente usa.
 
 ## 2. Contrato de `/incoming/`
 

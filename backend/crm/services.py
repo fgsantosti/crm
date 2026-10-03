@@ -5,8 +5,8 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password, check_password
 from django.db import transaction
 from django.utils import timezone
-from .emails import send_credentials_email, send_invite_email
-from .models import Lead, Question, Event, Company, Area, AtendenteInvite, PasswordChangeRequired
+from .emails import send_credentials_email, send_invite_email, send_email_change_code
+from .models import Lead, Question, Event, Company, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest
 
 NO_REPLY = {"action": "NO_REPLY"}
 
@@ -219,7 +219,56 @@ def validar_convite(invite_id, code):
     send_credentials_email(invite.email, invite.name, provisional_password)
     return {"ok": True, "detail": "Conta criada. As credenciais de acesso foram enviadas para o seu e-mail."}
 
-def trocar_senha(user, new_password):
+def trocar_senha(user, current_password, new_password):
+    """Exige a senha atual mesmo quando a troca é obrigatória (senha provisória
+    recém-recebida por e-mail): uma sessão aberta sem saber a senha atual nunca
+    deveria conseguir travar a conta sozinha trocando a senha por outra."""
+    if not user.check_password(current_password):
+        return "Senha atual incorreta."
     user.set_password(new_password)
     user.save()
     PasswordChangeRequired.objects.filter(user=user).delete()
+    return None
+
+EMAIL_CHANGE_TTL = timedelta(minutes=15)
+MAX_EMAIL_CHANGE_ATTEMPTS = 5
+
+def solicitar_troca_email(user, new_email):
+    User = get_user_model()
+    if User.objects.filter(email=new_email).exclude(pk=user.pk).exists():
+        raise ValueError("Já existe uma conta usando este e-mail.")
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    request = EmailChangeRequest.objects.create(
+        user=user, new_email=new_email,
+        code_hash=make_password(code), expires_at=timezone.now() + EMAIL_CHANGE_TTL,
+    )
+    send_email_change_code(new_email, code)
+    return request
+
+@transaction.atomic
+def confirmar_troca_email(user, code):
+    request = (
+        EmailChangeRequest.objects.select_for_update()
+        .filter(user=user, confirmed_at__isnull=True)
+        .order_by("-created_at")
+        .first()
+    )
+    if not request:
+        return {"ok": False, "detail": "Nenhuma troca de e-mail pendente. Peça o código novamente."}
+    if request.expires_at < timezone.now():
+        return {"ok": False, "detail": "Código expirado. Peça um novo código."}
+    if request.attempts >= MAX_EMAIL_CHANGE_ATTEMPTS:
+        return {"ok": False, "detail": "Número de tentativas excedido. Peça um novo código."}
+    request.attempts += 1
+    if not check_password(code, request.code_hash):
+        request.save(update_fields=["attempts"])
+        return {"ok": False, "detail": "Código incorreto."}
+    User = get_user_model()
+    if User.objects.filter(email=request.new_email).exclude(pk=user.pk).exists():
+        request.save(update_fields=["attempts"])
+        return {"ok": False, "detail": "Já existe uma conta usando este e-mail."}
+    user.email = request.new_email
+    user.save(update_fields=["email"])
+    request.confirmed_at = timezone.now()
+    request.save(update_fields=["attempts", "confirmed_at"])
+    return {"ok": True, "detail": "E-mail atualizado."}

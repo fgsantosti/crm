@@ -16,6 +16,18 @@ def send_invite_email(invite, code):
         recipient_list=[invite.email],
     )
 
+def send_email_change_code(new_email, code):
+    send_mail(
+        subject="Confirme a troca de e-mail — Conecta CRM",
+        message=(
+            f"Recebemos um pedido para trocar o e-mail da sua conta no Conecta CRM para este endereço.\n\n"
+            f"Código de confirmação: {code}\n\n"
+            f"Informe esse código na tela de perfil para concluir a troca. Se você não pediu essa troca, ignore este e-mail."
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[new_email],
+    )
+
 def send_credentials_email(email, name, password):
     send_mail(
         subject="Suas credenciais de acesso — Conecta CRM",

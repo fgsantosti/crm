@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { apiFactory } from './api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { apiFactory, clearTokens, hasSession, logoutRequest } from './api';
 import type { Company, Lead, Me, Paginated, Role } from './types';
 import { Sidebar, type View } from './components/Sidebar';
 import { Login } from './views/Login';
@@ -14,7 +14,7 @@ import { Admin } from './views/Admin';
 import { TrocarSenhaObrigatoria } from './views/TrocarSenhaObrigatoria';
 
 export function App() {
-  const [token, setToken] = useState('');
+  const [authed, setAuthed] = useState(() => hasSession());
   const [me, setMe] = useState<Me | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
@@ -25,12 +25,17 @@ export function App() {
   const [humanCount, setHumanCount] = useState(0);
   const [companiesRetry, setCompaniesRetry] = useState(0);
 
-  const api = useMemo(() => apiFactory(token), [token]);
+  const onSessionExpired = useCallback(() => {
+    clearTokens();
+    setAuthed(false);
+    setMe(null);
+  }, []);
+  const api = useMemo(() => apiFactory(onSessionExpired), [onSessionExpired]);
   const company = companies.find((c) => String(c.id) === companyId) || null;
   const role: Role = me?.is_superuser ? 'admin' : me?.is_staff ? 'empresa' : 'atendente';
 
   useEffect(() => {
-    if (!token) {
+    if (!authed) {
       setMe(null);
       return;
     }
@@ -42,16 +47,16 @@ export function App() {
       .catch((e) => {
         if (active) {
           setError(e.message);
-          setToken('');
+          setAuthed(false);
         }
       });
     return () => {
       active = false;
     };
-  }, [token]);
+  }, [authed]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!authed) return;
     let active = true;
     setError('');
     api('/companies/')
@@ -67,7 +72,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [token, companiesRetry]);
+  }, [authed, companiesRetry]);
 
   useEffect(() => {
     if (!company) return;
@@ -90,7 +95,9 @@ export function App() {
   }, [role, view]);
 
   function logout() {
-    setToken('');
+    logoutRequest();
+    clearTokens();
+    setAuthed(false);
     setMe(null);
     setCompanies([]);
     setCompanyId('');
@@ -98,7 +105,7 @@ export function App() {
     setError('');
   }
 
-  if (!token) return <Login onLogin={setToken} />;
+  if (!authed) return <Login onLogin={() => setAuthed(true)} />;
   if (!me) return <div className="shell" />;
   if (me.must_change_password) return <TrocarSenhaObrigatoria api={api} onDone={() => setMe({ ...me, must_change_password: false })} onLogout={logout} />;
   if (role === 'admin') return <Admin onLogout={logout} />;
@@ -143,6 +150,10 @@ export function App() {
         leadsCount={leadsCount}
         pendingCount={pendingCount}
         humanCount={humanCount}
+        api={api}
+        me={me}
+        onMeChange={(patch) => setMe((prev) => (prev ? { ...prev, ...patch } : prev))}
+        onAccountDeleted={logout}
       />
       <main className="main">
         {error && (

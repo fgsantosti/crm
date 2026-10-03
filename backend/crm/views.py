@@ -1,24 +1,61 @@
 from django.db.models import Case, When, Value, IntegerField
 from rest_framework import viewsets, permissions, status
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.decorators import action, api_view, permission_classes, parser_classes
+from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
+from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
-from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite
+from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile
 from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer
-from .services import receive, escalate, create_invite, validar_convite as validar_convite_service, trocar_senha as trocar_senha_service
+from .services import (
+    receive, escalate, create_invite,
+    validar_convite as validar_convite_service,
+    trocar_senha as trocar_senha_service,
+    solicitar_troca_email, confirmar_troca_email as confirmar_troca_email_service,
+)
 
-@api_view(["GET"])
+def _avatar_url(request, profile):
+    return request.build_absolute_uri(profile.avatar.url) if profile.avatar else None
+
+@api_view(["GET", "PATCH"])
 @permission_classes([permissions.IsAuthenticated])
 def me(request):
     user = request.user
+    profile, _ = Profile.objects.get_or_create(user=user)
+    if request.method == "PATCH":
+        if "display_name" in request.data:
+            profile.display_name = str(request.data.get("display_name") or "")[:160]
+            profile.save()
     return Response({
         "username": user.username,
+        "email": user.email,
+        "display_name": profile.display_name,
+        "avatar_url": _avatar_url(request, profile),
         "is_staff": user.is_staff,
         "is_superuser": user.is_superuser,
         "is_agent": user.groups.filter(name="agente").exists(),
         "must_change_password": hasattr(user, "password_change_required"),
     })
+
+@api_view(["POST", "DELETE"])
+@permission_classes([permissions.IsAuthenticated])
+@parser_classes([MultiPartParser])
+def avatar(request):
+    profile, _ = Profile.objects.get_or_create(user=request.user)
+    if request.method == "DELETE":
+        profile.avatar.delete(save=True)
+        return Response({"avatar_url": None})
+    file = request.FILES.get("avatar")
+    if not file:
+        return Response({"detail": "Envie um arquivo em 'avatar'."}, status=400)
+    if file.content_type not in ("image/png", "image/jpeg", "image/webp"):
+        return Response({"detail": "Formato não suportado. Use PNG, JPEG ou WEBP."}, status=400)
+    if file.size > 2 * 1024 * 1024:
+        return Response({"detail": "Imagem muito grande (máximo 2MB)."}, status=400)
+    profile.avatar = file
+    profile.save()
+    return Response({"avatar_url": _avatar_url(request, profile)})
 
 @api_view(["POST"])
 @permission_classes([permissions.AllowAny])
@@ -30,11 +67,53 @@ def validar_convite(request, pk):
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def trocar_senha(request):
-    password = str(request.data.get("password") or "")
-    if len(password) < 8:
-        return Response({"detail": "A senha deve ter ao menos 8 caracteres."}, status=400)
-    trocar_senha_service(request.user, password)
+    current_password = str(request.data.get("current_password") or "")
+    new_password = str(request.data.get("password") or "")
+    if len(new_password) < 8:
+        return Response({"detail": "A nova senha deve ter ao menos 8 caracteres."}, status=400)
+    error = trocar_senha_service(request.user, current_password, new_password)
+    if error:
+        return Response({"detail": error}, status=400)
     return Response({"detail": "Senha atualizada."})
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def trocar_email_solicitar(request):
+    new_email = str(request.data.get("email") or "").strip()
+    if not new_email:
+        return Response({"detail": "Informe um e-mail."}, status=400)
+    try:
+        solicitar_troca_email(request.user, new_email)
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=400)
+    return Response({"detail": "Enviamos um código de confirmação para o novo e-mail."})
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def trocar_email_confirmar(request):
+    code = str(request.data.get("code") or "").strip()
+    result = confirmar_troca_email_service(request.user, code)
+    return Response({"detail": result["detail"]}, status=200 if result["ok"] else 400)
+
+@api_view(["DELETE"])
+@permission_classes([permissions.IsAuthenticated])
+def excluir_conta(request):
+    password = str(request.data.get("password") or "")
+    if not request.user.check_password(password):
+        return Response({"detail": "Senha incorreta."}, status=400)
+    request.user.delete()
+    return Response({"detail": "Conta excluída."})
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def logout_view(request):
+    refresh = request.data.get("refresh")
+    if refresh:
+        try:
+            RefreshToken(refresh).blacklist()
+        except Exception:
+            pass
+    return Response({"detail": "Sessão encerrada."})
 
 class NotAgentAccount(permissions.BasePermission):
     """Nega acesso a contas de serviço do agente de IA (membros do grupo "agente").

@@ -17,9 +17,9 @@ x-backend: &backend
     CELERY_BROKER_URL: redis://redis:6379/0
     CELERY_RESULT_BACKEND: redis://redis:6379/1
     CHANNEL_REDIS_URL: redis://redis:6379/2
-    # Convite de atendente (código de 6 dígitos) e credenciais provisórias.
-    # Sem EMAIL_HOST_USER/PASSWORD configurados em prod.env, cai no backend
-    # console (só loga, não envia de verdade) -- ver docs/integracao-equipe.md.
+    # Convite de atendente (código de 6 dígitos), credenciais provisórias e
+    # troca de e-mail de perfil. Sem EMAIL_HOST_USER/PASSWORD configurados em
+    # prod.env, cai no backend console (só loga, não envia de verdade).
     EMAIL_BACKEND: ${EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}
     EMAIL_HOST: ${EMAIL_HOST:-smtp.gmail.com}
     EMAIL_PORT: ${EMAIL_PORT:-587}
@@ -72,6 +72,8 @@ services:
 
   web:
     <<: *backend
+    volumes:
+      - media_data:/app/media
     depends_on:
       setup:
         condition: service_completed_successfully
@@ -107,6 +109,7 @@ services:
     volumes:
       - ./deploy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
       - static_data:/srv/static:ro
+      - media_data:/srv/media:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
@@ -120,5 +123,6 @@ volumes:
   crm_data:
   redis_data:
   static_data:
+  media_data:
   caddy_data:
   caddy_config:

@@ -3,6 +3,10 @@ crm.axiomaia.com.br {
         root * /srv
         file_server
     }
+    handle /media/* {
+        root * /srv
+        file_server
+    }
     @backend path /api/* /admin/* /ws/* /health/*
     handle @backend {
         reverse_proxy web:8000

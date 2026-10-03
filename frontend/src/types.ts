@@ -64,6 +64,9 @@ export type Role = 'atendente' | 'empresa' | 'admin';
 
 export type Me = {
   username: string;
+  email: string;
+  display_name: string;
+  avatar_url: string | null;
   is_staff: boolean;
   is_superuser: boolean;
   is_agent: boolean;

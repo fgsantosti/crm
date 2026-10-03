@@ -78,6 +78,32 @@ class PasswordChangeRequired(models.Model):
     """
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="password_change_required")
 
+class Profile(models.Model):
+    """Dados de perfil que o User padrão do Django não tem (nome de exibição, foto).
+
+    Criado sob demanda (get_or_create) em views.me -- contas antigas (admin,
+    empresa.rufus-advocacia etc.) não têm uma linha aqui até o primeiro acesso
+    à tela de perfil, e isso é esperado.
+    """
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
+    display_name = models.CharField(max_length=160, blank=True)
+    avatar = models.ImageField(upload_to="avatars/", blank=True)
+
+class EmailChangeRequest(models.Model):
+    """Troca de e-mail da própria conta, confirmada por código de 6 dígitos
+    enviado para o endereço NOVO (nunca o antigo) -- evita que uma sessão
+    aberta troque o e-mail de contato da conta sem confirmar que quem está
+    pedindo a troca realmente tem acesso à caixa nova."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="email_change_requests")
+    new_email = models.EmailField()
+    code_hash = models.CharField(max_length=128)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    class Meta:
+        ordering = ["-created_at"]
+
 class Lead(models.Model):
     ESPECIALIDADE_CHOICES = [("Previdenciário", "Previdenciário"), ("Consumidor", "Consumidor"), ("Trabalhista", "Trabalhista"), ("Fora de escopo", "Fora de escopo")]
     TEMPERATURA_CHOICES = [("Qualificado", "Qualificado"), ("Quente", "Quente"), ("Desconfiado", "Desconfiado"), ("Remarketing", "Remarketing"), ("Desqualificado", "Desqualificado")]

@@ -3,7 +3,7 @@ from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
 from rest_framework.authtoken.models import TokenProxy
 from rest_framework.authtoken.admin import TokenAdmin
-from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, PasswordChangeRequired
+from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, PasswordChangeRequired, Profile, EmailChangeRequest
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
@@ -65,6 +65,17 @@ class AtendenteInviteAdmin(admin.ModelAdmin):
 class PasswordChangeRequiredAdmin(admin.ModelAdmin):
     list_display = ["user"]
     search_fields = ["user__username"]
+
+@admin.register(Profile)
+class ProfileAdmin(admin.ModelAdmin):
+    list_display = ["user", "display_name"]
+    search_fields = ["user__username", "display_name"]
+
+@admin.register(EmailChangeRequest)
+class EmailChangeRequestAdmin(admin.ModelAdmin):
+    list_display = ["user", "new_email", "created_at", "expires_at", "confirmed_at", "attempts"]
+    search_fields = ["user__username", "new_email"]
+    readonly_fields = ["user", "new_email", "code_hash", "created_at", "expires_at", "attempts", "confirmed_at"]
 
 # --- Usuários e tokens: reforça na UI a mesma restrição que já existe no backend
 # (grupo "agente" só acessa /incoming/ e /delivery/ — ver crm/views.py NotAgentAccount) ---

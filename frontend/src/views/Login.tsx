@@ -3,7 +3,7 @@ import { Logo } from '../components/Logo';
 import { Spinner } from '../components/Skeleton';
 import { login } from '../api';
 
-export function Login({ onLogin }: { onLogin: (token: string) => void }) {
+export function Login({ onLogin }: { onLogin: () => void }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -13,8 +13,8 @@ export function Login({ onLogin }: { onLogin: (token: string) => void }) {
     setError('');
     const form = new FormData(e.currentTarget);
     try {
-      const token = await login(String(form.get('username')), String(form.get('password')));
-      onLogin(token);
+      await login(String(form.get('username')), String(form.get('password')));
+      onLogin();
     } catch (err) {
       setError((err as Error).message);
     } finally {

@@ -1,5 +1,7 @@
 import { Logo } from './Logo';
-import type { Company } from '../types';
+import { ProfileMenu } from './ProfileMenu';
+import type { Api } from '../api';
+import type { Company, Me } from '../types';
 
 export type View = 'dashboard' | 'leads' | 'pendencias' | 'humano' | 'roteiro' | 'dados-empresa' | 'equipe';
 
@@ -14,6 +16,10 @@ export function Sidebar({
   leadsCount,
   pendingCount,
   humanCount,
+  api,
+  me,
+  onMeChange,
+  onAccountDeleted,
 }: {
   role: 'atendente' | 'empresa';
   companies: Company[];
@@ -25,6 +31,10 @@ export function Sidebar({
   leadsCount: number;
   pendingCount: number;
   humanCount: number;
+  api: Api;
+  me: Me;
+  onMeChange: (patch: Partial<Me>) => void;
+  onAccountDeleted: () => void;
 }) {
   const items: { key: View; label: string; count?: number }[] = [
     { key: 'dashboard', label: 'Dashboard' },
@@ -70,9 +80,12 @@ export function Sidebar({
           ? 'Você define o roteiro que o agente segue. Atendentes recebem a triagem já concluída e não configuram esse fluxo.'
           : 'O agente conduz a triagem automática e só chega até você quando precisa de uma decisão humana.'}
       </p>
-      <button type="button" className="logout" onClick={onLogout}>
-        Sair
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <ProfileMenu api={api} me={me} onMeChange={onMeChange} onAccountDeleted={onAccountDeleted} />
+        <button type="button" className="logout" style={{ flex: 1 }} onClick={onLogout}>
+          Sair
+        </button>
+      </div>
     </aside>
   );
 }

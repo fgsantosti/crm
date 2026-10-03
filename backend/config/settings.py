@@ -4,7 +4,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
-INSTALLED_APPS = ["django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes", "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles", "rest_framework", "rest_framework.authtoken", "corsheaders", "channels", "django_celery_beat", "crm"]
+INSTALLED_APPS = ["django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes", "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles", "rest_framework", "rest_framework.authtoken", "rest_framework_simplejwt.token_blacklist", "corsheaders", "channels", "django_celery_beat", "crm"]
 MIDDLEWARE = ["django.middleware.security.SecurityMiddleware", "corsheaders.middleware.CorsMiddleware", "django.contrib.sessions.middleware.SessionMiddleware", "django.middleware.common.CommonMiddleware", "django.middleware.csrf.CsrfViewMiddleware", "django.contrib.auth.middleware.AuthenticationMiddleware", "django.contrib.messages.middleware.MessageMiddleware", "django.middleware.clickjacking.XFrameOptionsMiddleware"]
 ROOT_URLCONF = "config.urls"
 TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates", "DIRS": [], "APP_DIRS": True, "OPTIONS": {"context_processors": ["django.template.context_processors.request", "django.contrib.auth.context_processors.auth", "django.contrib.messages.context_processors.messages"]}}]
@@ -12,13 +12,22 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "NAME": os.getenv("POSTGRES_DB", "crm"), "USER": os.getenv("POSTGRES_USER", "crm"), "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""), "HOST": os.getenv("POSTGRES_HOST", "localhost"), "PORT": os.getenv("POSTGRES_PORT", "5432")}}
 if os.getenv("TEST_SQLITE") == "1":
     DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "test.sqlite3"}}
-# Só TokenAuthentication: o frontend e o agente autenticam exclusivamente via
-# header "Authorization: Token ...". SessionAuthentication nunca é usada pela
-# API — incluí-la aqui junto com TokenAuthentication faz o DRF exigir CSRF
-# token em qualquer requisição de quem também tiver uma sessão Django ativa
-# no mesmo navegador (ex.: logado no /admin/ ao mesmo tempo), retornando 403
-# mesmo com usuário/senha corretos, já que o frontend nunca envia CSRF token.
-REST_FRAMEWORK = {"DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.TokenAuthentication"], "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"], "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination", "PAGE_SIZE": 100, "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"], "DEFAULT_THROTTLE_RATES": {"agent-incoming": "60/minute"}}
+# Dois esquemas de autenticação, cada um pra um consumidor diferente:
+# - JWTAuthentication: usuários humanos no frontend (access token de vida curta
+#   + refresh token, ver SIMPLE_JWT abaixo). Nunca usa cookie/sessão, então não
+#   tem o mesmo risco de CSRF que SessionAuthentication tinha (ver histórico).
+# - TokenAuthentication: mantido só pela conta de serviço do agente Axioma, que
+#   usa um token fixo pré-provisionado (nunca passa por /api/login/).
+REST_FRAMEWORK = {"DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework_simplejwt.authentication.JWTAuthentication", "rest_framework.authentication.TokenAuthentication"], "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"], "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination", "PAGE_SIZE": 100, "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"], "DEFAULT_THROTTLE_RATES": {"agent-incoming": "60/minute"}}
+
+from datetime import timedelta
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=14),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "AUTH_HEADER_TYPES": ("Bearer",),
+}
 CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 LANGUAGE_CODE = "pt-br"
 TIME_ZONE = "America/Fortaleza"
@@ -29,6 +38,10 @@ AUTH_PASSWORD_VALIDATORS = [{"NAME": "django.contrib.auth.password_validation.Us
 
 ASGI_APPLICATION = "config.asgi.application"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# Foto de perfil (crm.Profile.avatar). Caddy serve isso em /media/* a partir
+# do mesmo volume (ver compose.prod.yaml e deploy/Caddyfile.prod).
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "http://localhost:8080").split(",")
 
 # E-mail (convite de atendente e credenciais provisórias). Backend padrão é o

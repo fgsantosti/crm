@@ -10,6 +10,7 @@ export function TrocarSenhaObrigatoria({ api, onDone, onLogout }: { api: Api; on
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
+    const currentPassword = String(form.get('current_password') || '');
     const password = String(form.get('password') || '');
     const confirm = String(form.get('confirm') || '');
     if (password !== confirm) {
@@ -23,7 +24,7 @@ export function TrocarSenhaObrigatoria({ api, onDone, onLogout }: { api: Api; on
     setBusy(true);
     setError('');
     try {
-      await api('/trocar-senha/', { method: 'POST', body: JSON.stringify({ password }) });
+      await api('/trocar-senha/', { method: 'POST', body: JSON.stringify({ current_password: currentPassword, password }) });
       onDone();
     } catch (err) {
       setError((err as Error).message);
@@ -44,6 +45,10 @@ export function TrocarSenhaObrigatoria({ api, onDone, onLogout }: { api: Api; on
               {error}
             </p>
           )}
+          <label>
+            Senha provisória recebida por e-mail
+            <input name="current_password" type="password" autoComplete="current-password" required />
+          </label>
           <label>
             Nova senha
             <input name="password" type="password" autoComplete="new-password" required minLength={8} />
