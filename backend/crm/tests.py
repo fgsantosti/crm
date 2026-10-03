@@ -165,6 +165,20 @@ class QualificationTests(TestCase):
         created = staff_client.post(f"/api/areas/?company={self.company.pk}", {"name": "Imobiliário"}, format="json")
         self.assertEqual(created.status_code, 201)
         self.assertTrue(Area.objects.filter(company=self.company, name="Imobiliário").exists())
+    def test_equipe_endpoint_only_lists_atendente_role(self):
+        from django.contrib.auth.models import Group
+        staff = get_user_model().objects.create_user(username="empresa-staff", is_staff=True)
+        atendente = get_user_model().objects.create_user(username="atendente-real", is_staff=False)
+        agent_group, _ = Group.objects.get_or_create(name="agente")
+        agent_user = get_user_model().objects.create_user(username="agente.empresa-a")
+        agent_user.groups.add(agent_group)
+        for u in (staff, atendente, agent_user):
+            self.company.members.add(u)
+        response = self.client.get(f"/api/companies/{self.company.pk}/equipe/")
+        self.assertEqual(response.status_code, 200)
+        usernames = {m["username"] for m in response.json()}
+        # self.user ("operador", setUp) também é atendente real (is_staff=False) -- esperado aparecer junto.
+        self.assertEqual(usernames, {"operador", "atendente-real"})
     def test_convite_flow_creates_account_and_sends_credentials_email(self):
         staff = get_user_model().objects.create_user(username="empresa-staff", is_staff=True)
         self.company.members.add(staff)
@@ -190,6 +204,8 @@ class QualificationTests(TestCase):
         self.assertTrue(PasswordChangeRequired.objects.filter(user=new_user).exists())
         self.assertEqual(len(mail.outbox), 2)
         self.assertIn("Senha provisória", mail.outbox[1].body)
+        # Link de uso único: o convite some do banco assim que validado, não fica só marcado.
+        self.assertFalse(AtendenteInvite.objects.filter(pk=invite.pk).exists())
 
         again = self.client.post(f"/api/convites/{invite.pk}/validar/", {"code": code}, format="json")
         self.assertEqual(again.status_code, 400)

@@ -192,12 +192,14 @@ def validar_convite(invite_id, code):
 
     Tudo protegido por select_for_update: duas tentativas concorrentes para o
     mesmo convite nunca criam duas contas nem passam ambas com o mesmo código.
+
+    O link/código é de uso único: ao validar com sucesso, o convite é excluído
+    na hora (não só marcado como verificado) -- ele nunca mais existe pra ser
+    reaproveitado, nem guarda o code_hash depois de cumprir sua função.
     """
     invite = AtendenteInvite.objects.select_for_update().filter(pk=invite_id).first()
     if not invite:
-        return {"ok": False, "detail": "Convite não encontrado."}
-    if invite.verified_at:
-        return {"ok": False, "detail": "Este convite já foi validado."}
+        return {"ok": False, "detail": "Link inválido, expirado ou já utilizado."}
     if invite.expires_at < timezone.now():
         return {"ok": False, "detail": "Código expirado. Peça um novo convite à empresa."}
     if invite.attempts >= MAX_INVITE_ATTEMPTS:
@@ -214,9 +216,8 @@ def validar_convite(invite_id, code):
     user = User.objects.create_user(username=invite.email, email=invite.email, password=provisional_password, first_name=invite.name[:150])
     invite.company.members.add(user)
     PasswordChangeRequired.objects.create(user=user)
-    invite.verified_at = timezone.now()
-    invite.save(update_fields=["attempts", "verified_at"])
     send_credentials_email(invite.email, invite.name, provisional_password)
+    invite.delete()
     return {"ok": True, "detail": "Conta criada. As credenciais de acesso foram enviadas para o seu e-mail."}
 
 def trocar_senha(user, current_password, new_password):

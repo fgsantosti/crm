@@ -192,8 +192,11 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self): return self.request.user.companies.all()
     @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated, NotAgentAccount])
     def equipe(self, request, pk=None):
+        """Só atendentes (is_staff=False) -- nem a conta de serviço do agente,
+        nem os usuários com papel Empresa/Admin aparecem aqui, já que esta tela
+        existe pra Empresa gerenciar o time de atendentes, não a si mesma."""
         company = self.get_object()
-        members = company.members.exclude(groups__name="agente").order_by("username")
+        members = company.members.exclude(groups__name="agente").filter(is_staff=False).order_by("username")
         return Response([
             {"id": u.id, "username": u.username, "email": u.email or u.username, "is_staff": u.is_staff, "is_superuser": u.is_superuser, "date_joined": u.date_joined}
             for u in members
