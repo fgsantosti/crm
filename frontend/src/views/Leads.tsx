@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Api } from '../api';
 import type { Company, Lead, LeadEvent, Paginated } from '../types';
-import { SkeletonRows, Spinner } from '../components/Skeleton';
+import { SkeletonCards, Spinner } from '../components/Skeleton';
 
 export function Leads({ api, company }: { api: Api; company: Company }) {
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -68,6 +68,19 @@ export function Leads({ api, company }: { api: Api; company: Company }) {
 
   const visible = leads.filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()));
 
+  const columnOf = (l: Lead): 'novo' | 'triagem' | 'humano' | 'classificado' => {
+    if (l.mode === 'HUMANO') return 'humano';
+    if (l.bot_closed) return 'classificado';
+    if (l.funnel_stage === 'Novo lead') return 'novo';
+    return 'triagem';
+  };
+  const columns: { key: ReturnType<typeof columnOf>; label: string }[] = [
+    { key: 'novo', label: 'Novo lead' },
+    { key: 'triagem', label: 'Em triagem' },
+    { key: 'humano', label: 'Atendimento humano' },
+    { key: 'classificado', label: 'Classificado' },
+  ];
+
   return (
     <>
       <header className="page-header">
@@ -85,59 +98,64 @@ export function Leads({ api, company }: { api: Api; company: Company }) {
         </p>
       )}
 
-      <section className="panel">
+      <section className="panel" style={{ padding: 0 }}>
         <div className="panel-toolbar">
           <h2>Central de leads</h2>
           <input placeholder="Buscar nome ou telefone" aria-label="Buscar leads" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Contato</th>
-                <th>Etapa</th>
-                <th>Atendimento</th>
-                <th>Prioridade</th>
-                <th>Próxima ação</th>
-              </tr>
-            </thead>
-            <tbody>
-              {busy && !visible.length && <SkeletonRows rows={4} cols={5} />}
-              {visible.map((l) => (
-                <tr
-                  key={l.id}
-                  onClick={() => setSelected(l)}
-                  style={{ cursor: 'pointer' }}
-                  tabIndex={0}
-                  role="button"
-                  aria-label={`Ver detalhes de ${l.name || l.contact}`}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      setSelected(l);
-                    }
-                  }}
-                >
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{l.name || 'Sem nome informado'}</div>
-                    <small>{l.contact}</small>
-                  </td>
-                  <td>{l.funnel_stage}</td>
-                  <td>
-                    <span className={`badge ${l.mode === 'HUMANO' ? 'badge-human' : 'badge-auto'}`}>{l.mode === 'HUMANO' ? 'Humano' : 'Automático'}</span>
-                  </td>
-                  <td>
-                    <span className={`priority priority-${l.priority === 'Alta' ? 'alta' : l.priority === 'Média' ? 'media' : 'baixa'}`}>
-                      <span className="priority-dot" />
-                      {l.priority}
-                    </span>
-                  </td>
-                  <td style={{ color: 'var(--muted)' }}>{l.next_action || 'Aguardando resposta'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {busy && !visible.length ? (
+          <div style={{ padding: '18px 24px' }}>
+            <SkeletonCards count={4} height={90} />
+          </div>
+        ) : (
+          <div className="kanban">
+            {columns.map((col) => {
+              const items = visible.filter((l) => columnOf(l) === col.key);
+              return (
+                <div key={col.key} className="kanban-col">
+                  <div className="kanban-col-head">
+                    <h3>{col.label}</h3>
+                    <small>
+                      {items.length} lead{items.length === 1 ? '' : 's'}
+                    </small>
+                  </div>
+                  <div className="kanban-col-body">
+                    {items.map((l) => (
+                      <article
+                        key={l.id}
+                        className={`kanban-card${selected?.id === l.id ? ' selected' : ''}`}
+                        onClick={() => setSelected(l)}
+                        tabIndex={0}
+                        role="button"
+                        aria-label={`Ver detalhes de ${l.name || l.contact}`}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setSelected(l);
+                          }
+                        }}
+                      >
+                        <span className={`priority-dot priority-dot-${l.priority === 'Alta' ? 'alta' : l.priority === 'Média' ? 'media' : 'baixa'}`} />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {l.name || 'Sem nome informado'}
+                          </div>
+                          <small style={{ display: 'block', fontFamily: "'DM Mono',monospace" }}>{l.contact}</small>
+                          {l.demand && (
+                            <small style={{ display: 'block', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {l.demand}
+                            </small>
+                          )}
+                        </div>
+                      </article>
+                    ))}
+                    {!items.length && <p style={{ fontSize: 12.5, color: 'var(--muted-soft)', padding: '4px 2px' }}>Nenhum lead aqui.</p>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
         {!busy && !visible.length && (
           <div className="empty">
             {'Nenhum lead nesta visão. Os contatos aparecerão ao receber mensagens pela integração.'}
