@@ -5,7 +5,7 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 RUN useradd --create-home --uid 10001 crm
 COPY --chown=crm:crm . .
-RUN mkdir -p /app/staticfiles && chown crm:crm /app/staticfiles
+RUN mkdir -p /app/staticfiles /app/media && chown crm:crm /app/staticfiles /app/media
 USER crm
 EXPOSE 8000
 # Em produção, sobrescreva FORWARDED_ALLOW_IPS com o nome/IP do serviço "proxy" do
