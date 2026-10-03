@@ -77,9 +77,14 @@ class QuestionViewSet(TenantMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer): serializer.save(company=self.company())
 
 class CompanyInfoViewSet(TenantMixin, viewsets.ModelViewSet):
+    """Dados da empresa: o agente de IA precisa LER isto (para responder perguntas
+    livres sobre a empresa fora do roteiro fixo), então a leitura fica aberta a
+    qualquer membro autenticado da empresa, inclusive a conta de serviço do
+    agente. Só a escrita é restrita a staff humano (NotAgentAccount)."""
     queryset = CompanyInfo.objects.all()
     serializer_class = CompanyInfoSerializer
     def get_permissions(self):
-        base = [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
-        return base + [NotAgentAccount()]
+        if self.request.method in permissions.SAFE_METHODS:
+            return [permissions.IsAuthenticated()]
+        return [permissions.IsAdminUser(), NotAgentAccount()]
     def perform_create(self, serializer): serializer.save(company=self.company())

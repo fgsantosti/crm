@@ -153,3 +153,20 @@ class QualificationTests(TestCase):
         )
         self.assertEqual(incoming_response.status_code, 200)
         self.assertEqual(incoming_response.json()["action"], "TEXTO")
+    def test_agent_service_account_can_read_but_not_write_company_info(self):
+        from django.contrib.auth.models import Group
+        from .models import CompanyInfo
+        CompanyInfo.objects.create(company=self.company, title="Horário", content="Seg a sex, 9h às 18h.")
+        agent_group, _ = Group.objects.get_or_create(name="agente")
+        agent_user = get_user_model().objects.create_user(username="agente.empresa-b")
+        agent_user.groups.add(agent_group)
+        self.company.members.add(agent_user)
+        agent_client = APIClient()
+        agent_client.force_authenticate(agent_user)
+        read_response = agent_client.get(f"/api/company-info/?company={self.company.pk}")
+        self.assertEqual(read_response.status_code, 200)
+        self.assertEqual(len(read_response.json()["results"]), 1)
+        self.assertEqual(
+            agent_client.post(f"/api/company-info/?company={self.company.pk}", {"title": "x", "content": "y"}, format="json").status_code,
+            403,
+        )
