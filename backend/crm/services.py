@@ -3,10 +3,13 @@ import secrets
 from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password, check_password
+from django.contrib.auth.models import Group
 from django.db import transaction
 from django.utils import timezone
+from django.utils.text import slugify
+from rest_framework.authtoken.models import Token
 from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
-from .models import Lead, Question, Event, Company, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest
+from .models import Lead, Question, Event, Company, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry
 
 NO_REPLY = {"action": "NO_REPLY"}
 
@@ -285,3 +288,55 @@ def redefinir_senha_atendente(atendente):
     profile = getattr(atendente, "profile", None)
     nome = (profile.display_name if profile else "") or atendente.first_name or atendente.username
     send_password_reset_by_admin_email(atendente.email or atendente.username, nome, nova_senha)
+
+# --- Painel Admin interno (Axioma): conta de serviço do agente por empresa ---
+# Convenção de username já documentada em docs/integracao-agente.md
+# (agente.<slug-da-empresa>) -- mantida aqui pra não divergir do que já está
+# em produção (ex.: agente.rufus-advocacia, criado antes desta tela existir).
+
+def _agent_username(company):
+    return f"agente.{slugify(company.name)}"
+
+def agent_status(company):
+    """Estado atual do token do agente desta empresa, pra tela Admin e pro
+    serializer (nunca devolve a chave inteira, só uma prévia mascarada)."""
+    User = get_user_model()
+    username = _agent_username(company)
+    user = User.objects.filter(username=username).first()
+    if not user:
+        return {"existe": False, "username": username, "masked_key": None, "validade": None}
+    token = Token.objects.filter(user=user).first()
+    if not token:
+        return {"existe": True, "username": username, "masked_key": None, "validade": None}
+    expiry = getattr(token, "expiry", None)
+    validade = None
+    if expiry:
+        validade = {"expires_at": expiry.expires_at, "expirado": expiry.expires_at < timezone.now()}
+    return {"existe": True, "username": username, "masked_key": f"{token.key[:8]}…{token.key[-4:]}", "validade": validade}
+
+@transaction.atomic
+def gerar_token_agente(company, dias_validade):
+    """Cria a conta de serviço do agente se ainda não existir, e sempre
+    GERA UM TOKEN NOVO (rotação: qualquer token antigo dessa empresa para de
+    funcionar na hora). A chave completa só é devolvida aqui -- depois disso
+    só a versão mascarada (agent_status) fica disponível, igual ao Django Admin."""
+    User = get_user_model()
+    agent_group, _ = Group.objects.get_or_create(name="agente")
+    username = _agent_username(company)
+    user, created = User.objects.get_or_create(username=username)
+    if created:
+        user.set_unusable_password()
+        user.save()
+    user.groups.add(agent_group)
+    company.members.add(user)
+    Token.objects.filter(user=user).delete()
+    token = Token.objects.create(user=user)
+    expires_at = timezone.now() + timedelta(days=dias_validade)
+    AgentTokenExpiry.objects.create(token=token, expires_at=expires_at)
+    return {"username": username, "token": token.key, "expires_at": expires_at}
+
+def revogar_token_agente(company):
+    User = get_user_model()
+    user = User.objects.filter(username=_agent_username(company)).first()
+    if user:
+        Token.objects.filter(user=user).delete()

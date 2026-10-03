@@ -11,13 +11,14 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, Toke
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
 from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile
-from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer
+from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer
 from .services import (
     receive, escalate, create_invite,
     validar_convite as validar_convite_service,
     trocar_senha as trocar_senha_service,
     solicitar_troca_email, confirmar_troca_email as confirmar_troca_email_service,
     redefinir_senha_atendente as redefinir_senha_atendente_service,
+    agent_status, gerar_token_agente, revogar_token_agente,
 )
 
 def _avatar_url(request, profile):
@@ -186,6 +187,20 @@ class NotAgentAccount(permissions.BasePermission):
         user = request.user
         return bool(user and user.is_authenticated and not user.groups.filter(name="agente").exists())
 
+class IsSuperUser(permissions.BasePermission):
+    """Restrito à equipe interna da Axioma (is_superuser=True).
+
+    Importante: NÃO é o mesmo que IsAdminUser do DRF (que só checa is_staff).
+    Contas "Empresa" também têm is_staff=True -- usar IsAdminUser aqui
+    deixaria qualquer empresa cliente enxergar/editar TODAS as empresas,
+    já que os endpoints deste grupo não são filtrados por tenant de propósito
+    (são a própria ferramenta interna de operação multi-empresa da Axioma).
+    """
+    message = "Restrito à equipe Axioma."
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and user.is_superuser)
+
 class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = CompanySerializer
     throttle_classes = [ScopedRateThrottle]
@@ -288,6 +303,42 @@ class CompanyInfoViewSet(TenantMixin, viewsets.ModelViewSet):
             return [permissions.IsAuthenticated()]
         return [permissions.IsAdminUser(), NotAgentAccount()]
     def perform_create(self, serializer): serializer.save(company=self.company())
+
+class AdminCompanyViewSet(viewsets.ModelViewSet):
+    """Painel Admin interno da Axioma: cadastro de empresas e token do agente.
+
+    Propositalmente SEM TenantMixin -- é a única tela do sistema com visão
+    cross-tenant de verdade, então IsSuperUser (não IsAdminUser, que também
+    deixaria passar contas "Empresa" com is_staff=True) é quem garante que
+    só a equipe interna da Axioma chega aqui.
+    """
+    queryset = Company.objects.all().order_by("name")
+    serializer_class = AdminCompanySerializer
+    permission_classes = [IsSuperUser]
+    # "delete" precisa ficar habilitado pra action "agente" (revogar token) --
+    # destroy() é desligado explicitamente abaixo pra isso não virar exclusão
+    # de empresa (destrutivo demais pra expor sem uma tela própria de confirmação).
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({"detail": "Exclusão de empresa não é suportada por aqui."}, status=405)
+
+    @action(detail=True, methods=["get", "post", "delete"])
+    def agente(self, request, pk=None):
+        company = self.get_object()
+        if request.method == "GET":
+            return Response(agent_status(company))
+        if request.method == "POST":
+            raw = request.data.get("validade_dias")
+            try:
+                dias = int(raw) if raw not in (None, "") else 180
+            except (TypeError, ValueError):
+                return Response({"detail": "validade_dias precisa ser um número inteiro."}, status=400)
+            if dias < 1 or dias > 730:
+                return Response({"detail": "Validade deve ser entre 1 e 730 dias."}, status=400)
+            return Response(gerar_token_agente(company, dias))
+        revogar_token_agente(company)
+        return Response({"detail": "Token revogado."})
 
 class AreaViewSet(TenantMixin, viewsets.ModelViewSet):
     """Áreas de atendimento cadastradas pela empresa (tela "Equipe")."""

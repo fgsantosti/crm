@@ -184,6 +184,77 @@ class QualificationTests(TestCase):
         row = next(m for m in response.json() if m["username"] == "atendente-real")
         self.assertIn("display_name", row)
         self.assertIn("avatar_url", row)
+    def test_admin_companies_requires_superuser_not_just_staff(self):
+        staff = get_user_model().objects.create_user(username="empresa-staff-admin-test", is_staff=True)
+        self.company.members.add(staff)
+        staff_client = APIClient()
+        staff_client.force_authenticate(staff)
+        self.assertEqual(staff_client.get("/api/admin-companies/").status_code, 403)
+        superuser = get_user_model().objects.create_user(username="super-teste", is_staff=True, is_superuser=True)
+        super_client = APIClient()
+        super_client.force_authenticate(superuser)
+        resp = super_client.get("/api/admin-companies/")
+        self.assertEqual(resp.status_code, 200)
+        names = {c["name"] for c in resp.json()["results"]}
+        self.assertIn(self.company.name, names)
+        self.assertIn(self.other.name, names)  # cross-tenant por design: é a tela interna da Axioma
+    def test_admin_companies_create_and_update(self):
+        superuser = get_user_model().objects.create_user(username="super-teste-2", is_staff=True, is_superuser=True)
+        c = APIClient()
+        c.force_authenticate(superuser)
+        created = c.post("/api/admin-companies/", {"name": "Nova Empresa Teste", "initial_state": "apresentacao"}, format="json")
+        self.assertEqual(created.status_code, 201)
+        company_id = created.json()["id"]
+        updated = c.patch(f"/api/admin-companies/{company_id}/", {"default_owner": "Fila Nova"}, format="json")
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["default_owner"], "Fila Nova")
+    def test_admin_agente_gerar_status_revogar_token(self):
+        superuser = get_user_model().objects.create_user(username="super-teste-3", is_staff=True, is_superuser=True)
+        c = APIClient()
+        c.force_authenticate(superuser)
+        status_antes = c.get(f"/api/admin-companies/{self.company.pk}/agente/")
+        self.assertEqual(status_antes.status_code, 200)
+        self.assertFalse(status_antes.json()["existe"])
+
+        gerado = c.post(f"/api/admin-companies/{self.company.pk}/agente/", {"validade_dias": 30}, format="json")
+        self.assertEqual(gerado.status_code, 200)
+        self.assertIn("token", gerado.json())
+        primeiro_token = gerado.json()["token"]
+
+        status_depois = c.get(f"/api/admin-companies/{self.company.pk}/agente/")
+        self.assertTrue(status_depois.json()["existe"])
+        self.assertIsNotNone(status_depois.json()["masked_key"])
+        self.assertFalse(status_depois.json()["validade"]["expirado"])
+
+        # Gerar de novo = rotação: token antigo para de funcionar
+        regerado = c.post(f"/api/admin-companies/{self.company.pk}/agente/", {"validade_dias": 180}, format="json")
+        novo_token = regerado.json()["token"]
+        self.assertNotEqual(primeiro_token, novo_token)
+        agent_client = APIClient()
+        agent_client.credentials(HTTP_AUTHORIZATION=f"Token {primeiro_token}")
+        self.assertEqual(agent_client.get("/api/me/").status_code, 401)
+        agent_client.credentials(HTTP_AUTHORIZATION=f"Token {novo_token}")
+        self.assertEqual(agent_client.get("/api/me/").status_code, 200)
+
+        revogado = c.delete(f"/api/admin-companies/{self.company.pk}/agente/")
+        self.assertEqual(revogado.status_code, 200)
+        agent_client.credentials(HTTP_AUTHORIZATION=f"Token {novo_token}")
+        self.assertEqual(agent_client.get("/api/me/").status_code, 401)
+    def test_admin_companies_destroy_is_disabled(self):
+        superuser = get_user_model().objects.create_user(username="super-teste-5", is_staff=True, is_superuser=True)
+        c = APIClient()
+        c.force_authenticate(superuser)
+        resp = c.delete(f"/api/admin-companies/{self.company.pk}/")
+        self.assertEqual(resp.status_code, 405)
+        self.assertTrue(Company.objects.filter(pk=self.company.pk).exists())
+    def test_admin_agente_validade_dias_bounds(self):
+        superuser = get_user_model().objects.create_user(username="super-teste-4", is_staff=True, is_superuser=True)
+        c = APIClient()
+        c.force_authenticate(superuser)
+        muito_longo = c.post(f"/api/admin-companies/{self.company.pk}/agente/", {"validade_dias": 9999}, format="json")
+        self.assertEqual(muito_longo.status_code, 400)
+        muito_curto = c.post(f"/api/admin-companies/{self.company.pk}/agente/", {"validade_dias": 0}, format="json")
+        self.assertEqual(muito_curto.status_code, 400)
     def test_redefinir_senha_atendente_requires_empresa_and_emails_new_password(self):
         atendente = get_user_model().objects.create_user(username="atendente-x", password="senha-velha-123", email="atendente-x@example.com")
         self.company.members.add(atendente)

@@ -7,6 +7,23 @@ class CompanySerializer(serializers.ModelSerializer):
         model = Company
         fields = ["id", "name", "initial_state", "allow_transcription", "default_owner"]
 
+class AdminCompanySerializer(serializers.ModelSerializer):
+    """Só para a tela interna da Axioma (IsSuperUser) -- cross-tenant de propósito."""
+    member_count = serializers.SerializerMethodField()
+    tem_agente_ativo = serializers.SerializerMethodField()
+    class Meta:
+        model = Company
+        fields = ["id", "name", "initial_state", "allow_transcription", "default_owner", "member_count", "tem_agente_ativo"]
+        read_only_fields = ["id", "member_count", "tem_agente_ativo"]
+    def get_member_count(self, obj):
+        return obj.members.exclude(groups__name="agente").count()
+    def get_tem_agente_ativo(self, obj):
+        from .services import agent_status
+        status = agent_status(obj)
+        if not status["masked_key"]:
+            return False
+        return not (status["validade"] and status["validade"]["expirado"])
+
 class LeadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Lead
