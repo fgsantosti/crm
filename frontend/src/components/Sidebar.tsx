@@ -22,6 +22,8 @@ export function Sidebar({
   onAccountDeleted,
   onOpenTrocarEmail,
   onOpenTrocarSenha,
+  isSuperuser,
+  onOpenAdminPanel,
 }: {
   role: 'atendente' | 'empresa';
   companies: Company[];
@@ -39,6 +41,8 @@ export function Sidebar({
   onAccountDeleted: () => void;
   onOpenTrocarEmail: () => void;
   onOpenTrocarSenha: () => void;
+  isSuperuser: boolean;
+  onOpenAdminPanel: () => void;
 }) {
   const items: { key: View; label: string; count?: number }[] = [
     { key: 'dashboard', label: 'Dashboard' },
@@ -79,6 +83,11 @@ export function Sidebar({
           </button>
         ))}
       </nav>
+      {isSuperuser && (
+        <button type="button" className="secondary" onClick={onOpenAdminPanel}>
+          Painel Admin interno
+        </button>
+      )}
       <p className="sidebar-note">
         {role === 'empresa'
           ? 'Você define o roteiro que o agente segue. Atendentes recebem a triagem já concluída e não configuram esse fluxo.'

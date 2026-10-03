@@ -6,7 +6,7 @@ import { Logo } from '../components/Logo';
  * de CRUD de empresas na API (hoje isso é feito pelo Django Admin, conforme
  * o README). Os dados abaixo são estáticos, só para validar o layout.
  */
-export function Admin({ onLogout }: { onLogout: () => void }) {
+export function Admin({ onLogout, onBackToCrm }: { onLogout: () => void; onBackToCrm?: () => void }) {
   return (
     <div className="admin-shell">
       <header className="admin-top">
@@ -18,6 +18,11 @@ export function Admin({ onLogout }: { onLogout: () => void }) {
         </div>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 18 }}>
           <span style={{ fontSize: 13.5, color: '#D9C7B4' }}>Axioma Operações</span>
+          {onBackToCrm && (
+            <button className="secondary" onClick={onBackToCrm}>
+              Voltar ao CRM
+            </button>
+          )}
           <button className="logout" onClick={onLogout}>
             Sair
           </button>

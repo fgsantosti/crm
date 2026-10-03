@@ -15,7 +15,7 @@ import { TrocarSenhaObrigatoria } from './views/TrocarSenhaObrigatoria';
 import { TrocarEmailPagina } from './views/TrocarEmailPagina';
 import { TrocarSenhaPagina } from './views/TrocarSenhaPagina';
 
-type Screen = 'app' | 'trocar-email' | 'trocar-senha';
+type Screen = 'app' | 'trocar-email' | 'trocar-senha' | 'admin-panel';
 
 export function App() {
   // null = ainda checando a sessão (refresh silencioso via cookie httpOnly).
@@ -100,7 +100,7 @@ export function App() {
   }, [company?.id]);
 
   useEffect(() => {
-    if (role !== 'empresa' && (view === 'roteiro' || view === 'dados-empresa' || view === 'equipe')) setView('dashboard');
+    if (role === 'atendente' && (view === 'roteiro' || view === 'dados-empresa' || view === 'equipe')) setView('dashboard');
   }, [role, view]);
 
   function logout() {
@@ -130,7 +130,7 @@ export function App() {
       />
     );
   if (screen === 'trocar-senha') return <TrocarSenhaPagina api={api} me={me} onDone={() => setScreen('app')} onCancel={() => setScreen('app')} />;
-  if (role === 'admin') return <Admin onLogout={logout} />;
+  if (screen === 'admin-panel') return <Admin onLogout={logout} onBackToCrm={() => setScreen('app')} />;
 
   if (!company) {
     return (
@@ -150,6 +150,11 @@ export function App() {
                 Tentar novamente
               </button>
             )}
+            {role === 'admin' && (
+              <button type="button" onClick={() => setScreen('admin-panel')}>
+                Painel Admin
+              </button>
+            )}
             <button type="button" className="secondary" onClick={logout}>
               Sair
             </button>
@@ -162,7 +167,9 @@ export function App() {
   return (
     <div className="shell">
       <Sidebar
-        role={role === 'empresa' ? 'empresa' : 'atendente'}
+        role={role === 'atendente' ? 'atendente' : 'empresa'}
+        isSuperuser={role === 'admin'}
+        onOpenAdminPanel={() => setScreen('admin-panel')}
         companies={companies}
         companyId={companyId}
         onCompanyChange={setCompanyId}
@@ -186,11 +193,11 @@ export function App() {
           </p>
         )}
         <div key={view} className="view-enter">
-          {view === 'dashboard' && <Dashboard api={api} company={company} role={role === 'empresa' ? 'empresa' : 'atendente'} />}
+          {view === 'dashboard' && <Dashboard api={api} company={company} role={role === 'atendente' ? 'atendente' : 'empresa'} />}
           {view === 'leads' && <Leads api={api} company={company} />}
           {view === 'pendencias' && <Pendencias api={api} company={company} />}
           {view === 'humano' && <AtendimentoHumano api={api} company={company} />}
-          {view === 'roteiro' && <Roteiro api={api} company={company} canEdit={role === 'empresa'} />}
+          {view === 'roteiro' && <Roteiro api={api} company={company} canEdit={role !== 'atendente'} />}
           {view === 'dados-empresa' && <DadosEmpresa api={api} company={company} />}
           {view === 'equipe' && <Equipe api={api} company={company} />}
         </div>
