@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password, check_password
 from django.db import transaction
 from django.utils import timezone
-from .emails import send_credentials_email, send_invite_email, send_email_change_code
+from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
 from .models import Lead, Question, Event, Company, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest
 
 NO_REPLY = {"action": "NO_REPLY"}
@@ -273,3 +273,15 @@ def confirmar_troca_email(user, code):
     request.confirmed_at = timezone.now()
     request.save(update_fields=["attempts", "confirmed_at"])
     return {"ok": True, "detail": "E-mail atualizado."}
+
+def redefinir_senha_atendente(atendente):
+    """A empresa força uma senha nova para um atendente da própria equipe,
+    enviada por e-mail. Mesma regra de segurança do convite: o atendente é
+    obrigado a trocar essa senha no próximo login (PasswordChangeRequired)."""
+    nova_senha = secrets.token_urlsafe(9)
+    atendente.set_password(nova_senha)
+    atendente.save()
+    PasswordChangeRequired.objects.get_or_create(user=atendente)
+    profile = getattr(atendente, "profile", None)
+    nome = (profile.display_name if profile else "") or atendente.first_name or atendente.username
+    send_password_reset_by_admin_email(atendente.email or atendente.username, nome, nova_senha)

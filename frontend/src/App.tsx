@@ -12,6 +12,10 @@ import { DadosEmpresa } from './views/DadosEmpresa';
 import { Equipe } from './views/Equipe';
 import { Admin } from './views/Admin';
 import { TrocarSenhaObrigatoria } from './views/TrocarSenhaObrigatoria';
+import { TrocarEmailPagina } from './views/TrocarEmailPagina';
+import { TrocarSenhaPagina } from './views/TrocarSenhaPagina';
+
+type Screen = 'app' | 'trocar-email' | 'trocar-senha';
 
 export function App() {
   // null = ainda checando a sessão (refresh silencioso via cookie httpOnly).
@@ -25,6 +29,7 @@ export function App() {
   const [pendingCount, setPendingCount] = useState(0);
   const [humanCount, setHumanCount] = useState(0);
   const [companiesRetry, setCompaniesRetry] = useState(0);
+  const [screen, setScreen] = useState<Screen>('app');
 
   const onSessionExpired = useCallback(() => {
     setAuthed(false);
@@ -112,6 +117,19 @@ export function App() {
   if (!authed) return <Login onLogin={() => setAuthed(true)} />;
   if (!me) return <div className="shell" />;
   if (me.must_change_password) return <TrocarSenhaObrigatoria api={api} onDone={() => setMe({ ...me, must_change_password: false })} onLogout={logout} />;
+  if (screen === 'trocar-email')
+    return (
+      <TrocarEmailPagina
+        api={api}
+        me={me}
+        onDone={(email) => {
+          setMe({ ...me, email });
+          setScreen('app');
+        }}
+        onCancel={() => setScreen('app')}
+      />
+    );
+  if (screen === 'trocar-senha') return <TrocarSenhaPagina api={api} me={me} onDone={() => setScreen('app')} onCancel={() => setScreen('app')} />;
   if (role === 'admin') return <Admin onLogout={logout} />;
 
   if (!company) {
@@ -158,6 +176,8 @@ export function App() {
         me={me}
         onMeChange={(patch) => setMe((prev) => (prev ? { ...prev, ...patch } : prev))}
         onAccountDeleted={logout}
+        onOpenTrocarEmail={() => setScreen('trocar-email')}
+        onOpenTrocarSenha={() => setScreen('trocar-senha')}
       />
       <main className="main">
         {error && (

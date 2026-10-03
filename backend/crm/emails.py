@@ -41,3 +41,16 @@ def send_credentials_email(email, name, password):
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[email],
     )
+
+def send_password_reset_by_admin_email(email, name, password):
+    send_mail(
+        subject="Sua senha foi redefinida — Conecta CRM",
+        message=(
+            f"Olá, {name}!\n\n"
+            f"A empresa redefiniu sua senha de acesso ao Conecta CRM. Use a senha nova abaixo:\n\n"
+            f"Senha: {password}\n\n"
+            f"Por segurança, você vai precisar definir uma nova senha no próximo acesso. Se você não esperava isso, avise a empresa."
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[email],
+    )

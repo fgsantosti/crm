@@ -93,6 +93,8 @@ export type EquipeMembro = {
   id: number;
   username: string;
   email: string;
+  display_name: string;
+  avatar_url: string | null;
   is_staff: boolean;
   is_superuser: boolean;
   date_joined: string;

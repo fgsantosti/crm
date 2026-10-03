@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Api } from '../api';
 import type { Area, AtendenteInvite, Company, EquipeMembro, Paginated } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
+import { Avatar } from '../components/ProfileMenu';
 
 export function Equipe({ api, company }: { api: Api; company: Company }) {
   const [membros, setMembros] = useState<EquipeMembro[]>([]);
@@ -12,6 +13,7 @@ export function Equipe({ api, company }: { api: Api; company: Company }) {
   const [savingArea, setSavingArea] = useState<number | 'new' | null>(null);
   const [savingConvite, setSavingConvite] = useState(false);
   const [newArea, setNewArea] = useState('');
+  const [membroAction, setMembroAction] = useState<number | null>(null);
 
   function load() {
     setBusy(true);
@@ -84,6 +86,33 @@ export function Equipe({ api, company }: { api: Api; company: Company }) {
     }
   }
 
+  async function redefinirSenha(membro: EquipeMembro) {
+    if (!window.confirm(`Enviar uma nova senha por e-mail para ${membro.email}?`)) return;
+    setMembroAction(membro.id);
+    setError('');
+    try {
+      await api(`/companies/${company.id}/equipe/${membro.id}/redefinir-senha/`, { method: 'POST' });
+      window.alert('Nova senha enviada para o e-mail do atendente.');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setMembroAction(null);
+    }
+  }
+
+  async function desligarAtendente(membro: EquipeMembro) {
+    if (!window.confirm(`Desligar ${membro.display_name || membro.username}? A conta de acesso dele(a) será removida permanentemente.`)) return;
+    setMembroAction(membro.id);
+    setError('');
+    try {
+      await api(`/companies/${company.id}/equipe/${membro.id}/`, { method: 'DELETE' });
+      setMembros((v) => v.filter((m) => m.id !== membro.id));
+    } catch (err) {
+      setError((err as Error).message);
+      setMembroAction(null);
+    }
+  }
+
   async function cancelarConvite(invite: AtendenteInvite) {
     if (!window.confirm(`Cancelar o convite enviado para ${invite.email}?`)) return;
     try {
@@ -124,17 +153,29 @@ export function Equipe({ api, company }: { api: Api; company: Company }) {
               <table>
                 <thead>
                   <tr>
-                    <th>Usuário</th>
+                    <th />
+                    <th>Nome</th>
                     <th>E-mail</th>
-                    <th>Papel</th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
                   {membros.map((m) => (
                     <tr key={m.id}>
-                      <td style={{ fontFamily: "'DM Mono',monospace" }}>{m.username}</td>
+                      <td style={{ width: 40 }}>
+                        <Avatar me={m} size={32} />
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{m.display_name || m.username}</td>
                       <td>{m.email}</td>
-                      <td>{m.is_superuser ? 'Admin' : m.is_staff ? 'Empresa' : 'Atendente'}</td>
+                      <td style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '10px 24px' }}>
+                        <button type="button" className="secondary" disabled={membroAction === m.id} onClick={() => redefinirSenha(m)}>
+                          {membroAction === m.id && <Spinner />}
+                          Redefinir senha
+                        </button>
+                        <button type="button" className="danger-outline" disabled={membroAction === m.id} onClick={() => desligarAtendente(m)}>
+                          Desligar atendente
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

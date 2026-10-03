@@ -20,6 +20,8 @@ export function Sidebar({
   me,
   onMeChange,
   onAccountDeleted,
+  onOpenTrocarEmail,
+  onOpenTrocarSenha,
 }: {
   role: 'atendente' | 'empresa';
   companies: Company[];
@@ -35,6 +37,8 @@ export function Sidebar({
   me: Me;
   onMeChange: (patch: Partial<Me>) => void;
   onAccountDeleted: () => void;
+  onOpenTrocarEmail: () => void;
+  onOpenTrocarSenha: () => void;
 }) {
   const items: { key: View; label: string; count?: number }[] = [
     { key: 'dashboard', label: 'Dashboard' },
@@ -81,7 +85,14 @@ export function Sidebar({
           : 'O agente conduz a triagem automática e só chega até você quando precisa de uma decisão humana.'}
       </p>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <ProfileMenu api={api} me={me} onMeChange={onMeChange} onAccountDeleted={onAccountDeleted} />
+        <ProfileMenu
+          api={api}
+          me={me}
+          onMeChange={onMeChange}
+          onAccountDeleted={onAccountDeleted}
+          onOpenTrocarEmail={onOpenTrocarEmail}
+          onOpenTrocarSenha={onOpenTrocarSenha}
+        />
         <button type="button" className="logout" style={{ flex: 1 }} onClick={onLogout}>
           Sair
         </button>

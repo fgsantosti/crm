@@ -7,6 +7,7 @@ from rest_framework.routers import DefaultRouter
 from crm.views import (
     CompanyViewSet, LeadViewSet, QuestionViewSet, CompanyInfoViewSet, AreaViewSet, AtendenteInviteViewSet,
     me, avatar, validar_convite, trocar_senha, trocar_email_solicitar, trocar_email_confirmar, excluir_conta,
+    redefinir_senha_atendente_view, desligar_atendente,
     LoginView, RefreshView, logout_view,
 )
 router = DefaultRouter()
@@ -32,6 +33,8 @@ urlpatterns = [
     path("api/me/excluir/", excluir_conta),
     path("api/trocar-senha/", trocar_senha),
     path("api/convites/<int:pk>/validar/", validar_convite),
+    path("api/companies/<int:company_id>/equipe/<int:user_id>/redefinir-senha/", redefinir_senha_atendente_view),
+    path("api/companies/<int:company_id>/equipe/<int:user_id>/", desligar_atendente),
     path("api/", include(router.urls)),
 ]
 if settings.DEBUG:

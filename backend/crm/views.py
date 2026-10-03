@@ -17,6 +17,7 @@ from .services import (
     validar_convite as validar_convite_service,
     trocar_senha as trocar_senha_service,
     solicitar_troca_email, confirmar_troca_email as confirmar_troca_email_service,
+    redefinir_senha_atendente as redefinir_senha_atendente_service,
 )
 
 def _avatar_url(request, profile):
@@ -196,11 +197,17 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
         nem os usuários com papel Empresa/Admin aparecem aqui, já que esta tela
         existe pra Empresa gerenciar o time de atendentes, não a si mesma."""
         company = self.get_object()
-        members = company.members.exclude(groups__name="agente").filter(is_staff=False).order_by("username")
-        return Response([
-            {"id": u.id, "username": u.username, "email": u.email or u.username, "is_staff": u.is_staff, "is_superuser": u.is_superuser, "date_joined": u.date_joined}
-            for u in members
-        ])
+        members = company.members.exclude(groups__name="agente").filter(is_staff=False).select_related("profile").order_by("username")
+        result = []
+        for u in members:
+            profile = getattr(u, "profile", None)
+            result.append({
+                "id": u.id, "username": u.username, "email": u.email or u.username,
+                "display_name": profile.display_name if profile else "",
+                "avatar_url": _avatar_url(request, profile) if profile else None,
+                "is_staff": u.is_staff, "is_superuser": u.is_superuser, "date_joined": u.date_joined,
+            })
+        return Response(result)
     @action(detail=True, methods=["post"])
     def incoming(self, request, pk=None):
         company = self.get_object()
@@ -223,6 +230,24 @@ class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
                 event.save()
                 if value == "FAILED": escalate(event.lead, "Falha de envio: revisar entrega antes de qualquer retomada")
             return Response({"delivery": event.delivery})
+
+def _get_atendente_or_404(request, company_id, user_id):
+    company = get_object_or_404(request.user.companies.all(), pk=company_id)
+    return get_object_or_404(company.members.filter(is_staff=False), pk=user_id)
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAdminUser, NotAgentAccount])
+def redefinir_senha_atendente_view(request, company_id, user_id):
+    atendente = _get_atendente_or_404(request, company_id, user_id)
+    redefinir_senha_atendente_service(atendente)
+    return Response({"detail": "Nova senha enviada para o e-mail do atendente."})
+
+@api_view(["DELETE"])
+@permission_classes([permissions.IsAdminUser, NotAgentAccount])
+def desligar_atendente(request, company_id, user_id):
+    atendente = _get_atendente_or_404(request, company_id, user_id)
+    atendente.delete()
+    return Response({"detail": "Atendente desligado."})
 
 class TenantMixin:
     def company(self):
