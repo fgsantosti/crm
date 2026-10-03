@@ -26,8 +26,8 @@ contrato neste ambiente de desenvolvimento local:
 
 | Campo | Valor |
 | --- | --- |
-| Empresa | Oliveira Advogados (`company_id = 1`) |
-| Usuário | `agente.oliveira-advogados` |
+| Empresa | Rufus Advocacia (`company_id = 1`) |
+| Usuário | `agente.rufus-advocacia` |
 | Token | `1ff60c93797b5f9ac0e5be2e3dc8c49a61180e95` |
 
 Esse token vai em todo request como header:
@@ -183,7 +183,7 @@ curl -s -X POST -H "Authorization: Token $TOKEN" -H "Content-Type: application/j
 ## 5. O que falta cadastrar antes de ligar ao agente real
 
 O catálogo de `question_id → texto/áudio` ainda está com conteúdo de teste.
-Antes de apontar o agente real da Oliveira Advogados (ou qualquer empresa)
+Antes de apontar o agente real da Rufus Advocacia (ou qualquer empresa)
 para este endpoint, cadastre o texto/áudio aprovado de cada um dos 10
 `question_id` pela tela "Roteiro aprovado" do CRM (ou direto no Django
 Admin, modelo `Question`):
