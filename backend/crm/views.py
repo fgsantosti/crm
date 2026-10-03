@@ -2,13 +2,29 @@ from django.db.models import Case, When, Value, IntegerField
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from django.shortcuts import get_object_or_404
 from .models import Company, Lead, Question, CompanyInfo, Event
 from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer
 from .services import receive, escalate
 
+class NotAgentAccount(permissions.BasePermission):
+    """Nega acesso a contas de serviço do agente de IA (membros do grupo "agente").
+
+    A conta de serviço do agente (ex.: username agente.<empresa>) só deve poder
+    chamar as actions `incoming`/`delivery` de CompanyViewSet. Qualquer outro
+    endpoint de escrita/leitura de dados do CRM (leads, roteiro, dados da
+    empresa) é reservado a usuários humanos (atendentes/empresa).
+    """
+    message = "Conta de serviço do agente não tem acesso a este recurso."
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and not user.groups.filter(name="agente").exists())
+
 class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = CompanySerializer
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "agent-incoming"
     def get_queryset(self): return self.request.user.companies.all()
     @action(detail=True, methods=["post"])
     def incoming(self, request, pk=None):
@@ -42,6 +58,7 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
     queryset = Lead.objects.all()
     serializer_class = LeadSerializer
     http_method_names = ["get", "patch", "head", "options"]
+    permission_classes = [permissions.IsAuthenticated, NotAgentAccount]
     def get_queryset(self):
         qs = super().get_queryset()
         if self.request.query_params.get("pending") == "1":
@@ -55,12 +72,14 @@ class QuestionViewSet(TenantMixin, viewsets.ModelViewSet):
     queryset = Question.objects.all().order_by("id")
     serializer_class = QuestionSerializer
     def get_permissions(self):
-        return [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
+        base = [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
+        return base + [NotAgentAccount()]
     def perform_create(self, serializer): serializer.save(company=self.company())
 
 class CompanyInfoViewSet(TenantMixin, viewsets.ModelViewSet):
     queryset = CompanyInfo.objects.all()
     serializer_class = CompanyInfoSerializer
     def get_permissions(self):
-        return [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
+        base = [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
+        return base + [NotAgentAccount()]
     def perform_create(self, serializer): serializer.save(company=self.company())

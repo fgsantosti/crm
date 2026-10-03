@@ -42,7 +42,20 @@ class AgentFieldsSerializer(serializers.Serializer):
     interesse = serializers.ChoiceField(choices=[c[0] for c in Lead.INTERESSE_CHOICES], required=False, allow_blank=True)
     temperatura = serializers.ChoiceField(choices=[c[0] for c in Lead.TEMPERATURA_CHOICES], required=False, allow_blank=True)
     prioridade = serializers.ChoiceField(choices=["Alta", "Média", "Baixa"], required=False, allow_blank=True)
-    proxima = serializers.CharField(max_length=80, required=False, allow_blank=True)
+    proxima = serializers.ChoiceField(
+        choices=[
+            "apresentacao",
+            "empresa",
+            "nome",
+            "situacao",
+            "ainda_na_empresa",
+            "tipo_de_situacao",
+            "afetou_renda",
+            "equipe_avaliar_situacao",
+        ],
+        required=False,
+        allow_blank=True,
+    )
 
 class IncomingSerializer(serializers.Serializer):
     contact = serializers.RegexField(r"^\+[1-9]\d{7,14}$")
@@ -55,10 +68,10 @@ class IncomingSerializer(serializers.Serializer):
     reason = serializers.ChoiceField(choices=["pedido humano", "urgência ou risco", "fora de escopo", "decisão profissional", "falha de integração"], required=False, default="pedido humano")
 
     def validate(self, attrs):
-        if attrs["marker"] == "Q" and not attrs.get("question_id"):
-            raise serializers.ValidationError("question_id é obrigatório quando marker=Q.")
-        if attrs["marker"] == "ATUALIZAR" and not (attrs.get("fields") or {}).get("proxima"):
-            raise serializers.ValidationError("fields.proxima é obrigatório quando marker=ATUALIZAR.")
+        if attrs["marker"] == "CLASSIFICADO":
+            fields = attrs.get("fields") or {}
+            if not fields.get("temperatura") or not fields.get("prioridade"):
+                raise serializers.ValidationError("fields.temperatura e fields.prioridade são obrigatórios quando marker=CLASSIFICADO.")
         return attrs
 
 class DeliverySerializer(serializers.Serializer):

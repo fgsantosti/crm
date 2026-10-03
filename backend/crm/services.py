@@ -1,3 +1,4 @@
+import re
 from django.db import transaction
 from django.utils import timezone
 from .models import Lead, Question, Event, Company
@@ -28,6 +29,8 @@ def apply_fields(lead, fields):
         if key in fields and fields[key]:
             setattr(lead, model_field, fields[key])
 
+PLACEHOLDER_RE = re.compile(r"\{(" + "|".join(re.escape(p) for p in ["empresa", *FIELD_MAP.keys()]) + r")\}")
+
 def render_text(text, lead, company):
     """Substitui placeholders no texto aprovado pelos dados já coletados do lead e pela empresa.
 
@@ -37,11 +40,22 @@ def render_text(text, lead, company):
     {nome}, {especialidade}, {tema}... vêm dos dados já coletados do lead (usado
     sobretudo no texto aprovado de 'validar', que mostra um resumo para confirmação).
     Placeholder sem valor ainda vira string vazia, nunca quebra ou expõe '{campo}' literal.
+
+    Todos os valores de substituição são resolvidos ANTES de rodar o regex, e a
+    troca é feita em uma única passada sobre o texto original: um valor de campo
+    (texto livre vindo do lead via o agente de IA) nunca é reprocessado como se
+    fosse ele próprio um novo placeholder. Isso evita que um lead encadeie campos
+    (ex.: nome="{tema}", tema="{impacto}", impacto="<texto arbitrário>") para fazer
+    o backend reexpandir e enviar conteúdo que não é do roteiro aprovado da empresa.
     """
-    text = text.replace("{empresa}", company.name)
+    values = {"empresa": company.name}
     for placeholder, model_field in FIELD_MAP.items():
-        text = text.replace("{" + placeholder + "}", getattr(lead, model_field) or "")
-    return text
+        values[placeholder] = getattr(lead, model_field) or ""
+
+    def substitute(match):
+        return values[match.group(1)]
+
+    return PLACEHOLDER_RE.sub(substitute, text)
 
 @transaction.atomic
 def receive(company, data):
@@ -67,7 +81,11 @@ def receive(company, data):
         fields = data.get("fields") or {}
         if marker == "Q":
             question_id = data["question_id"]
-            lead.state = question_id
+            if not question_id:
+                escalate(lead, "Marcador Q sem question_id: revisar integração do agente")
+                question_id = None
+            else:
+                lead.state = question_id
         elif marker == "REPETIR":
             question_id = lead.state
             event.summary = "Entrada ambígua ou fora do roteiro; repetindo pergunta atual"
@@ -85,12 +103,16 @@ def receive(company, data):
             question_id = "validar"
             lead.state = "VALIDANDO"
         elif marker == "CLASSIFICADO":
-            apply_fields(lead, fields)
-            lead.bot_closed = True
-            lead.state = "ENCERRADO_CLASSIFICADO"
-            lead.funnel_stage = "Triagem concluída"
-            lead.next_action = "Revisar classificação e dar continuidade humana"
-            question_id = "encerramento"
+            if lead.state != "VALIDANDO":
+                escalate(lead, "CLASSIFICADO recebido sem VALIDAR anterior: revisar fluxo do agente")
+                question_id = None
+            else:
+                apply_fields(lead, fields)
+                lead.bot_closed = True
+                lead.state = "ENCERRADO_CLASSIFICADO"
+                lead.funnel_stage = "Triagem concluída"
+                lead.next_action = "Revisar classificação e dar continuidade humana"
+                question_id = "encerramento"
         else:
             escalate(lead, f"Marcador desconhecido: {marker}")
             question_id = None

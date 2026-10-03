@@ -8,4 +8,8 @@ COPY --chown=crm:crm . .
 RUN mkdir -p /app/staticfiles && chown crm:crm /app/staticfiles
 USER crm
 EXPOSE 8000
-CMD ["uvicorn", "config.asgi:application", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# Em produção, sobrescreva FORWARDED_ALLOW_IPS com o nome/IP do serviço "proxy" do
+# Docker Compose (ex.: o nome do serviço Caddy na rede interna), nunca com "*" —
+# confiar em X-Forwarded-* de qualquer origem permite spoofing de IP/proto do cliente.
+ENV FORWARDED_ALLOW_IPS=127.0.0.1
+CMD ["sh", "-c", "uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips \"$FORWARDED_ALLOW_IPS\""]

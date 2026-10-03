@@ -36,6 +36,25 @@ class QualificationTests(TestCase):
         self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Maria", "especialidade": "Trabalhista", "proxima": "nome"}))
         result = self.send("3", marker="VALIDAR", fields={"tema": "Rescisão"})
         self.assertEqual(result["content"], "Nome: Maria | Área: Trabalhista | Tema: Rescisão")
+    def test_placeholder_substitution_is_single_pass_not_reexpanded(self):
+        # Um lead não deve conseguir encadear campos de texto livre (nome="{tema}",
+        # tema="SEGREDO...") para fazer o backend reexpandir, numa passada seguinte
+        # do loop de substituição, o que já tinha sido substituído no lugar de
+        # {nome} — ou seja, {nome} nunca deve acabar mostrando o valor de "tema".
+        Question.objects.filter(company=self.company, question_id="validar").update(
+            text="Nome: {nome} | Tema: {tema}"
+        )
+        self.delivered(self.send())
+        self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "{tema}", "proxima": "nome"}))
+        self.delivered(self.send("3", marker="ATUALIZAR", fields={"tema": "SEGREDO_NAO_DEVERIA_APARECER", "proxima": "nome"}))
+        result = self.send("4", marker="VALIDAR", fields={})
+        # O valor cru armazenado em lead.name ({tema} literal) é o que deve aparecer
+        # no lugar de {nome} -- nunca o valor de demand (SEGREDO...) reexpandido ali.
+        nome_part, tema_part = result["content"].split(" | ")
+        self.assertEqual(nome_part, "Nome: {tema}")
+        self.assertNotIn("SEGREDO_NAO_DEVERIA_APARECER", nome_part)
+        self.assertEqual(tema_part, "Tema: SEGREDO_NAO_DEVERIA_APARECER")
+        self.assertEqual(result["content"], "Nome: {tema} | Tema: SEGREDO_NAO_DEVERIA_APARECER")
     def test_duplicate_does_not_send_or_create_twice(self):
         first = self.send()
         self.assertEqual(first["action"], "TEXTO")
@@ -45,14 +64,27 @@ class QualificationTests(TestCase):
     def test_classificado_closes_and_blocks_further_messages(self):
         self.delivered(self.send())
         self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Maria", "proxima": "nome"}))
-        result = self.send("3", marker="CLASSIFICADO", fields={"temperatura": "Quente", "prioridade": "Alta"})
+        self.delivered(self.send("3", marker="VALIDAR"))
+        result = self.send("4", marker="CLASSIFICADO", fields={"temperatura": "Quente", "prioridade": "Alta"})
         self.assertEqual(result["action"], "TEXTO")
         self.assertEqual(result["question_id"], "encerramento")
         lead = Lead.objects.get()
         self.assertTrue(lead.bot_closed)
         self.assertEqual(lead.temperature, "Quente")
         self.assertEqual(lead.priority, "Alta")
-        self.assertEqual(self.send("4")["action"], "NO_REPLY")
+        self.assertEqual(self.send("5")["action"], "NO_REPLY")
+    def test_classificado_without_validar_is_escalated_not_closed(self):
+        self.delivered(self.send())
+        self.send("2", marker="CLASSIFICADO", fields={"temperatura": "Quente", "prioridade": "Alta"})
+        lead = Lead.objects.get()
+        self.assertFalse(lead.bot_closed)
+        self.assertEqual(lead.mode, "HUMANO")
+    def test_q_without_question_id_is_escalated_and_returns_200_shaped_result(self):
+        result = self.send(question_id="")
+        self.assertNotEqual(result.get("action"), "ERROR")
+        self.assertIn("action", result)
+        lead = Lead.objects.get()
+        self.assertEqual(lead.mode, "HUMANO")
     def test_repetir_resends_current_question(self):
         self.delivered(self.send())
         result = self.send("2", marker="REPETIR")
@@ -104,3 +136,20 @@ class QualificationTests(TestCase):
         self.assertEqual(len(response.json()["results"]), 1)
         self.assertEqual(self.client.get(f"/api/company-info/?company={self.other.pk}").status_code, 404)
         self.assertEqual(self.client.post(f"/api/company-info/?company={self.company.pk}", {"title": "Endereço", "content": "Rua X, 123"}, format="json").status_code, 403)
+    def test_agent_service_account_is_restricted_to_incoming_and_delivery(self):
+        from django.contrib.auth.models import Group
+        agent_group, _ = Group.objects.get_or_create(name="agente")
+        agent_user = get_user_model().objects.create_user(username="agente.empresa-a")
+        agent_user.groups.add(agent_group)
+        self.company.members.add(agent_user)
+        agent_client = APIClient()
+        agent_client.force_authenticate(agent_user)
+        self.assertEqual(agent_client.get(f"/api/leads/?company={self.company.pk}").status_code, 403)
+        self.assertEqual(agent_client.post(f"/api/questions/?company={self.company.pk}", {}).status_code, 403)
+        incoming_response = agent_client.post(
+            f"/api/companies/{self.company.pk}/incoming/",
+            {"contact": "+5585999999998", "message_id": "agent-1", "kind": "text", "marker": "Q", "question_id": "apresentacao", "fields": {}, "human_required": False, "reason": "pedido humano"},
+            format="json",
+        )
+        self.assertEqual(incoming_response.status_code, 200)
+        self.assertEqual(incoming_response.json()["action"], "TEXTO")

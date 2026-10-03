@@ -12,7 +12,7 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "NAME": os.getenv("POSTGRES_DB", "crm"), "USER": os.getenv("POSTGRES_USER", "crm"), "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""), "HOST": os.getenv("POSTGRES_HOST", "localhost"), "PORT": os.getenv("POSTGRES_PORT", "5432")}}
 if os.getenv("TEST_SQLITE") == "1":
     DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "test.sqlite3"}}
-REST_FRAMEWORK = {"DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.TokenAuthentication", "rest_framework.authentication.SessionAuthentication"], "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"], "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination", "PAGE_SIZE": 100}
+REST_FRAMEWORK = {"DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.TokenAuthentication", "rest_framework.authentication.SessionAuthentication"], "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"], "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination", "PAGE_SIZE": 100, "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"], "DEFAULT_THROTTLE_RATES": {"agent-incoming": "60/minute"}}
 CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 LANGUAGE_CODE = "pt-br"
 TIME_ZONE = "America/Fortaleza"
@@ -24,6 +24,15 @@ AUTH_PASSWORD_VALIDATORS = [{"NAME": "django.contrib.auth.password_validation.Us
 ASGI_APPLICATION = "config.asgi.application"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "http://localhost:8080").split(",")
+
+# Em produção, setar DJANGO_HTTPS=true no ambiente do backend (quando o Caddy já estiver
+# emitindo TLS para um domínio real) para forçar redirecionamento HTTPS e cookies seguros.
+DJANGO_HTTPS = os.getenv("DJANGO_HTTPS") == "true"
+SECURE_SSL_REDIRECT = DJANGO_HTTPS
+SESSION_COOKIE_SECURE = DJANGO_HTTPS
+CSRF_COOKIE_SECURE = DJANGO_HTTPS
+SECURE_HSTS_SECONDS = 31536000 if DJANGO_HTTPS else 0
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https") if DJANGO_HTTPS else None
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
 CELERY_ACCEPT_CONTENT = ["json"]
