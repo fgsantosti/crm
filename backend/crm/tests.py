@@ -22,6 +22,14 @@ class QualificationTests(TestCase):
         return receive(self.company, data)
     def delivered(self, result):
         Event.objects.filter(pk=result["event_id"]).update(delivery="SENT")
+    def test_validar_renders_placeholders_from_collected_fields(self):
+        Question.objects.filter(company=self.company, question_id="validar").update(
+            text="Nome: {nome} | Área: {especialidade} | Tema: {tema}"
+        )
+        self.delivered(self.send())
+        self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Maria", "especialidade": "Trabalhista", "proxima": "nome"}))
+        result = self.send("3", marker="VALIDAR", fields={"tema": "Rescisão"})
+        self.assertEqual(result["content"], "Nome: Maria | Área: Trabalhista | Tema: Rescisão")
     def test_duplicate_does_not_send_or_create_twice(self):
         first = self.send()
         self.assertEqual(first["action"], "TEXTO")

@@ -28,6 +28,16 @@ def apply_fields(lead, fields):
         if key in fields and fields[key]:
             setattr(lead, model_field, fields[key])
 
+def render_text(text, lead):
+    """Substitui placeholders {nome}, {especialidade}, {tema}... pelos dados já coletados do lead.
+
+    Usado no texto aprovado de 'validar', que mostra um resumo para o lead confirmar.
+    Placeholder sem valor ainda vira string vazia, nunca quebra ou expõe '{campo}' literal.
+    """
+    for placeholder, model_field in FIELD_MAP.items():
+        text = text.replace("{" + placeholder + "}", getattr(lead, model_field) or "")
+    return text
+
 @transaction.atomic
 def receive(company, data):
     # Serialize per company: protege a criação do primeiro contato e mensagens concorrentes.
@@ -86,7 +96,7 @@ def receive(company, data):
                 escalate(lead, f"Configurar roteiro aprovado para question_id={question_id}")
             else:
                 use_audio = data["kind"] == "audio" and question.audio_asset
-                asset = question.audio_asset if use_audio else question.text
+                asset = question.audio_asset if use_audio else render_text(question.text, lead)
                 if not asset:
                     escalate(lead, "Ativo aprovado ausente")
                 else:
