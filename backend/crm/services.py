@@ -28,12 +28,17 @@ def apply_fields(lead, fields):
         if key in fields and fields[key]:
             setattr(lead, model_field, fields[key])
 
-def render_text(text, lead):
-    """Substitui placeholders {nome}, {especialidade}, {tema}... pelos dados já coletados do lead.
+def render_text(text, lead, company):
+    """Substitui placeholders no texto aprovado pelos dados já coletados do lead e pela empresa.
 
-    Usado no texto aprovado de 'validar', que mostra um resumo para o lead confirmar.
+    {empresa} vem de Company.name: o roteiro nunca precisa citar o nome da empresa
+    na mão, e continua correto automaticamente se a empresa for renomeada ou se o
+    mesmo texto for reaproveitado como modelo para uma empresa nova.
+    {nome}, {especialidade}, {tema}... vêm dos dados já coletados do lead (usado
+    sobretudo no texto aprovado de 'validar', que mostra um resumo para confirmação).
     Placeholder sem valor ainda vira string vazia, nunca quebra ou expõe '{campo}' literal.
     """
+    text = text.replace("{empresa}", company.name)
     for placeholder, model_field in FIELD_MAP.items():
         text = text.replace("{" + placeholder + "}", getattr(lead, model_field) or "")
     return text
@@ -96,7 +101,7 @@ def receive(company, data):
                 escalate(lead, f"Configurar roteiro aprovado para question_id={question_id}")
             else:
                 use_audio = data["kind"] == "audio" and question.audio_asset
-                asset = question.audio_asset if use_audio else render_text(question.text, lead)
+                asset = question.audio_asset if use_audio else render_text(question.text, lead, company)
                 if not asset:
                     escalate(lead, "Ativo aprovado ausente")
                 else:

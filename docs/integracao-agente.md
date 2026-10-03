@@ -130,6 +130,20 @@ Campos aceitos dentro de `fields` (nomes exatamente como o Axioma emite):
 | `prioridade` | Prioridade de atendimento | `Alta` \| `Média` \| `Baixa` |
 | `proxima` | **não é campo do lead** — só em `ATUALIZAR`, diz qual é o próximo `question_id` | um dos 8 códigos de pergunta (nunca `validar` nem `encerramento`) |
 
+### Placeholders no texto aprovado
+
+O texto de qualquer `Question` pode usar placeholders entre chaves, que o CRM
+substitui antes de devolver `content`. Nunca precisa pedir isso ao Axioma —
+é resolvido automaticamente pelo backend:
+
+| Placeholder | Resolvido a partir de |
+| --- | --- |
+| `{empresa}` | `Company.name` — sempre o nome real da empresa daquele `question_id`. Use isso em vez de escrever o nome da empresa direto no texto: se a empresa for renomeada, ou se o mesmo texto for reaproveitado como modelo para uma empresa nova, continua certo sem precisar editar nada. |
+| `{nome}`, `{especialidade}`, `{tema}`, `{impacto}`, `{interesse}`, `{temperatura}`, `{prioridade}` | O mesmo campo já coletado do lead (ver tabela acima). Usado sobretudo no texto de `validar`, para mostrar o resumo que o lead confirma. |
+
+Um placeholder sem valor ainda (ex.: `{tema}` antes de o lead informar o tema)
+vira string vazia — nunca aparece `{tema}` literal na mensagem.
+
 Envie só os campos que a resposta atual esclareceu — o CRM mantém os que já
 tinha. Isso já é como o `AGENTS.md` do Axioma descreve o preenchimento.
 

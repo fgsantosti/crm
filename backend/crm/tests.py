@@ -22,6 +22,12 @@ class QualificationTests(TestCase):
         return receive(self.company, data)
     def delivered(self, result):
         Event.objects.filter(pk=result["event_id"]).update(delivery="SENT")
+    def test_empresa_placeholder_renders_company_name(self):
+        Question.objects.filter(company=self.company, question_id="apresentacao").update(
+            text="Olá! Você está falando com a {empresa}."
+        )
+        result = self.send()
+        self.assertEqual(result["content"], "Olá! Você está falando com a Empresa A.")
     def test_validar_renders_placeholders_from_collected_fields(self):
         Question.objects.filter(company=self.company, question_id="validar").update(
             text="Nome: {nome} | Área: {especialidade} | Tema: {tema}"
