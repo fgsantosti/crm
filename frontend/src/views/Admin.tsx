@@ -1,6 +1,4 @@
 import { Logo } from '../components/Logo';
-import { RolePreview } from '../components/RolePreview';
-import type { Role } from '../types';
 
 /**
  * Tela interna da Axioma: cadastro de empresas e chave de API do agente.
@@ -8,7 +6,7 @@ import type { Role } from '../types';
  * de CRUD de empresas na API (hoje isso é feito pelo Django Admin, conforme
  * o README). Os dados abaixo são estáticos, só para validar o layout.
  */
-export function Admin({ role, onRoleChange, onLogout }: { role: Role; onRoleChange: (r: Role) => void; onLogout: () => void }) {
+export function Admin({ onLogout }: { onLogout: () => void }) {
   return (
     <div className="admin-shell">
       <header className="admin-top">
@@ -19,7 +17,6 @@ export function Admin({ role, onRoleChange, onLogout }: { role: Role; onRoleChan
           <span className="admin-badge">Admin interno</span>
         </div>
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 18 }}>
-          <RolePreview role={role} onChange={onRoleChange} />
           <span style={{ fontSize: 13.5, color: '#D9C7B4' }}>Axioma Operações</span>
           <button className="logout" onClick={onLogout}>
             Sair

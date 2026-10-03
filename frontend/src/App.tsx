@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiFactory } from './api';
-import type { Company, Lead, Paginated, Role } from './types';
+import type { Company, Lead, Me, Paginated, Role } from './types';
 import { Sidebar, type View } from './components/Sidebar';
-import { RolePreview } from './components/RolePreview';
 import { Login } from './views/Login';
 import { Dashboard } from './views/Dashboard';
 import { Leads } from './views/Leads';
@@ -14,7 +13,7 @@ import { Admin } from './views/Admin';
 
 export function App() {
   const [token, setToken] = useState('');
-  const [role, setRole] = useState<Role>('atendente');
+  const [me, setMe] = useState<Me | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
   const [view, setView] = useState<View>('dashboard');
@@ -26,6 +25,28 @@ export function App() {
 
   const api = useMemo(() => apiFactory(token), [token]);
   const company = companies.find((c) => String(c.id) === companyId) || null;
+  const role: Role = me?.is_superuser ? 'admin' : me?.is_staff ? 'empresa' : 'atendente';
+
+  useEffect(() => {
+    if (!token) {
+      setMe(null);
+      return;
+    }
+    let active = true;
+    api('/me/')
+      .then((d: Me) => {
+        if (active) setMe(d);
+      })
+      .catch((e) => {
+        if (active) {
+          setError(e.message);
+          setToken('');
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -68,6 +89,7 @@ export function App() {
 
   function logout() {
     setToken('');
+    setMe(null);
     setCompanies([]);
     setCompanyId('');
     setView('dashboard');
@@ -75,7 +97,8 @@ export function App() {
   }
 
   if (!token) return <Login onLogin={setToken} />;
-  if (role === 'admin') return <Admin role={role} onRoleChange={setRole} onLogout={logout} />;
+  if (!me) return <div className="shell" />;
+  if (role === 'admin') return <Admin onLogout={logout} />;
 
   if (!company) {
     return (
@@ -119,7 +142,6 @@ export function App() {
         humanCount={humanCount}
       />
       <main className="main">
-        <RolePreview role={role} onChange={setRole} />
         {error && (
           <p role="alert" className="error">
             {error}

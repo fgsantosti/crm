@@ -1,12 +1,23 @@
 from django.db.models import Case, When, Value, IntegerField
 from rest_framework import viewsets, permissions, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from django.shortcuts import get_object_or_404
 from .models import Company, Lead, Question, CompanyInfo, Event
 from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer
 from .services import receive, escalate
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def me(request):
+    user = request.user
+    return Response({
+        "username": user.username,
+        "is_staff": user.is_staff,
+        "is_superuser": user.is_superuser,
+        "is_agent": user.groups.filter(name="agente").exists(),
+    })
 
 class NotAgentAccount(permissions.BasePermission):
     """Nega acesso a contas de serviço do agente de IA (membros do grupo "agente").

@@ -153,6 +153,20 @@ class QualificationTests(TestCase):
         )
         self.assertEqual(incoming_response.status_code, 200)
         self.assertEqual(incoming_response.json()["action"], "TEXTO")
+    def test_me_reflects_real_staff_flag(self):
+        response = self.client.get("/api/me/")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["username"], "operador")
+        self.assertFalse(body["is_staff"])
+        self.assertFalse(body["is_superuser"])
+        self.assertFalse(body["is_agent"])
+        self.user.is_staff = True
+        self.user.save()
+        self.assertTrue(self.client.get("/api/me/").json()["is_staff"])
+    def test_me_requires_authentication(self):
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get("/api/me/").status_code, 401)
     def test_agent_service_account_can_read_but_not_write_company_info(self):
         from django.contrib.auth.models import Group
         from .models import CompanyInfo

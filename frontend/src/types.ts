@@ -60,3 +60,10 @@ export type CompanyInfoEntry = {
 export type Paginated<T> = { count: number; next: string | null; previous: string | null; results: T[] };
 
 export type Role = 'atendente' | 'empresa' | 'admin';
+
+export type Me = {
+  username: string;
+  is_staff: boolean;
+  is_superuser: boolean;
+  is_agent: boolean;
+};
