@@ -39,8 +39,15 @@ Authorization: Token <TOKEN_DO_AGENTE>
 **Importante:** este token é do ambiente local (`http://localhost:8080`), só
 para validar o contrato. Quando o backend for implantado num domínio real,
 gere um token novo nesse ambiente (mesmo procedimento, outro host) e nunca
-reaproveite o de dev. O token não expira e não deve ser salvo em código ou
-planilha — só em variável de ambiente/cofre do lado do plugin.
+reaproveite o de dev. O token não deve ser salvo em código ou planilha — só em
+variável de ambiente/cofre do lado do plugin.
+
+**Validade:** por padrão o token não expira (igual sempre foi). Opcionalmente,
+na tela `Tokens` do Django Admin dá pra definir uma validade por tempo — a
+empresa recebe um campo "Validade" no token (inline `AgentTokenExpiry`),
+padrão sugerido de 6 meses, teto de 2 anos a partir de hoje. Passado esse
+prazo, o token para de autenticar (`401 Token expirado.`) e precisa ser
+renovado manualmente no Admin — não há renovação automática.
 
 Para gerar um token de verdade mais pra frente (quando a empresa real for
 cadastrada em produção), o fluxo é:
@@ -56,6 +63,12 @@ user = User.objects.create_user(username="agente.<slug-da-empresa>")
 company.members.add(user)
 token = Token.objects.create(user=user)
 print(token.key)
+
+# Opcional: validade por tempo (sem isso, o token nunca expira)
+from datetime import timedelta
+from django.utils import timezone
+from crm.models import AgentTokenExpiry
+AgentTokenExpiry.objects.create(token=token, expires_at=timezone.now() + timedelta(days=183))  # 6 meses
 ```
 
 Alternativa sem shell: criar o usuário pelo Django Admin (`/admin/`), vincular

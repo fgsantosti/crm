@@ -1,9 +1,12 @@
+from datetime import timedelta
+from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
+from django.utils import timezone
 from rest_framework.authtoken.models import TokenProxy
 from rest_framework.authtoken.admin import TokenAdmin
-from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, PasswordChangeRequired, Profile, EmailChangeRequest
+from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, PasswordChangeRequired, Profile, EmailChangeRequest, AgentTokenExpiry, default_token_expiry
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
@@ -89,14 +92,46 @@ class GroupListFilterUserAdmin(UserAdmin):
 admin.site.unregister(User)
 admin.site.register(User, GroupListFilterUserAdmin)
 
+MAX_TOKEN_VALIDITY = timedelta(days=730)  # 2 anos
+
+class AgentTokenExpiryForm(forms.ModelForm):
+    class Meta:
+        model = AgentTokenExpiry
+        fields = ["expires_at"]
+    def clean_expires_at(self):
+        expires_at = self.cleaned_data["expires_at"]
+        if expires_at <= timezone.now():
+            raise forms.ValidationError("A validade precisa ser uma data futura.")
+        if expires_at > timezone.now() + MAX_TOKEN_VALIDITY:
+            raise forms.ValidationError("A validade não pode passar de 2 anos a partir de hoje.")
+        return expires_at
+
+class AgentTokenExpiryInline(admin.StackedInline):
+    """Validade por tempo do token: padrão 6 meses, até 2 anos (ver AgentTokenExpiryForm).
+    Deixar sem preencher = token sem validade (comportamento antigo, permanente)."""
+    model = AgentTokenExpiry
+    form = AgentTokenExpiryForm
+    extra = 0
+    max_num = 1
+    can_delete = True
+
 class MaskedKeyTokenAdmin(TokenAdmin):
-    list_display = ["masked_key", "user", "user_groups", "created"]
+    list_display = ["masked_key", "user", "user_groups", "created", "validade"]
+    inlines = [AgentTokenExpiryInline]
     @admin.display(description="Key")
     def masked_key(self, obj):
         return f"{obj.key[:8]}…{obj.key[-4:]}"
     @admin.display(description="Grupos")
     def user_groups(self, obj):
         return ", ".join(g.name for g in obj.user.groups.all()) or "—"
+    @admin.display(description="Validade")
+    def validade(self, obj):
+        expiry = getattr(obj, "expiry", None)
+        if not expiry:
+            return "Sem validade"
+        if expiry.expires_at < timezone.now():
+            return f"Expirado em {expiry.expires_at:%d/%m/%Y}"
+        return f"Expira em {expiry.expires_at:%d/%m/%Y}"
 
 admin.site.unregister(TokenProxy)
 admin.site.register(TokenProxy, MaskedKeyTokenAdmin)

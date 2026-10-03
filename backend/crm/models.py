@@ -1,6 +1,8 @@
 import uuid
+from datetime import timedelta
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 class Company(models.Model):
     name = models.CharField(max_length=160)
@@ -149,3 +151,17 @@ class Event(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=["lead", "message_id"], name="unique_lead_message")]
         ordering = ["created_at"]
+
+def default_token_expiry():
+    return timezone.now() + timedelta(days=183)  # ~6 meses
+
+class AgentTokenExpiry(models.Model):
+    """Validade por tempo para um token de serviço (DRF Token) do agente Axioma.
+
+    Opcional: um Token sem linha aqui nunca expira (comportamento padrão do
+    DRF, preservado para não quebrar tokens já em produção antes desta
+    feature). Criado pelo inline em Tokens no Django Admin; o padrão de 6
+    meses e o teto de 2 anos são aplicados lá (AgentTokenExpiryForm).
+    """
+    token = models.OneToOneField("authtoken.Token", on_delete=models.CASCADE, related_name="expiry")
+    expires_at = models.DateTimeField(default=default_token_expiry)

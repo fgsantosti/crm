@@ -1,8 +1,10 @@
+from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.test import Client, TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
-from .models import Company, Question, Lead, Event, Area, AtendenteInvite, PasswordChangeRequired
+from .models import Company, Question, Lead, Event, Area, AtendenteInvite, PasswordChangeRequired, AgentTokenExpiry
 from .services import receive
 
 class QualificationTests(TestCase):
@@ -360,6 +362,47 @@ class QualificationTests(TestCase):
         self.assertEqual(logout_resp.cookies["refresh_token"].value, "")
         blocked = anon_client.post("/api/login/refresh/")
         self.assertEqual(blocked.status_code, 401)
+    def test_agent_token_without_expiry_row_never_expires(self):
+        from rest_framework.authtoken.models import Token
+        agent_user = get_user_model().objects.create_user(username="agente.sem-validade")
+        self.company.members.add(agent_user)
+        token = Token.objects.create(user=agent_user)
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        response = client.post(
+            f"/api/companies/{self.company.pk}/incoming/",
+            {"contact": "+5585999110022", "message_id": "m1", "kind": "text", "marker": "Q", "question_id": "apresentacao", "fields": {}, "human_required": False, "reason": "pedido humano"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+    def test_agent_token_with_future_expiry_works(self):
+        from rest_framework.authtoken.models import Token
+        agent_user = get_user_model().objects.create_user(username="agente.valido")
+        self.company.members.add(agent_user)
+        token = Token.objects.create(user=agent_user)
+        AgentTokenExpiry.objects.create(token=token, expires_at=timezone.now() + timedelta(days=30))
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        response = client.post(
+            f"/api/companies/{self.company.pk}/incoming/",
+            {"contact": "+5585999110023", "message_id": "m1", "kind": "text", "marker": "Q", "question_id": "apresentacao", "fields": {}, "human_required": False, "reason": "pedido humano"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+    def test_agent_token_past_expiry_is_rejected(self):
+        from rest_framework.authtoken.models import Token
+        agent_user = get_user_model().objects.create_user(username="agente.expirado")
+        self.company.members.add(agent_user)
+        token = Token.objects.create(user=agent_user)
+        AgentTokenExpiry.objects.create(token=token, expires_at=timezone.now() - timedelta(days=1))
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        response = client.post(
+            f"/api/companies/{self.company.pk}/incoming/",
+            {"contact": "+5585999110024", "message_id": "m1", "kind": "text", "marker": "Q", "question_id": "apresentacao", "fields": {}, "human_required": False, "reason": "pedido humano"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 401)
     def test_agent_service_account_is_restricted_to_incoming_and_delivery(self):
         from django.contrib.auth.models import Group
         agent_group, _ = Group.objects.get_or_create(name="agente")

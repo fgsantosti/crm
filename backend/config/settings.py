@@ -16,9 +16,11 @@ if os.getenv("TEST_SQLITE") == "1":
 # - JWTAuthentication: usuários humanos no frontend (access token de vida curta
 #   + refresh token, ver SIMPLE_JWT abaixo). Nunca usa cookie/sessão, então não
 #   tem o mesmo risco de CSRF que SessionAuthentication tinha (ver histórico).
-# - TokenAuthentication: mantido só pela conta de serviço do agente Axioma, que
-#   usa um token fixo pré-provisionado (nunca passa por /api/login/).
-REST_FRAMEWORK = {"DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework_simplejwt.authentication.JWTAuthentication", "rest_framework.authentication.TokenAuthentication"], "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"], "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination", "PAGE_SIZE": 100, "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"], "DEFAULT_THROTTLE_RATES": {"agent-incoming": "60/minute"}}
+# - ExpiringTokenAuthentication: mantido só pela conta de serviço do agente
+#   Axioma, que usa um token fixo pré-provisionado (nunca passa por
+#   /api/login/). Igual ao TokenAuthentication padrão, mas respeita validade
+#   opcional por tempo (AgentTokenExpiry, crm/models.py) quando configurada.
+REST_FRAMEWORK = {"DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework_simplejwt.authentication.JWTAuthentication", "crm.authentication.ExpiringTokenAuthentication"], "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"], "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination", "PAGE_SIZE": 100, "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"], "DEFAULT_THROTTLE_RATES": {"agent-incoming": "60/minute"}}
 
 from datetime import timedelta
 SIMPLE_JWT = {
