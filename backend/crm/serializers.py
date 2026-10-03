@@ -1,38 +1,59 @@
 from rest_framework import serializers
-from .models import Company, Lead, Step, Event
+from .models import Company, Lead, Question, Event
+
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = Company
-        fields = ["id", "name", "initial_state", "output_channel", "allow_transcription", "default_owner"]
+        fields = ["id", "name", "initial_state", "allow_transcription", "default_owner"]
+
 class LeadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Lead
         fields = "__all__"
-        read_only_fields = ["id", "company", "contact", "created_at", "state", "output_channel", "last_audio_id", "bot_closed", "last_contact"]
+        read_only_fields = ["id", "company", "contact", "created_at", "state", "last_audio_id", "bot_closed", "last_contact"]
+
     def validate(self, attrs):
         if attrs.get("mode") == "AUTOMÁTICO" and self.instance and self.instance.mode == "HUMANO":
             raise serializers.ValidationError("Retomada exige comando administrativo autorizado; indisponível nesta versão.")
         return attrs
-class StepSerializer(serializers.ModelSerializer):
+
+class QuestionSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Step
+        model = Question
         fields = "__all__"
         read_only_fields = ["company"]
-    def validate_accepted_answers(self, value):
-        if not isinstance(value, list) or any(not isinstance(v, str) or not v.strip() for v in value):
-            raise serializers.ValidationError("Informe uma lista de respostas textuais aprovadas.")
-        return value
+
 class EventSerializer(serializers.ModelSerializer):
     class Meta:
         model = Event
         fields = ["id", "message_id", "created_at", "summary", "delivery"]
+
+class AgentFieldsSerializer(serializers.Serializer):
+    nome = serializers.CharField(max_length=160, required=False, allow_blank=True)
+    especialidade = serializers.ChoiceField(choices=[c[0] for c in Lead.ESPECIALIDADE_CHOICES], required=False, allow_blank=True)
+    tema = serializers.CharField(max_length=300, required=False, allow_blank=True)
+    impacto = serializers.CharField(max_length=300, required=False, allow_blank=True)
+    interesse = serializers.ChoiceField(choices=[c[0] for c in Lead.INTERESSE_CHOICES], required=False, allow_blank=True)
+    temperatura = serializers.ChoiceField(choices=[c[0] for c in Lead.TEMPERATURA_CHOICES], required=False, allow_blank=True)
+    prioridade = serializers.ChoiceField(choices=["Alta", "Média", "Baixa"], required=False, allow_blank=True)
+    proxima = serializers.CharField(max_length=80, required=False, allow_blank=True)
+
 class IncomingSerializer(serializers.Serializer):
     contact = serializers.RegexField(r"^\+[1-9]\d{7,14}$")
     message_id = serializers.CharField(max_length=160)
-    answer = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
     kind = serializers.ChoiceField(choices=["text", "audio"], default="text")
+    marker = serializers.ChoiceField(choices=["Q", "REPETIR", "ATUALIZAR", "VALIDAR", "CLASSIFICADO"])
+    question_id = serializers.CharField(max_length=80, required=False, allow_blank=True, default="")
+    fields = AgentFieldsSerializer(required=False, default=dict)
     human_required = serializers.BooleanField(default=False)
     reason = serializers.ChoiceField(choices=["pedido humano", "urgência ou risco", "fora de escopo", "decisão profissional", "falha de integração"], required=False, default="pedido humano")
+
+    def validate(self, attrs):
+        if attrs["marker"] == "Q" and not attrs.get("question_id"):
+            raise serializers.ValidationError("question_id é obrigatório quando marker=Q.")
+        if attrs["marker"] == "ATUALIZAR" and not (attrs.get("fields") or {}).get("proxima"):
+            raise serializers.ValidationError("fields.proxima é obrigatório quando marker=ATUALIZAR.")
+        return attrs
 
 class DeliverySerializer(serializers.Serializer):
     event_id = serializers.IntegerField(min_value=1)

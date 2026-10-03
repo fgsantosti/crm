@@ -1,8 +1,21 @@
 from django.db import transaction
 from django.utils import timezone
-from .models import Lead, Step, Event, Company
+from .models import Lead, Question, Event, Company
 
 NO_REPLY = {"action": "NO_REPLY"}
+
+# Mapa dos campos que o agente Axioma envia em ATUALIZAR/VALIDAR/CLASSIFICADO
+# para os campos reais do Lead. 'proxima' nunca é um campo do Lead: é o
+# question_id da próxima pergunta, tratado separadamente.
+FIELD_MAP = {
+    "nome": "name",
+    "especialidade": "especialidade",
+    "tema": "demand",
+    "impacto": "impacto",
+    "interesse": "interesse",
+    "temperatura": "temperature",
+    "prioridade": "priority",
+}
 
 def escalate(lead, reason):
     lead.mode = "HUMANO"
@@ -10,49 +23,79 @@ def escalate(lead, reason):
     lead.next_action = reason
     lead.save()
 
+def apply_fields(lead, fields):
+    for key, model_field in FIELD_MAP.items():
+        if key in fields and fields[key]:
+            setattr(lead, model_field, fields[key])
+
 @transaction.atomic
 def receive(company, data):
-    # Serialize per company: protects first-contact creation and concurrent messages.
+    # Serialize per company: protege a criação do primeiro contato e mensagens concorrentes.
     company = Company.objects.select_for_update().get(pk=company.pk)
-    lead, created = Lead.objects.get_or_create(company=company, contact=data["contact"], defaults={"state": company.initial_state, "output_channel": company.output_channel, "owner": company.default_owner})
+    lead, created = Lead.objects.get_or_create(company=company, contact=data["contact"], defaults={"state": company.initial_state, "owner": company.default_owner})
     previous = Event.objects.filter(lead=lead, message_id=data["message_id"]).first()
     if previous:
         return {**NO_REPLY, "duplicate": True, "lead_id": str(lead.pk)}
     lead.last_contact = timezone.now()
     lead.save()
-    event = Event.objects.create(lead=lead, message_id=data["message_id"], summary="Entrada recebida: " + data["kind"])
+    event = Event.objects.create(lead=lead, message_id=data["message_id"], summary=f"Marcador recebido: {data['marker']}")
     result = dict(NO_REPLY)
+
     if lead.mode == "HUMANO" or lead.bot_closed or lead.state == "ENCERRADO_CLASSIFICADO":
         pass
-    elif data["human_required"] or any(term in data["answer"].casefold() for term in ["atendente", "atendimento humano", "urgente", "urgência", "ameaça", "reclamação", "contrato", "agendar", "preço", "prazo"]):
+    elif data["human_required"]:
         escalate(lead, data["reason"])
-    elif data["kind"] == "audio":
-        event.summary = "Áudio registrado sem processamento; transcrição não implementada"
     elif Event.objects.filter(lead=lead, delivery="PENDING").exclude(pk=event.pk).exists():
         escalate(lead, "Entrega anterior pendente: verificar integração")
     else:
-        step = Step.objects.filter(company=company, state=lead.state).first()
-        if not step:
-            escalate(lead, "Configurar roteiro aprovado para o estado atual")
-        elif not created and data["answer"].strip().casefold() not in [a.strip().casefold() for a in step.accepted_answers]:
-            event.summary = "Entrada ambígua ou fora do roteiro"
-        elif step.terminal:
+        marker = data["marker"]
+        fields = data.get("fields") or {}
+        if marker == "Q":
+            question_id = data["question_id"]
+            lead.state = question_id
+        elif marker == "REPETIR":
+            question_id = lead.state
+            event.summary = "Entrada ambígua ou fora do roteiro; repetindo pergunta atual"
+        elif marker == "ATUALIZAR":
+            apply_fields(lead, fields)
+            question_id = fields.get("proxima", "")
+            if not question_id:
+                escalate(lead, "ATUALIZAR sem 'proxima': configurar roteiro aprovado")
+                question_id = None
+            else:
+                lead.state = question_id
+                lead.funnel_stage = "Triagem"
+        elif marker == "VALIDAR":
+            apply_fields(lead, fields)
+            question_id = "validar"
+            lead.state = "VALIDANDO"
+        elif marker == "CLASSIFICADO":
+            apply_fields(lead, fields)
             lead.bot_closed = True
             lead.state = "ENCERRADO_CLASSIFICADO"
             lead.funnel_stage = "Triagem concluída"
             lead.next_action = "Revisar classificação e dar continuidade humana"
-            lead.save()
+            question_id = "encerramento"
         else:
-            asset = step.text if lead.output_channel == "TEXTO" else step.audio_asset
-            if not asset:
-                escalate(lead, "Ativo aprovado ausente")
+            escalate(lead, f"Marcador desconhecido: {marker}")
+            question_id = None
+
+        if question_id:
+            question = Question.objects.filter(company=company, question_id=question_id).first()
+            if not question:
+                escalate(lead, f"Configurar roteiro aprovado para question_id={question_id}")
             else:
-                lead.state = step.next_state
-                lead.funnel_stage = "Triagem"
-                if lead.output_channel == "AUDIO_GRAVADO": lead.last_audio_id = step.audio_asset
-                lead.save()
-                result = {"action": lead.output_channel, "content": asset, "question_id": step.question_id}
-                event.delivery = "PENDING"
+                use_audio = data["kind"] == "audio" and question.audio_asset
+                asset = question.audio_asset if use_audio else question.text
+                if not asset:
+                    escalate(lead, "Ativo aprovado ausente")
+                else:
+                    if use_audio:
+                        lead.last_audio_id = question.audio_asset
+                    result = {"action": "AUDIO_GRAVADO" if use_audio else "TEXTO", "content": asset, "question_id": question_id}
+                    event.delivery = "PENDING"
+        lead.save()
+
     result.update({"lead_id": str(lead.pk), "event_id": event.pk})
     event.result = result
     event.save()
