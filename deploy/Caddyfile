@@ -1,4 +1,4 @@
-http://localhost {
+:80 {
     handle /static/* {
         root * /srv
         file_server
