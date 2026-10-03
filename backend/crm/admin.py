@@ -100,3 +100,9 @@ class MaskedKeyTokenAdmin(TokenAdmin):
 
 admin.site.unregister(TokenProxy)
 admin.site.register(TokenProxy, MaskedKeyTokenAdmin)
+
+# Reskin com a identidade da Conecta CRM -- ver templates/admin/base_site.html
+# e crm/static/admin/conecta-admin.css (mesma paleta do frontend).
+admin.site.site_header = "Conecta CRM"
+admin.site.site_title = "Conecta CRM"
+admin.site.index_title = "Painel administrativo"

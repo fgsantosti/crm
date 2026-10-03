@@ -1,0 +1,67 @@
+/* Reskin do Django Admin com a identidade visual da Conecta CRM (mesma
+   paleta do frontend em frontend/src/style.css). Só redefine as CSS custom
+   properties que o tema padrão do Django já usa — nenhum CSS novo por baixo,
+   então continua funcionando em telas/componentes futuros do admin sem
+   precisar duplicar regras. */
+
+@import url('https://fonts.googleapis.com/css2?family=Neuton:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  --primary: #D9531A;
+  --secondary: #A83E12;
+  --accent: #FBE3D0;
+  --primary-fg: #fff;
+
+  --body-fg: #241A12;
+  --body-bg: #FBF7F2;
+  --body-quiet-color: #6E5F4F;
+  --body-medium-color: #4A3321;
+  --body-loud-color: #241A12;
+
+  --header-color: #FBE3D0;
+  --header-branding-color: #FBE3D0;
+  --header-bg: #241A12;
+  --header-link-color: #fff;
+
+  --breadcrumbs-fg: #D9C7B4;
+  --breadcrumbs-link-fg: #fff;
+  --breadcrumbs-bg: #3A2A1B;
+
+  --link-fg: #A83E12;
+  --link-hover-color: #D9531A;
+  --link-selected-fg: #A83E12;
+
+  --hairline-color: #E7DECF;
+  --border-color: #E7DECF;
+
+  --error-fg: #B23A2E;
+
+  --message-success-bg: #DEF0E6;
+  --message-warning-bg: #FBEBD0;
+  --message-error-bg: #F8E1DD;
+
+  --darkened-bg: #F4EDE2;
+  --selected-bg: #FBE3D0;
+  --selected-row: #FBE3D0;
+
+  --button-fg: #fff;
+  --button-bg: #D9531A;
+  --button-hover-bg: #A83E12;
+  --default-button-bg: #D9531A;
+  --default-button-hover-bg: #A83E12;
+  --close-button-bg: #6E5F4F;
+  --close-button-hover-bg: #4A3321;
+  --delete-button-bg: #B23A2E;
+  --delete-button-hover-bg: #93251B;
+
+  --font-family-primary: 'DM Sans', system-ui, sans-serif;
+}
+
+#header, #branding h1, #branding h1 a:link, #branding h1 a:visited { font-family: 'Neuton', serif; font-weight: 700; }
+#branding h1 { font-size: 22px; }
+div.breadcrumbs { font-family: 'DM Sans', system-ui, sans-serif; }
+.module h2, .module caption, .inline-group h2 { font-family: 'DM Sans', system-ui, sans-serif; font-weight: 600; }
+a:link, a:visited { color: var(--link-fg); }
+.button, input[type=submit], input[type=button], .submit-row input, a.button { border-radius: 6px; }
+#changelist-filter { border-radius: 8px; }
+.object-tools a.addlink { border-radius: 6px; }
