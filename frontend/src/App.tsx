@@ -130,7 +130,7 @@ export function App() {
       />
     );
   if (screen === 'trocar-senha') return <TrocarSenhaPagina api={api} me={me} onDone={() => setScreen('app')} onCancel={() => setScreen('app')} />;
-  if (screen === 'admin-panel') return <Admin onLogout={logout} onBackToCrm={() => setScreen('app')} />;
+  if (screen === 'admin-panel') return <Admin api={api} onLogout={logout} onBackToCrm={() => setScreen('app')} />;
 
   if (!company) {
     return (

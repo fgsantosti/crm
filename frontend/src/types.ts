@@ -99,3 +99,20 @@ export type EquipeMembro = {
   is_superuser: boolean;
   date_joined: string;
 };
+
+export type AdminCompany = {
+  id: number;
+  name: string;
+  initial_state: string;
+  allow_transcription: boolean;
+  default_owner: string;
+  member_count: number;
+  tem_agente_ativo: boolean;
+};
+
+export type AgentStatus = {
+  existe: boolean;
+  username: string;
+  masked_key: string | null;
+  validade: { expires_at: string; expirado: boolean } | null;
+};
