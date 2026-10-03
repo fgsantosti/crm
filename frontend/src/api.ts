@@ -2,50 +2,37 @@ const base = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 export type Api = (path: string, init?: RequestInit) => Promise<any>;
 
-const ACCESS_KEY = 'conecta_access_token';
-const REFRESH_KEY = 'conecta_refresh_token';
-
-export function storeTokens(access: string, refresh: string) {
-  localStorage.setItem(ACCESS_KEY, access);
-  localStorage.setItem(REFRESH_KEY, refresh);
-}
-
-export function clearTokens() {
-  localStorage.removeItem(ACCESS_KEY);
-  localStorage.removeItem(REFRESH_KEY);
-}
-
-export function hasSession(): boolean {
-  return !!localStorage.getItem(REFRESH_KEY);
-}
+// O access token vive só em memória (nunca localStorage/sessionStorage): some
+// ao recarregar a página, e volta via refresh silencioso usando o cookie
+// httpOnly do refresh token, que o JavaScript nunca consegue ler (proteção
+// contra roubo de sessão via um eventual XSS no frontend).
+let accessToken = '';
 
 async function refreshAccessToken(): Promise<string | null> {
-  const refresh = localStorage.getItem(REFRESH_KEY);
-  if (!refresh) return null;
   try {
-    const response = await fetch(`${base}/login/refresh/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh }),
-    });
+    const response = await fetch(`${base}/login/refresh/`, { method: 'POST', credentials: 'include' });
     if (!response.ok) return null;
     const data = await response.json();
-    localStorage.setItem(ACCESS_KEY, data.access);
-    // ROTATE_REFRESH_TOKENS=True no backend: cada refresh devolve um refresh novo.
-    if (data.refresh) localStorage.setItem(REFRESH_KEY, data.refresh);
-    return data.access;
+    accessToken = data.access;
+    return accessToken;
   } catch {
     return null;
   }
 }
 
-/** `onSessionExpired` é chamado quando o access token expira E o refresh também falha (sessão morta de verdade). */
+/** Tenta restaurar a sessão a partir do cookie de refresh (ex.: ao abrir a página). */
+export async function trySilentLogin(): Promise<boolean> {
+  return !!(await refreshAccessToken());
+}
+
+/** `onSessionExpired` é chamado quando o access token expira E o refresh via cookie também falha (sessão morta de verdade). */
 export function apiFactory(onSessionExpired: () => void): Api {
   return async function api(path: string, init: RequestInit = {}) {
     const isFormData = init.body instanceof FormData;
     async function doFetch(token: string) {
       return fetch(`${base}${path}`, {
         ...init,
+        credentials: 'include',
         headers: {
           ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
           Authorization: `Bearer ${token}`,
@@ -53,11 +40,11 @@ export function apiFactory(onSessionExpired: () => void): Api {
         },
       });
     }
-    let response = await doFetch(localStorage.getItem(ACCESS_KEY) || '');
+    let response = await doFetch(accessToken);
     if (response.status === 401) {
       const newAccess = await refreshAccessToken();
       if (!newAccess) {
-        clearTokens();
+        accessToken = '';
         onSessionExpired();
         throw new Error('Sessão expirada. Entre novamente.');
       }
@@ -75,26 +62,26 @@ export function apiFactory(onSessionExpired: () => void): Api {
 export async function login(username: string, password: string): Promise<void> {
   const response = await fetch(`${base}/login/`, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
   });
   if (!response.ok) throw new Error('Confira seu usuário e senha.');
   const data = await response.json();
-  storeTokens(data.access, data.refresh);
+  accessToken = data.access;
 }
 
 export async function logoutRequest(): Promise<void> {
-  const refresh = localStorage.getItem(REFRESH_KEY);
-  if (!refresh) return;
   try {
     await fetch(`${base}/logout/`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem(ACCESS_KEY) || ''}` },
-      body: JSON.stringify({ refresh }),
+      credentials: 'include',
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
   } catch {
-    // Best-effort: mesmo se a chamada falhar, o logout local (clearTokens) já desloga este navegador.
+    // Best-effort: mesmo se a chamada falhar, zerar accessToken abaixo já desloga este navegador.
   }
+  accessToken = '';
 }
 
 // Sem token: o atendente ainda não tem conta nesse ponto do fluxo de convite.

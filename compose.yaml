@@ -7,6 +7,9 @@ x-backend: &backend
     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD no ambiente protegido}
     POSTGRES_HOST: db
     ALLOWED_HOSTS: localhost,127.0.0.1,web
+    # Dev local serve em HTTP puro (sem TLS) -- sem isso o cookie httpOnly do
+    # refresh token (Secure=true por padrão) nunca voltaria pro backend.
+    COOKIE_SECURE: "false"
     CELERY_BROKER_URL: redis://redis:6379/0
     CELERY_RESULT_BACKEND: redis://redis:6379/1
     CHANNEL_REDIS_URL: redis://redis:6379/2

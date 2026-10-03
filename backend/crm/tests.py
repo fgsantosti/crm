@@ -263,25 +263,36 @@ class QualificationTests(TestCase):
         ok = c.delete("/api/me/excluir/", {"password": "senha-certa-123"}, format="json")
         self.assertEqual(ok.status_code, 200)
         self.assertFalse(get_user_model().objects.filter(pk=user.pk).exists())
-    def test_login_returns_jwt_pair_and_refresh_rotates_access_token(self):
+    def test_login_returns_access_in_body_and_refresh_only_as_httponly_cookie(self):
         get_user_model().objects.create_user(username="login-jwt", password="senha-forte-123")
-        login_resp = self.client.post("/api/login/", {"username": "login-jwt", "password": "senha-forte-123"}, format="json")
+        anon_client = APIClient()
+        login_resp = anon_client.post("/api/login/", {"username": "login-jwt", "password": "senha-forte-123"}, format="json")
         self.assertEqual(login_resp.status_code, 200)
         body = login_resp.json()
         self.assertIn("access", body)
-        self.assertIn("refresh", body)
-        refresh_resp = self.client.post("/api/login/refresh/", {"refresh": body["refresh"]}, format="json")
+        self.assertNotIn("refresh", body)
+        cookie = login_resp.cookies.get("refresh_token")
+        self.assertIsNotNone(cookie)
+        self.assertTrue(cookie["httponly"])
+        self.assertTrue(cookie["secure"])
+        # O cookie já fica no cookiejar do client; /login/refresh/ não recebe nada no corpo.
+        refresh_resp = anon_client.post("/api/login/refresh/")
         self.assertEqual(refresh_resp.status_code, 200)
         self.assertIn("access", refresh_resp.json())
-    def test_logout_blacklists_refresh_token(self):
-        user = get_user_model().objects.create_user(username="logout-jwt", password="senha-forte-123")
-        login_resp = self.client.post("/api/login/", {"username": "logout-jwt", "password": "senha-forte-123"}, format="json")
-        refresh = login_resp.json()["refresh"]
-        c = APIClient()
-        c.force_authenticate(user)
-        logout_resp = c.post("/api/logout/", {"refresh": refresh}, format="json")
+    def test_refresh_without_cookie_is_rejected(self):
+        anon_client = APIClient()
+        resp = anon_client.post("/api/login/refresh/")
+        self.assertEqual(resp.status_code, 401)
+    def test_logout_blacklists_refresh_token_and_clears_cookie(self):
+        get_user_model().objects.create_user(username="logout-jwt", password="senha-forte-123")
+        anon_client = APIClient()
+        anon_client.force_authenticate(self.user)  # só pra satisfazer IsAuthenticated de /api/logout/
+        login_resp = anon_client.post("/api/login/", {"username": "logout-jwt", "password": "senha-forte-123"}, format="json")
+        self.assertIn("refresh_token", login_resp.cookies)
+        logout_resp = anon_client.post("/api/logout/")
         self.assertEqual(logout_resp.status_code, 200)
-        blocked = self.client.post("/api/login/refresh/", {"refresh": refresh}, format="json")
+        self.assertEqual(logout_resp.cookies["refresh_token"].value, "")
+        blocked = anon_client.post("/api/login/refresh/")
         self.assertEqual(blocked.status_code, 401)
     def test_agent_service_account_is_restricted_to_incoming_and_delivery(self):
         from django.contrib.auth.models import Group
@@ -311,7 +322,6 @@ class QualificationTests(TestCase):
         response = client.post("/api/login/", {"username": "empresa-teste", "password": "senha-123"}, content_type="application/json")
         self.assertEqual(response.status_code, 200)
         self.assertIn("access", response.json())
-        self.assertIn("refresh", response.json())
     def test_me_reflects_real_staff_flag(self):
         response = self.client.get("/api/me/")
         self.assertEqual(response.status_code, 200)

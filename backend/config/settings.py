@@ -29,6 +29,15 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+# Necessário pro cookie httpOnly do refresh token (ver crm/views.py) ir e
+# voltar em requisições cross-origin -- caso de dev local sem Docker, onde o
+# Vite (porta 5173) e o Django (porta 8000) são origens diferentes.
+CORS_ALLOW_CREDENTIALS = True
+# Secure=true (cookie só trafega em HTTPS) é o padrão -- correto em produção,
+# onde o navegador sempre fala com o Caddy via HTTPS. Em dev local sem TLS
+# (compose.yaml), setar COOKIE_SECURE=false no ambiente do backend, senão o
+# navegador nunca manda o cookie de volta e o refresh sempre falha.
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").lower() == "true"
 LANGUAGE_CODE = "pt-br"
 TIME_ZONE = "America/Fortaleza"
 USE_TZ = True

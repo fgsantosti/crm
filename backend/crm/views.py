@@ -1,9 +1,13 @@
+from django.conf import settings
 from django.db.models import Case, When, Value, IntegerField
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action, api_view, permission_classes, parser_classes
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
 from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile
@@ -17,6 +21,55 @@ from .services import (
 
 def _avatar_url(request, profile):
     return request.build_absolute_uri(profile.avatar.url) if profile.avatar else None
+
+# O refresh token JWT fica só num cookie httpOnly (JS nunca consegue ler, então
+# um XSS no frontend não rouba a sessão de longa duração) -- só o access token
+# de 30min circula em memória no frontend, nunca persistido em disco/localStorage.
+REFRESH_COOKIE = "refresh_token"
+REFRESH_COOKIE_PATH = "/api/"
+REFRESH_COOKIE_MAX_AGE = int(settings.SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds())
+
+def _set_refresh_cookie(response, refresh_token):
+    response.set_cookie(
+        REFRESH_COOKIE, str(refresh_token), max_age=REFRESH_COOKIE_MAX_AGE,
+        httponly=True, secure=settings.COOKIE_SECURE, samesite="Strict", path=REFRESH_COOKIE_PATH,
+    )
+
+def _clear_refresh_cookie(response):
+    response.delete_cookie(REFRESH_COOKIE, path=REFRESH_COOKIE_PATH, samesite="Strict")
+
+class LoginView(APIView):
+    """POST /api/login/ -- autentica e devolve só o access token no corpo; o
+    refresh vai num cookie httpOnly (ver REFRESH_COOKIE acima)."""
+    permission_classes = [permissions.AllowAny]
+    def post(self, request):
+        serializer = TokenObtainPairSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        response = Response({"access": serializer.validated_data["access"]})
+        _set_refresh_cookie(response, serializer.validated_data["refresh"])
+        return response
+
+class RefreshView(APIView):
+    """POST /api/login/refresh/ -- lê o refresh do cookie (nunca do corpo).
+    Usado tanto por um login silencioso ao abrir a página (sessão persistida só
+    pelo cookie) quanto pelo api.ts quando um access token expira no meio do uso."""
+    permission_classes = [permissions.AllowAny]
+    def post(self, request):
+        refresh = request.COOKIES.get(REFRESH_COOKIE)
+        if not refresh:
+            return Response({"detail": "Sessão não encontrada."}, status=401)
+        serializer = TokenRefreshSerializer(data={"refresh": refresh})
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError:
+            response = Response({"detail": "Sessão expirada."}, status=401)
+            _clear_refresh_cookie(response)
+            return response
+        response = Response({"access": serializer.validated_data["access"]})
+        new_refresh = serializer.validated_data.get("refresh")
+        if new_refresh:
+            _set_refresh_cookie(response, new_refresh)
+        return response
 
 @api_view(["GET", "PATCH"])
 @permission_classes([permissions.IsAuthenticated])
@@ -102,18 +155,22 @@ def excluir_conta(request):
     if not request.user.check_password(password):
         return Response({"detail": "Senha incorreta."}, status=400)
     request.user.delete()
-    return Response({"detail": "Conta excluída."})
+    response = Response({"detail": "Conta excluída."})
+    _clear_refresh_cookie(response)
+    return response
 
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 def logout_view(request):
-    refresh = request.data.get("refresh")
+    refresh = request.COOKIES.get(REFRESH_COOKIE)
     if refresh:
         try:
             RefreshToken(refresh).blacklist()
         except Exception:
             pass
-    return Response({"detail": "Sessão encerrada."})
+    response = Response({"detail": "Sessão encerrada."})
+    _clear_refresh_cookie(response)
+    return response
 
 class NotAgentAccount(permissions.BasePermission):
     """Nega acesso a contas de serviço do agente de IA (membros do grupo "agente").

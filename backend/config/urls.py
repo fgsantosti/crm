@@ -4,10 +4,10 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from crm.views import (
     CompanyViewSet, LeadViewSet, QuestionViewSet, CompanyInfoViewSet, AreaViewSet, AtendenteInviteViewSet,
-    me, avatar, validar_convite, trocar_senha, trocar_email_solicitar, trocar_email_confirmar, excluir_conta, logout_view,
+    me, avatar, validar_convite, trocar_senha, trocar_email_solicitar, trocar_email_confirmar, excluir_conta,
+    LoginView, RefreshView, logout_view,
 )
 router = DefaultRouter()
 router.register("companies", CompanyViewSet, basename="company")
@@ -22,8 +22,8 @@ urlpatterns = [
     # Humanos (frontend): JWT access + refresh. O agente Axioma usa um token
     # fixo (TokenAuthentication) pré-provisionado via Django shell/admin, nunca
     # passa por aqui -- ver docs/integracao-agente.md.
-    path("api/login/", TokenObtainPairView.as_view()),
-    path("api/login/refresh/", TokenRefreshView.as_view()),
+    path("api/login/", LoginView.as_view()),
+    path("api/login/refresh/", RefreshView.as_view()),
     path("api/logout/", logout_view),
     path("api/me/", me),
     path("api/me/avatar/", avatar),

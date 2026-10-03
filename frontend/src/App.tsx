@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { apiFactory, clearTokens, hasSession, logoutRequest } from './api';
+import { apiFactory, logoutRequest, trySilentLogin } from './api';
 import type { Company, Lead, Me, Paginated, Role } from './types';
 import { Sidebar, type View } from './components/Sidebar';
 import { Login } from './views/Login';
@@ -14,7 +14,8 @@ import { Admin } from './views/Admin';
 import { TrocarSenhaObrigatoria } from './views/TrocarSenhaObrigatoria';
 
 export function App() {
-  const [authed, setAuthed] = useState(() => hasSession());
+  // null = ainda checando a sessão (refresh silencioso via cookie httpOnly).
+  const [authed, setAuthed] = useState<boolean | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState('');
@@ -26,13 +27,16 @@ export function App() {
   const [companiesRetry, setCompaniesRetry] = useState(0);
 
   const onSessionExpired = useCallback(() => {
-    clearTokens();
     setAuthed(false);
     setMe(null);
   }, []);
   const api = useMemo(() => apiFactory(onSessionExpired), [onSessionExpired]);
   const company = companies.find((c) => String(c.id) === companyId) || null;
   const role: Role = me?.is_superuser ? 'admin' : me?.is_staff ? 'empresa' : 'atendente';
+
+  useEffect(() => {
+    trySilentLogin().then(setAuthed);
+  }, []);
 
   useEffect(() => {
     if (!authed) {
@@ -96,7 +100,6 @@ export function App() {
 
   function logout() {
     logoutRequest();
-    clearTokens();
     setAuthed(false);
     setMe(null);
     setCompanies([]);
@@ -105,6 +108,7 @@ export function App() {
     setError('');
   }
 
+  if (authed === null) return <div className="shell" />;
   if (!authed) return <Login onLogin={() => setAuthed(true)} />;
   if (!me) return <div className="shell" />;
   if (me.must_change_password) return <TrocarSenhaObrigatoria api={api} onDone={() => setMe({ ...me, must_change_password: false })} onLogout={logout} />;
