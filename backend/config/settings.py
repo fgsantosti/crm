@@ -76,7 +76,11 @@ SECURE_SSL_REDIRECT = DJANGO_HTTPS
 SESSION_COOKIE_SECURE = DJANGO_HTTPS
 CSRF_COOKIE_SECURE = DJANGO_HTTPS
 SECURE_HSTS_SECONDS = 31536000 if DJANGO_HTTPS else 0
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https") if DJANGO_HTTPS else None
+# Independente de DJANGO_HTTPS: o container `web` nunca fica exposto direto (só o proxy),
+# então confiar em X-Forwarded-Proto pra saber se a requisição ORIGINAL era https é seguro
+# e sempre correto -- sem isso, request.build_absolute_uri() (usado em avatar_url etc.)
+# gera link "http://" mesmo atrás de TLS de verdade, dando mixed-content no navegador.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
 CELERY_ACCEPT_CONTENT = ["json"]

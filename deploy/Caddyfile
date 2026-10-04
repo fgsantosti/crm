@@ -16,7 +16,12 @@
     }
     @backend path /api/* /admin/* /ws/* /health/*
     handle @backend {
-        reverse_proxy web:8000
+        # O TLS real (crm.axiomaia.com.br) é terminado antes de chegar aqui -- esse Caddy só
+        # recebe HTTP puro na VPS. Sem isso, Django nunca sabe que a requisição original era
+        # https (request.build_absolute_uri() gera link "http://" e dá mixed-content no navegador).
+        reverse_proxy web:8000 {
+            header_up X-Forwarded-Proto https
+        }
     }
     handle {
         reverse_proxy frontend:80
