@@ -71,14 +71,15 @@ export function Equipe({ api, company }: { api: Api; company: Company }) {
     e.preventDefault();
     setSavingConvite(true);
     setError('');
-    const form = new FormData(e.currentTarget);
+    const formEl = e.currentTarget;
+    const form = new FormData(formEl);
     try {
       const created = await api(`/convites/?company=${company.id}`, {
         method: 'POST',
         body: JSON.stringify({ name: form.get('name'), email: form.get('email') }),
       });
       setConvites((v) => [created, ...v]);
-      (e.currentTarget as HTMLFormElement).reset();
+      formEl.reset();
     } catch (err) {
       setError((err as Error).message);
     } finally {
