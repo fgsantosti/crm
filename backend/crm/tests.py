@@ -1076,7 +1076,7 @@ class DashboardResumoTests(TestCase):
         self.lead("+5585000000012", bot_closed=True, mode="HUMANO", owner=self.ana, desfecho="encerrado")
         self.lead("+5585000000013")  # sem owner: não entra na tabela de atendentes
         data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
-        self.assertEqual(data["por_owner"], [{"owner_id": self.ana.pk, "owner": "ana", "atendimentos": 2, "concluidos": 1}])
+        self.assertEqual(data["por_owner"], [{"owner_id": self.ana.pk, "owner": "ana", "atendimentos": 2, "concluidos": 1, "sucesso": 1}])
 
     def test_resumo_mesmo_contato_reaberto_conta_os_dois_leads(self):
         self.lead("+5585000000021", bot_closed=True, mode="HUMANO", owner=self.ana, desfecho="encerrado")
@@ -1312,3 +1312,109 @@ class ExcluirEmpresaTests(TestCase):
         c.force_authenticate(staff)
         self.assertEqual(c.delete(self.url(), {"confirmar_nome": "Empresa Apagavel"}, format="json").status_code, 403)
         self.assertTrue(Company.objects.filter(pk=self.empresa.pk).exists())
+
+
+class DespachoEConcluidosTests(TestCase):
+    """Atendente fecha o lead pelo Despacho (escolhendo desfecho e área da empresa) e o
+    Dashboard lista os concluídos com suas classificações, com os mesmos filtros do resumo."""
+    def setUp(self):
+        from .models import Area
+        User = get_user_model()
+        self.company = Company.objects.create(name="Empresa Despacho")
+        self.other = Company.objects.create(name="Outra Despacho")
+        for nome in ["Trabalhista", "Consumidor"]:
+            Area.objects.create(company=self.company, name=nome)
+        Area.objects.create(company=self.other, name="Tributário")
+        self.ana = User.objects.create_user(username="ana@d.com", first_name="Ana")
+        self.bia = User.objects.create_user(username="bia@d.com", first_name="Bia")
+        self.empresa = User.objects.create_user(username="empresa@d.com", is_staff=True)
+        self.company.members.add(self.ana, self.bia, self.empresa)
+
+    def cliente(self, user):
+        c = APIClient()
+        c.force_authenticate(user)
+        return c
+
+    def lead(self, contact, **kw):
+        base = {"bot_closed": True, "temperature": "Quente", "state": "ENCERRADO_CLASSIFICADO"}
+        base.update(kw)
+        return Lead.objects.create(company=self.company, contact=contact, **base)
+
+    def url(self, lead, acao):
+        return f"/api/leads/{lead.pk}/{acao}/?company={self.company.pk}"
+
+    def test_atendente_fecha_lead_pelo_despacho_escolhendo_area_da_empresa(self):
+        lead = self.lead("+5585977770001", especialidade="Consumidor")
+        ana = self.cliente(self.ana)
+        self.assertEqual(ana.post(self.url(lead, "negociar")).status_code, 200)
+        r = ana.post(self.url(lead, "preparar-despacho"), {"desfecho": "encerrado", "especialidade": "Trabalhista"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["especialidade"], "Trabalhista")
+        self.assertEqual(r.json()["desfecho_pendente"], "encerrado")
+        # Aparece em "Meus Atendimentos" enquanto está no Despacho.
+        meus = [l["id"] for l in ana.get(f"/api/leads/?company={self.company.pk}&meus=1").json()["results"]]
+        self.assertIn(str(lead.pk), meus)
+        self.assertEqual(ana.post(f"/api/leads/enviar-despachos/?company={self.company.pk}").json(), {"enviados": 1})
+        lead.refresh_from_db()
+        self.assertEqual((lead.desfecho, lead.especialidade), ("encerrado", "Trabalhista"))
+        self.assertIsNotNone(lead.concluido_em)
+        meus = [l["id"] for l in ana.get(f"/api/leads/?company={self.company.pk}&meus=1").json()["results"]]
+        self.assertNotIn(str(lead.pk), meus)
+
+    def test_area_de_outra_empresa_ou_inexistente_da_400_e_nao_altera_nada(self):
+        lead = self.lead("+5585977770002", especialidade="Consumidor")
+        ana = self.cliente(self.ana)
+        ana.post(self.url(lead, "negociar"))
+        for area in ["Tributário", "Inventada"]:
+            r = ana.post(self.url(lead, "preparar-despacho"), {"desfecho": "encerrado", "especialidade": area}, format="json")
+            self.assertEqual(r.status_code, 400)
+        lead.refresh_from_db()
+        self.assertEqual((lead.especialidade, lead.etapa_atendimento, lead.desfecho_pendente), ("Consumidor", "negociacao", ""))
+
+    def test_so_o_dono_despacha_e_empresa_nao_despacha(self):
+        lead = self.lead("+5585977770003")
+        self.cliente(self.ana).post(self.url(lead, "negociar"))
+        r = self.cliente(self.bia).post(self.url(lead, "preparar-despacho"), {"desfecho": "encerrado", "especialidade": "Trabalhista"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        r = self.cliente(self.empresa).post(self.url(lead, "preparar-despacho"), {"desfecho": "encerrado"}, format="json")
+        self.assertEqual(r.status_code, 403)
+
+    def test_lead_manual_tambem_fecha_pelo_despacho(self):
+        ana = self.cliente(self.ana)
+        criado = ana.post(f"/api/leads/manual/?company={self.company.pk}", {"name": "Zé", "contact": "85977770004"}, format="json").json()
+        r = ana.post(f"/api/leads/{criado['id']}/preparar-despacho/?company={self.company.pk}", {"desfecho": "comprometido", "especialidade": "Consumidor"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        meus = [l["id"] for l in ana.get(f"/api/leads/?company={self.company.pk}&meus=1").json()["results"]]
+        self.assertIn(criado["id"], meus)
+        self.assertEqual(ana.post(f"/api/leads/enviar-despachos/?company={self.company.pk}").json(), {"enviados": 1})
+        self.assertEqual(Lead.objects.get(pk=criado["id"]).desfecho, "comprometido")
+
+    def test_resumo_lista_concluidos_com_classificacao_e_filtros(self):
+        agora = timezone.now()
+        ok = self.lead("+5585977770010", owner=self.ana, mode="HUMANO", desfecho="encerrado", especialidade="Trabalhista", priority="Alta", concluido_em=agora)
+        self.lead("+5585977770011", owner=self.bia, mode="HUMANO", desfecho="falha", especialidade="Consumidor", concluido_em=agora - timedelta(hours=1))
+        self.lead("+5585977770012", temperature="Desqualificado", desfecho="desqualificado", concluido_em=agora)
+        self.lead("+5585977770013", owner=self.ana, mode="HUMANO", etapa_atendimento="negociacao")
+        empresa = self.cliente(self.empresa)
+        data = empresa.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
+        self.assertEqual(data["sucesso"], 1)
+        self.assertEqual([c["desfecho"] for c in data["concluidos"]], ["encerrado", "falha"])
+        primeiro = data["concluidos"][0]
+        self.assertEqual(primeiro["id"], str(ok.pk))
+        self.assertEqual((primeiro["temperature"], primeiro["priority"], primeiro["especialidade"], primeiro["owner"]), ("Quente", "Alta", "Trabalhista", "Ana"))
+        self.assertIsNotNone(primeiro["concluido_em"])
+        # Totais batem com a lista e com os tiles.
+        self.assertEqual(len(data["concluidos"]), sum(data["desfechos"].values()))
+        self.assertEqual(len(data["concluidos"]), data["status"]["despachado"])
+        self.assertEqual(data["desqualificados"], data["status"]["desqualificado"])
+        # Mesmo filtro de área do resto do resumo.
+        filtrado = empresa.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all&area=Trabalhista").json()
+        self.assertEqual([c["id"] for c in filtrado["concluidos"]], [str(ok.pk)])
+        self.assertEqual(filtrado["sucesso"], 1)
+
+    def test_resumo_triagem_concluida_nao_conta_cadastro_manual(self):
+        self.lead("+5585977770020")
+        self.lead("+5585977770021", origem_manual=True, mode="HUMANO", owner=self.ana)
+        data = self.cliente(self.empresa).get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
+        self.assertEqual(data["triagem_concluida"], 1)
+        self.assertEqual(data["total"], 2)

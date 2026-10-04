@@ -13,14 +13,30 @@ type Resumo = {
   desfechos: Record<'encerrado' | 'comprometido' | 'falha', number>;
   por_area: [string, number][];
   por_mes: [string, number][];
-  por_owner: { owner_id: number; owner: string; atendimentos: number; concluidos: number }[];
+  por_owner: { owner_id: number; owner: string; atendimentos: number; concluidos: number; sucesso: number }[];
+  sucesso: number;
+  concluidos: LeadConcluido[];
+};
+
+type LeadConcluido = {
+  id: string;
+  name: string;
+  contact: string;
+  temperature: string;
+  priority: string;
+  especialidade: string;
+  desfecho: 'encerrado' | 'comprometido' | 'falha';
+  owner: string;
+  concluido_em: string | null;
+  created_at: string;
+  origem_manual: boolean;
 };
 
 const RESUMO_VAZIO: Resumo = {
   total: 0, triagem_concluida: 0, desqualificados: 0,
   status: { despachado: 0, automatico: 0, equipe: 0, desqualificado: 0 },
   desfechos: { encerrado: 0, comprometido: 0, falha: 0 },
-  por_area: [], por_mes: [], por_owner: [],
+  por_area: [], por_mes: [], por_owner: [], sucesso: 0, concluidos: [],
 };
 
 function rotuloMes(chave: string) {
@@ -54,6 +70,8 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   const [excluindoId, setExcluindoId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [recarregar, setRecarregar] = useState(0);
+  // "Concluído com sucesso" = desfecho Encerrado (ver services.DESFECHO_SUCESSO).
+  const [filtroConcluidos, setFiltroConcluidos] = useState<'sucesso' | 'todos'>('sucesso');
 
   useEffect(() => {
     let active = true;
@@ -105,6 +123,8 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   const humano = resumo.status.equipe;
   const concluidosPorDesfecho = DESFECHO_LABELS.map((d) => ({ ...d, count: resumo.desfechos[d.value] }));
   const totalDespachados = concluidosPorDesfecho.reduce((sum, d) => sum + d.count, 0);
+  const listaConcluidos = filtroConcluidos === 'sucesso' ? resumo.concluidos.filter((c) => c.desfecho === 'encerrado') : resumo.concluidos;
+  const corDesfecho = (v: string) => DESFECHO_LABELS.find((d) => d.value === v);
 
   const monthly = resumo.por_mes.map(([k, v]) => [rotuloMes(k), v] as [string, number]);
   const maxMonthly = Math.max(1, ...monthly.map(([, v]) => v));
@@ -325,6 +345,59 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
           </div>
         )}
         {!busy && !totalDespachados && <p style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>Nenhum atendimento despachado no período selecionado.</p>}
+        {totalDespachados > 0 && (
+          <div className="panel" style={{ marginTop: 16 }}>
+            <div className="panel-toolbar">
+              <h2>Atendimentos concluídos</h2>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" className={filtroConcluidos === 'sucesso' ? undefined : 'secondary'} onClick={() => setFiltroConcluidos('sucesso')}>
+                  Com sucesso ({resumo.sucesso})
+                </button>
+                <button type="button" className={filtroConcluidos === 'todos' ? undefined : 'secondary'} onClick={() => setFiltroConcluidos('todos')}>
+                  Todos ({resumo.concluidos.length})
+                </button>
+              </div>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Lead</th>
+                    <th>Área</th>
+                    <th>Temperatura</th>
+                    <th>Prioridade</th>
+                    <th>Desfecho</th>
+                    <th>Atendente</th>
+                    <th>Concluído em</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {listaConcluidos.map((c) => {
+                    const d = corDesfecho(c.desfecho);
+                    return (
+                      <tr key={c.id}>
+                        <td>
+                          <strong style={{ display: 'block' }}>{c.name || 'Sem nome informado'}</strong>
+                          <small style={{ fontFamily: "'DM Mono',monospace", color: 'var(--muted)' }}>
+                            {c.contact}
+                            {c.origem_manual ? ' · cadastro manual' : ''}
+                          </small>
+                        </td>
+                        <td>{c.especialidade || '—'}</td>
+                        <td>{c.temperature || '—'}</td>
+                        <td>{c.priority || '—'}</td>
+                        <td style={{ color: d?.color, fontWeight: 600 }}>{d?.label || c.desfecho}</td>
+                        <td>{c.owner || '—'}</td>
+                        <td style={{ fontFamily: "'DM Mono',monospace" }}>{c.concluido_em ? new Date(c.concluido_em).toLocaleString('pt-BR') : '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {!listaConcluidos.length && <div className="empty">Nenhum atendimento concluído com sucesso no período selecionado.</div>}
+          </div>
+        )}
       </section>
 
       <div className="section-divider" />
@@ -420,6 +493,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                       <th>Atendente</th>
                       <th>Atendimentos</th>
                       <th>Despachados</th>
+                      <th>Com sucesso</th>
                       <th>Taxa de conclusão</th>
                     </tr>
                   </thead>
@@ -431,6 +505,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                           <td style={{ fontWeight: 600 }}>{o.owner}</td>
                           <td style={{ fontFamily: "'DM Mono',monospace" }}>{o.atendimentos}</td>
                           <td style={{ fontFamily: "'DM Mono',monospace" }}>{o.concluidos}</td>
+                          <td style={{ fontFamily: "'DM Mono',monospace" }}>{o.sucesso}</td>
                           <td style={{ color: rate >= 50 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{rate}%</td>
                         </tr>
                       );

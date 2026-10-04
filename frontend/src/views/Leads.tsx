@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Company, Lead, LeadEvent, Me } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
+import { AreaSelect } from '../components/AreaSelect';
 
 // Mesma ordem de services.URGENCIA_POR_FAIXA no backend (menos urgente -> mais urgente).
 export const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Remarketing: 2, Qualificado: 3, Quente: 4 };
@@ -111,6 +112,8 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
   const [cadastroSemAtendimentoModal, setCadastroSemAtendimentoModal] = useState<Lead | null>(null);
   const [despachoClassificarModal, setDespachoClassificarModal] = useState<Lead | null>(null);
   const [enviandoDespachos, setEnviandoDespachos] = useState(false);
+  // Área escolhida no Despacho ('' = manter a atual do lead).
+  const [areaDespacho, setAreaDespacho] = useState('');
   const [desqualificadosCount, setDesqualificadosCount] = useState(0);
 
   const podeAtender = role === 'atendente';
@@ -200,12 +203,12 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
   }
 
   async function confirmarCadastroSemAtendimento(lead: Lead) {
-    const updated = await chamarAcao('preparar-despacho', lead, { auto_falha: true });
+    const updated = await chamarAcao('preparar-despacho', lead, { auto_falha: true, especialidade: areaDespacho || undefined });
     if (updated) setCadastroSemAtendimentoModal(null);
   }
 
   async function confirmarDespacho(lead: Lead, desfecho: 'encerrado' | 'comprometido' | 'falha') {
-    const updated = await chamarAcao('preparar-despacho', lead, { desfecho });
+    const updated = await chamarAcao('preparar-despacho', lead, { desfecho, especialidade: areaDespacho || undefined });
     if (updated) setDespachoClassificarModal(null);
   }
 
@@ -280,6 +283,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
       return;
     }
     if (target === 'despacho') {
+      setAreaDespacho(lead.especialidade || '');
       if (source === 'qualificados') {
         setCadastroSemAtendimentoModal(lead);
         return;
@@ -523,6 +527,9 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
             Este lead será marcado automaticamente como <strong>Falha durante o atendimento</strong> — ele vai para a coluna
             Despacho, pendente do botão "Enviar Despachos".
           </p>
+          <div style={{ marginBottom: 16 }}>
+            <AreaSelect api={api} companyId={company.id} value={areaDespacho} onChange={setAreaDespacho} />
+          </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button type="button" className="danger-outline" onClick={() => confirmarCadastroSemAtendimento(cadastroSemAtendimentoModal)} disabled={actionBusy}>
               {actionBusy && <Spinner />}
@@ -541,6 +548,9 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
           <p style={{ color: 'var(--muted)', marginBottom: 16 }}>
             Fica reservado na coluna Despacho — só é enviado como Concluído quando você clicar em "Enviar Despachos".
           </p>
+          <div style={{ marginBottom: 16 }}>
+            <AreaSelect api={api} companyId={company.id} value={areaDespacho} onChange={setAreaDespacho} />
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {DESFECHO_OPTIONS.map((opt) => (
               <button

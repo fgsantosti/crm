@@ -325,8 +325,12 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
             # evita que leads despachados ocupem a página e empurrem ativos pra fora.
             qs = qs.filter(desfecho="", origem_manual=False).exclude(temperature__in=FORA_DO_KANBAN)
         if self.request.query_params.get("meus") == "1":
-            # "Meus Atendimentos": o que está em negociação comigo + meus cadastros manuais.
-            qs = qs.filter(owner=self.request.user, desfecho="").filter(Q(etapa_atendimento="negociacao") | Q(origem_manual=True))
+            # "Meus Atendimentos": em negociação ou já no Despacho comigo + meus cadastros manuais
+            # (o Despacho aparece aqui pra o atendente conseguir enviar -- inclusive os manuais,
+            # que nunca aparecem no Kanban).
+            qs = qs.filter(owner=self.request.user, desfecho="").filter(
+                Q(etapa_atendimento__in=["negociacao", "despacho"]) | Q(origem_manual=True)
+            )
         return qs
     @action(detail=False, methods=["get"])
     def resumo(self, request):
@@ -371,7 +375,10 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
         if self._bloqueia_staff(request):
             return Response({"detail": "Esse perfil não despacha atendimentos."}, status=403)
         auto_falha = bool(request.data.get("auto_falha"))
-        erro = preparar_despacho_service(self.get_object().pk, request.data.get("desfecho"), request.user, auto_falha=auto_falha)
+        erro = preparar_despacho_service(
+            self.get_object().pk, request.data.get("desfecho"), request.user,
+            auto_falha=auto_falha, especialidade=request.data.get("especialidade") or None,
+        )
         if erro:
             return Response({"detail": erro}, status=400)
         return Response(LeadSerializer(self.get_object()).data)

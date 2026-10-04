@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Company, Lead, Me } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
+import { AreaSelect } from '../components/AreaSelect';
 
 const DESFECHO_OPTIONS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string; help: string }[] = [
   { value: 'encerrado', label: 'Encerrado', color: 'var(--success)', help: 'Sucesso de comunicação — o cliente conseguiu realizar o que desejava.' },
@@ -18,6 +19,8 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
   const [error, setError] = useState('');
   const [novo, setNovo] = useState(false);
   const [salvandoNovo, setSalvandoNovo] = useState(false);
+  const [areaDespacho, setAreaDespacho] = useState('');
+  const [enviando, setEnviando] = useState(false);
 
   function load() {
     setBusy(true);
@@ -57,10 +60,12 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
     setActionBusy(lead.id);
     setError('');
     try {
-      // Só reserva o desfecho e move pra coluna "Despacho" do Kanban -- o envio
-      // definitivo (Lead.desfecho) acontece pelo botão "Enviar Despachos" em Leads.
-      await api(`/leads/${lead.id}/preparar-despacho/?company=${company.id}`, { method: 'POST', body: JSON.stringify({ desfecho }) });
-      setLeads((v) => v.filter((l) => l.id !== lead.id));
+      // Só reserva o desfecho (coluna "Despacho") -- vira definitivo no "Enviar Despachos".
+      const updated: Lead = await api(`/leads/${lead.id}/preparar-despacho/?company=${company.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ desfecho, especialidade: areaDespacho || undefined }),
+      });
+      setLeads((v) => v.map((l) => (l.id === updated.id ? updated : l)));
       setDespachandoId(null);
     } catch (err) {
       setError((err as Error).message);
@@ -69,7 +74,51 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
     }
   }
 
-  const visible = leads.filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()));
+  async function enviarDespachos() {
+    setEnviando(true);
+    setError('');
+    try {
+      await api(`/leads/enviar-despachos/?company=${company.id}`, { method: 'POST' });
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  function abrirDespacho(l: Lead) {
+    setAreaDespacho(l.especialidade || '');
+    setDespachandoId((v) => (v === l.id ? null : l.id));
+  }
+
+  const busca = (l: Lead) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase());
+  const visible = leads.filter((l) => l.etapa_atendimento !== 'despacho' && busca(l));
+  const noDespacho = leads.filter((l) => l.etapa_atendimento === 'despacho' && busca(l));
+  const rotuloDesfecho = (v: string) => DESFECHO_OPTIONS.find((o) => o.value === v)?.label || v;
+
+  function painelDespacho(l: Lead) {
+    return (
+      <div className="panel" style={{ padding: 16, marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <h3 style={{ margin: 0, fontSize: 15 }}>Classificar desfecho</h3>
+        <AreaSelect api={api} companyId={company.id} value={areaDespacho} onChange={setAreaDespacho} />
+        {DESFECHO_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            className="desfecho-option"
+            onClick={() => despachar(l, opt.value)}
+            disabled={actionBusy === l.id}
+            style={{ '--cor': opt.color } as React.CSSProperties}
+          >
+            {actionBusy === l.id && <Spinner />}
+            <strong style={{ display: 'block' }}>{opt.label}</strong>
+            <small style={{ color: 'var(--muted)', fontWeight: 400 }}>{opt.help}</small>
+          </button>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <>
@@ -158,34 +207,52 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
                     </button>
                   </a>
                 )}
-                <button type="button" className="danger-outline" onClick={() => setDespachandoId((v) => (v === l.id ? null : l.id))}>
+                <button type="button" className="danger-outline" onClick={() => abrirDespacho(l)}>
                   Despachar
                 </button>
               </div>
             </div>
-            {despachandoId === l.id && (
-              <div className="panel" style={{ padding: 16, marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <h3 style={{ margin: 0, fontSize: 15 }}>Classificar desfecho</h3>
-                {DESFECHO_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    className="desfecho-option"
-                    onClick={() => despachar(l, opt.value)}
-                    disabled={actionBusy === l.id}
-                    style={{ '--cor': opt.color } as React.CSSProperties}
-                  >
-                    {actionBusy === l.id && <Spinner />}
-                    <strong style={{ display: 'block' }}>{opt.label}</strong>
-                    <small style={{ color: 'var(--muted)', fontWeight: 400 }}>{opt.help}</small>
-                  </button>
-                ))}
-              </div>
-            )}
+            {despachandoId === l.id && painelDespacho(l)}
           </article>
         ))}
-        {!busy && !visible.length && <div className="empty">Nenhum caso sob sua responsabilidade no momento.</div>}
+        {!busy && !visible.length && <div className="empty">Nenhum caso em andamento sob sua responsabilidade.</div>}
       </section>
+
+      {noDespacho.length > 0 && (
+        <section className="section">
+          <div className="section-head">
+            <h2>Prontos para envio (Despacho)</h2>
+            <button type="button" onClick={enviarDespachos} disabled={enviando} style={{ background: 'var(--success)', borderColor: 'var(--success)' }}>
+              {enviando && <Spinner />}
+              Enviar Despachos ({noDespacho.length})
+            </button>
+          </div>
+          <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 12 }}>
+            Ao enviar, o atendimento é concluído com o desfecho e a área escolhidos e sai da sua lista.
+          </p>
+          {noDespacho.map((l) => (
+            <article key={l.id} className="queue-card" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+                  <div className="queue-meta">
+                    <strong style={{ fontSize: 16 }}>{l.name || 'Sem nome informado'}</strong>
+                    <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 12.5, color: 'var(--muted)' }}>{l.contact}</span>
+                    {l.origem_manual && <span className="chip chip-neutral">cadastro manual</span>}
+                  </div>
+                  <p style={{ fontSize: 12.5 }}>
+                    Desfecho: <strong style={{ color: 'var(--ink)' }}>{rotuloDesfecho(l.desfecho_pendente)}</strong> · Área:{' '}
+                    <strong style={{ color: 'var(--ink)' }}>{l.especialidade || '—'}</strong>
+                  </p>
+                </div>
+                <button type="button" className="secondary" onClick={() => abrirDespacho(l)}>
+                  Alterar
+                </button>
+              </div>
+              {despachandoId === l.id && painelDespacho(l)}
+            </article>
+          ))}
+        </section>
+      )}
     </>
   );
 }

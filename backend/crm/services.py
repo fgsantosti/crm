@@ -536,12 +536,13 @@ def mover_para_negociacao(lead_id, user):
     return None
 
 @transaction.atomic
-def preparar_despacho(lead_id, desfecho, user, auto_falha=False):
+def preparar_despacho(lead_id, desfecho, user, auto_falha=False, especialidade=None):
     """Qualificados, Em espera OU Em negociação -> Despacho: só RESERVA o
     desfecho (desfecho_pendente), não finaliza ainda -- isso só acontece em
     enviar_despachos (botão 'Enviar Despachos'). `auto_falha=True` é a
     transição direta Qualificados -> Despacho (sem nunca ter negociado):
-    força 'falha', ignora o `desfecho` pedido."""
+    força 'falha', ignora o `desfecho` pedido. `especialidade` (opcional) é a
+    área que o atendente escolhe ao despachar -- só uma Area desta empresa."""
     lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
     if not lead:
         return "Lead não encontrado."
@@ -553,10 +554,16 @@ def preparar_despacho(lead_id, desfecho, user, auto_falha=False):
     desfecho_final = "falha" if auto_falha else desfecho
     if desfecho_final not in Lead.DESFECHO_DESPACHO:
         return "Classificação de despacho inválida."
+    campos = ["owner", "etapa_atendimento", "desfecho_pendente"]
+    if especialidade:
+        if not isinstance(especialidade, str) or not Area.objects.filter(company_id=lead.company_id, name=especialidade).exists():
+            return "Área inválida: escolha uma das áreas cadastradas pela empresa."
+        lead.especialidade = especialidade
+        campos.append("especialidade")
     lead.owner = user
     lead.etapa_atendimento = "despacho"
     lead.desfecho_pendente = desfecho_final
-    lead.save(update_fields=["owner", "etapa_atendimento", "desfecho_pendente"])
+    lead.save(update_fields=campos)
     return None
 
 @transaction.atomic
@@ -659,6 +666,9 @@ URGENCIA_RANK = {temp: i for i, (_, _, temp) in enumerate(URGENCIA_POR_FAIXA)}
 FORA_DO_KANBAN = {"Desqualificado", "Desconfiado"}
 PODE_ASSUMIR_A_PARTIR_DE = "Remarketing"
 COOLDOWN_DESQUALIFICADO = timedelta(hours=24)
+# "Concluído com sucesso" = desfecho Encerrado (o cliente conseguiu o que queria);
+# Comprometido e Falha também são conclusões, mas não de sucesso.
+DESFECHO_SUCESSO = "encerrado"
 
 def calcular_urgencia_sugerida(pesos):
     """Sugestão auxiliar a partir da média dos pesos (1-10) das Variaveis das
@@ -702,7 +712,10 @@ def resumo_dashboard(company, dias=None, area="", busca=""):
             Q(name__icontains=busca) | Q(contact__icontains=busca) | Q(owner__username__icontains=busca)
             | Q(owner__first_name__icontains=busca) | Q(owner__profile__display_name__icontains=busca)
         )
-    rows = list(qs.values("created_at", "desfecho", "bot_closed", "mode", "temperature", "especialidade", "owner"))
+    rows = list(qs.values(
+        "id", "name", "contact", "created_at", "concluido_em", "desfecho", "bot_closed", "mode",
+        "temperature", "priority", "especialidade", "owner", "origem_manual",
+    ))
     User = get_user_model()
     nomes = {u.pk: _nome_usuario(u) for u in User.objects.filter(pk__in={r["owner"] for r in rows if r["owner"]}).select_related("profile")}
 
@@ -719,17 +732,37 @@ def resumo_dashboard(company, dias=None, area="", busca=""):
         mes = timezone.localtime(r["created_at"], tz).strftime("%Y-%m")
         por_mes[mes] = por_mes.get(mes, 0) + 1
         if r["owner"]:
-            o = por_owner.setdefault(r["owner"], {"owner_id": r["owner"], "owner": nomes.get(r["owner"], ""), "atendimentos": 0, "concluidos": 0})
+            o = por_owner.setdefault(r["owner"], {"owner_id": r["owner"], "owner": nomes.get(r["owner"], ""), "atendimentos": 0, "concluidos": 0, "sucesso": 0})
             o["atendimentos"] += 1
-            if r["desfecho"]:
+            if r["desfecho"] in Lead.DESFECHO_DESPACHO:
                 o["concluidos"] += 1
+            if r["desfecho"] == DESFECHO_SUCESSO:
+                o["sucesso"] += 1
 
+    # Despachados pela equipe (encerrado/comprometido/falha), mais recentes primeiro --
+    # mesmos filtros de período/área/busca de todo o resto do resumo.
+    concluidos = sorted(
+        (r for r in rows if r["desfecho"] in Lead.DESFECHO_DESPACHO),
+        key=lambda r: r["concluido_em"] or r["created_at"], reverse=True,
+    )
     return {
         "total": len(rows),
-        "triagem_concluida": sum(1 for r in rows if r["bot_closed"]),
-        "desqualificados": sum(1 for r in rows if r["temperature"] in FORA_DO_KANBAN),
+        # Cadastro manual nunca passou por triagem (bot_closed=True só pra silenciar o agente).
+        "triagem_concluida": sum(1 for r in rows if r["bot_closed"] and not r["origem_manual"]),
+        # Mesmo critério da fatia "desqualificado" do status -- o tile e o donut sempre batem.
+        "desqualificados": status["desqualificado"],
         "status": status,
         "desfechos": desfechos,
+        "sucesso": desfechos[DESFECHO_SUCESSO],
+        "concluidos": [
+            {
+                "id": str(r["id"]), "name": r["name"], "contact": r["contact"],
+                "temperature": r["temperature"], "priority": r["priority"], "especialidade": r["especialidade"],
+                "desfecho": r["desfecho"], "owner_id": r["owner"], "owner": nomes.get(r["owner"], ""),
+                "concluido_em": r["concluido_em"], "created_at": r["created_at"], "origem_manual": r["origem_manual"],
+            }
+            for r in concluidos
+        ],
         "por_area": sorted(por_area.items(), key=lambda kv: -kv[1]),
         "por_mes": sorted(por_mes.items()),
         "por_owner": sorted(por_owner.values(), key=lambda o: -o["atendimentos"]),
