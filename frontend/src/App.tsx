@@ -90,7 +90,7 @@ export function App() {
       .then(([main, pending]: [Paginated<Lead>, Paginated<Lead>]) => {
         if (!active) return;
         setLeadsCount(main.count);
-        setHumanCount(main.results.filter((l) => l.mode === 'HUMANO').length);
+        setHumanCount(main.results.filter((l) => l.etapa_atendimento === 'negociacao').length);
         setPendingCount(pending.count);
       })
       .catch(() => {});
@@ -194,7 +194,7 @@ export function App() {
         )}
         <div key={view} className="view-enter">
           {view === 'dashboard' && <Dashboard api={api} company={company} role={role === 'atendente' ? 'atendente' : 'empresa'} />}
-          {view === 'leads' && <Leads api={api} company={company} role={role} />}
+          {view === 'leads' && <Leads api={api} company={company} role={role} me={me} />}
           {view === 'pendencias' && <Pendencias api={api} company={company} />}
           {view === 'humano' && <AtendimentoHumano api={api} company={company} me={me} />}
           {view === 'roteiro' && <Roteiro api={api} company={company} canEdit={role !== 'atendente'} />}

@@ -210,7 +210,20 @@ class Lead(models.Model):
     bot_closed = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
     variaveis_roteiro = models.JSONField(default=dict, blank=True, help_text="slug->texto coletado nas perguntas com Variável de roteiro customizada (ver services.apply_fields/render_text). Os 3 builtin (nome/especialidade/tema) não usam isto -- já são campos próprios do Lead.")
-    desfecho = models.CharField(max_length=20, choices=DESFECHO_CHOICES, blank=True, help_text="Só setado ao despachar um atendimento humano (ver services.despachar_lead).")
+    desfecho = models.CharField(max_length=20, choices=DESFECHO_CHOICES, blank=True, help_text="Só setado ao despachar um atendimento humano -- definitivo (ver services.enviar_despachos). Lead some do Kanban quando preenchido.")
+    ETAPA_ATENDIMENTO_CHOICES = [
+        ("espera", "Atendimentos em espera"),
+        ("negociacao", "Em negociação"),
+        ("despacho", "Despacho"),
+    ]
+    etapa_atendimento = models.CharField(
+        max_length=20, choices=ETAPA_ATENDIMENTO_CHOICES, blank=True,
+        help_text="Coluna do Kanban pós-classificação em que um atendente já é owner. Vazio = ainda em 'Qualificados' (bot_closed, sem owner). Ver services.reivindicar_lead/mover_para_negociacao/preparar_despacho/liberar_lead.",
+    )
+    desfecho_pendente = models.CharField(
+        max_length=20, choices=DESFECHO_CHOICES, blank=True,
+        help_text="Desfecho escolhido ao arrastar pra 'Despacho', mas ainda NÃO definitivo -- só vira Lead.desfecho (e some do Kanban) quando o owner clica 'Enviar Despachos' (services.enviar_despachos).",
+    )
     class Meta:
         constraints = [models.UniqueConstraint(fields=["company", "contact"], name="unique_company_contact")]
         ordering = ["-created_at"]

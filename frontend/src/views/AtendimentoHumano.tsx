@@ -23,7 +23,7 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
     setBusy(true);
     setError('');
     api(`/leads/?company=${company.id}`)
-      .then((d: Paginated<Lead>) => setLeads(d.results.filter((l) => l.mode === 'HUMANO' && !l.desfecho && l.owner === minhaIdentidade)))
+      .then((d: Paginated<Lead>) => setLeads(d.results.filter((l) => l.etapa_atendimento === 'negociacao' && !l.desfecho && l.owner === minhaIdentidade)))
       .catch((e) => setError(e.message))
       .finally(() => setBusy(false));
   }
@@ -37,7 +37,9 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
     setActionBusy(lead.id);
     setError('');
     try {
-      await api(`/leads/${lead.id}/despachar/?company=${company.id}`, { method: 'POST', body: JSON.stringify({ desfecho }) });
+      // Só reserva o desfecho e move pra coluna "Despacho" do Kanban -- o envio
+      // definitivo (Lead.desfecho) acontece pelo botão "Enviar Despachos" em Leads.
+      await api(`/leads/${lead.id}/preparar-despacho/?company=${company.id}`, { method: 'POST', body: JSON.stringify({ desfecho }) });
       setLeads((v) => v.filter((l) => l.id !== lead.id));
       setDespachandoId(null);
     } catch (err) {

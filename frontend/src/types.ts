@@ -33,6 +33,10 @@ export type Lead = {
   bot_closed: boolean;
   notes: string;
   desfecho: 'encerrado' | 'comprometido' | 'falha' | '';
+  /** Coluna do Kanban pós-classificação em que esse owner já está. Vazio = ainda em "Qualificados". */
+  etapa_atendimento: 'espera' | 'negociacao' | 'despacho' | '';
+  /** Desfecho escolhido ao entrar em "Despacho", ainda não definitivo até "Enviar Despachos". */
+  desfecho_pendente: 'encerrado' | 'comprometido' | 'falha' | '';
 };
 
 export type LeadEvent = {

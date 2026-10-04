@@ -443,7 +443,7 @@ class QualificationTests(TestCase):
         self.assertEqual(muito_longo.status_code, 400)
         muito_curto = c.post(f"/api/admin-companies/{self.company.pk}/agente/", {"validade_dias": 0}, format="json")
         self.assertEqual(muito_curto.status_code, 400)
-    def test_assumir_lead_blocks_desqualificado_e_desconfiado(self):
+    def test_reivindicar_lead_blocks_desqualificado_e_desconfiado(self):
         self.delivered(self.send())
         self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": "nome"}))
         self.delivered(self.send("3", marker="VALIDAR"))
@@ -453,16 +453,17 @@ class QualificationTests(TestCase):
         self.company.members.add(atendente)
         client = APIClient()
         client.force_authenticate(atendente)
-        negado = client.post(f"/api/leads/{lead.pk}/assumir/?company={self.company.pk}")
+        negado = client.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(negado.status_code, 400)
         lead.refresh_from_db()
         self.assertEqual(lead.owner, "")
 
         lead.temperature = "Remarketing"
         lead.save()
-        ok = client.post(f"/api/leads/{lead.pk}/assumir/?company={self.company.pk}")
+        ok = client.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(ok.status_code, 200)
-    def test_assumir_lead_claims_it_atomically_and_blocks_staff(self):
+        self.assertEqual(ok.json()["etapa_atendimento"], "espera")
+    def test_reivindicar_lead_claims_it_atomically_and_blocks_staff(self):
         self.delivered(self.send())
         self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": "nome"}))
         self.delivered(self.send("3", marker="VALIDAR"))
@@ -474,7 +475,7 @@ class QualificationTests(TestCase):
         self.company.members.add(staff)
         staff_client = APIClient()
         staff_client.force_authenticate(staff)
-        denied = staff_client.post(f"/api/leads/{lead.pk}/assumir/?company={self.company.pk}")
+        denied = staff_client.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(denied.status_code, 403)
 
         atendente_a = get_user_model().objects.create_user(username="atendente-a")
@@ -485,48 +486,124 @@ class QualificationTests(TestCase):
         client_b = APIClient()
         client_b.force_authenticate(atendente_b)
 
-        ok = client_a.post(f"/api/leads/{lead.pk}/assumir/?company={self.company.pk}")
+        ok = client_a.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(ok.status_code, 200)
         lead.refresh_from_db()
         self.assertEqual(lead.owner, "atendente-a")
-        self.assertEqual(lead.mode, "HUMANO")
+        self.assertEqual(lead.etapa_atendimento, "espera")
+        self.assertEqual(lead.mode, "AUTOMÁTICO")  # só vira HUMANO ao entrar em negociação
 
-        ja_assumido = client_b.post(f"/api/leads/{lead.pk}/assumir/?company={self.company.pk}")
+        ja_assumido = client_b.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(ja_assumido.status_code, 400)
         lead.refresh_from_db()
         self.assertEqual(lead.owner, "atendente-a")
 
-        # owner/mode não podem mais ser trocados por PATCH livre
+        # owner/etapa_atendimento não podem mais ser trocados por PATCH livre
         bypass = client_a.patch(f"/api/leads/{lead.pk}/?company={self.company.pk}", {"owner": "hackeado"}, format="json")
         self.assertEqual(bypass.status_code, 200)
         lead.refresh_from_db()
         self.assertEqual(lead.owner, "atendente-a")
-    def test_despachar_lead_requires_owner_and_valid_desfecho(self):
+    def test_negociar_lead_from_qualificados_or_espera_and_blocks_other_owner(self):
         self.delivered(self.send())
         self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": "nome"}))
         self.delivered(self.send("3", marker="VALIDAR"))
         self.send("4", marker="CLASSIFICADO", fields={"temperatura": "Quente", "prioridade": "Alta"})
         lead = Lead.objects.get()
-        atendente_a = get_user_model().objects.create_user(username="atendente-c")
-        atendente_b = get_user_model().objects.create_user(username="atendente-d")
+        atendente_a = get_user_model().objects.create_user(username="atendente-neg-a")
+        atendente_b = get_user_model().objects.create_user(username="atendente-neg-b")
         self.company.members.add(atendente_a, atendente_b)
         client_a = APIClient()
         client_a.force_authenticate(atendente_a)
         client_b = APIClient()
         client_b.force_authenticate(atendente_b)
 
-        client_a.post(f"/api/leads/{lead.pk}/assumir/?company={self.company.pk}")
-
-        invalido = client_a.post(f"/api/leads/{lead.pk}/despachar/?company={self.company.pk}", {"desfecho": "sei-la"}, format="json")
-        self.assertEqual(invalido.status_code, 400)
-
-        outro = client_b.post(f"/api/leads/{lead.pk}/despachar/?company={self.company.pk}", {"desfecho": "encerrado"}, format="json")
-        self.assertEqual(outro.status_code, 400)
-
-        ok = client_a.post(f"/api/leads/{lead.pk}/despachar/?company={self.company.pk}", {"desfecho": "encerrado"}, format="json")
+        # direto de Qualificados (sem owner ainda) -- quem move se torna owner
+        ok = client_a.post(f"/api/leads/{lead.pk}/negociar/?company={self.company.pk}")
         self.assertEqual(ok.status_code, 200)
         lead.refresh_from_db()
-        self.assertEqual(lead.desfecho, "encerrado")
+        self.assertEqual(lead.owner, "atendente-neg-a")
+        self.assertEqual(lead.mode, "HUMANO")
+        self.assertEqual(lead.etapa_atendimento, "negociacao")
+
+        # outro atendente não pode mover um lead que já tem owner
+        bloqueado = client_b.post(f"/api/leads/{lead.pk}/negociar/?company={self.company.pk}")
+        self.assertEqual(bloqueado.status_code, 400)
+    def test_preparar_despacho_auto_falha_direto_de_qualificados(self):
+        self.delivered(self.send())
+        self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": "nome"}))
+        self.delivered(self.send("3", marker="VALIDAR"))
+        self.send("4", marker="CLASSIFICADO", fields={"temperatura": "Quente", "prioridade": "Alta"})
+        lead = Lead.objects.get()
+        atendente = get_user_model().objects.create_user(username="atendente-auto-falha")
+        self.company.members.add(atendente)
+        client = APIClient()
+        client.force_authenticate(atendente)
+
+        resp = client.post(f"/api/leads/{lead.pk}/preparar-despacho/?company={self.company.pk}", {"auto_falha": True}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        lead.refresh_from_db()
+        self.assertEqual(lead.owner, "atendente-auto-falha")
+        self.assertEqual(lead.etapa_atendimento, "despacho")
+        self.assertEqual(lead.desfecho_pendente, "falha")
+        self.assertEqual(lead.desfecho, "")  # ainda não é definitivo
+    def test_enviar_despachos_finaliza_so_do_proprio_owner_e_desta_empresa(self):
+        self.delivered(self.send())
+        self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": "nome"}))
+        self.delivered(self.send("3", marker="VALIDAR"))
+        self.send("4", marker="CLASSIFICADO", fields={"temperatura": "Quente", "prioridade": "Alta"})
+        lead_a = Lead.objects.get()
+
+        atendente = get_user_model().objects.create_user(username="atendente-envia")
+        outro = get_user_model().objects.create_user(username="atendente-nao-envia")
+        self.company.members.add(atendente, outro)
+        client = APIClient()
+        client.force_authenticate(atendente)
+        outro_client = APIClient()
+        outro_client.force_authenticate(outro)
+
+        # só lead_a está classificado/despachável nesse teste
+        client.post(f"/api/leads/{lead_a.pk}/preparar-despacho/?company={self.company.pk}", {"desfecho": "encerrado"}, format="json")
+
+        enviado_por_outro = outro_client.post(f"/api/leads/enviar-despachos/?company={self.company.pk}")
+        self.assertEqual(enviado_por_outro.json()["enviados"], 0)
+        lead_a.refresh_from_db()
+        self.assertEqual(lead_a.desfecho, "")  # não foi o owner que mandou, nada mudou
+
+        enviado = client.post(f"/api/leads/enviar-despachos/?company={self.company.pk}")
+        self.assertEqual(enviado.status_code, 200)
+        self.assertEqual(enviado.json()["enviados"], 1)
+        lead_a.refresh_from_db()
+        self.assertEqual(lead_a.desfecho, "encerrado")
+        self.assertEqual(lead_a.desfecho_pendente, "")
+        self.assertEqual(lead_a.etapa_atendimento, "")
+    def test_liberar_lead_devolve_para_qualificados(self):
+        self.delivered(self.send())
+        self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": "nome"}))
+        self.delivered(self.send("3", marker="VALIDAR"))
+        self.send("4", marker="CLASSIFICADO", fields={"temperatura": "Quente", "prioridade": "Alta"})
+        lead = Lead.objects.get()
+        atendente_a = get_user_model().objects.create_user(username="atendente-libera-a")
+        atendente_b = get_user_model().objects.create_user(username="atendente-libera-b")
+        self.company.members.add(atendente_a, atendente_b)
+        client_a = APIClient()
+        client_a.force_authenticate(atendente_a)
+        client_b = APIClient()
+        client_b.force_authenticate(atendente_b)
+
+        client_a.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
+
+        bloqueado = client_b.post(f"/api/leads/{lead.pk}/liberar/?company={self.company.pk}")
+        self.assertEqual(bloqueado.status_code, 400)
+
+        ok = client_a.post(f"/api/leads/{lead.pk}/liberar/?company={self.company.pk}")
+        self.assertEqual(ok.status_code, 200)
+        lead.refresh_from_db()
+        self.assertEqual(lead.owner, "")
+        self.assertEqual(lead.etapa_atendimento, "")
+
+        # livre de novo -- outro atendente consegue reivindicar
+        reivindicado_por_b = client_b.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
+        self.assertEqual(reivindicado_por_b.status_code, 200)
     def test_redefinir_senha_atendente_requires_empresa_and_emails_new_password(self):
         atendente = get_user_model().objects.create_user(username="atendente-x", password="senha-velha-123", email="atendente-x@example.com")
         self.company.members.add(atendente)

@@ -416,39 +416,113 @@ def revogar_token_agente(company):
 # Espera" -> "Atendimento humano" -> encerrado/comprometido/falha) ---
 
 @transaction.atomic
-def assumir_lead(lead_id, user):
-    """Um atendente 'pega' um lead classificado e ainda sem responsável.
-    select_for_update garante que, se dois atendentes clicarem ao mesmo tempo,
-    só um consegue -- corrige o gap de atomicidade identificado antes (owner
-    deixou de ser um PATCH livre, só muda por aqui ou por despachar_lead)."""
+def _nome_usuario(user):
+    profile = getattr(user, "profile", None)
+    return (profile.display_name if profile else "") or user.get_full_name() or user.username
+
+def _validar_lead_classificavel(lead):
+    """Checagem comum a toda transição pós-triagem do Kanban (Qualificados em
+    diante): precisa ter terminado o funil e não pode ser Desqualificado/
+    Desconfiado (esses nunca entram na fila de atendimento humano)."""
+    if not lead.bot_closed:
+        return "Este lead ainda não concluiu a triagem."
+    if lead.temperature in FORA_DO_KANBAN:
+        return "Leads classificados como Desqualificado ou Desconfiado não entram na fila de atendimento humano."
+    return None
+
+def reivindicar_lead(lead_id, user):
+    """Qualificados -> Atendimentos em espera: atendente reserva um lead
+    classificado e ainda sem responsável (ainda não é negociação -- só
+    'pendências'). select_for_update garante atomicidade na disputa entre
+    atendentes clicando ao mesmo tempo."""
     lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
     if not lead:
         return "Lead não encontrado."
     if lead.owner:
         return "Este atendimento já foi assumido por outro atendente."
-    if lead.temperature in FORA_DO_KANBAN:
-        return "Leads classificados como Desqualificado ou Desconfiado não entram na fila de atendimento humano."
-    profile = getattr(user, "profile", None)
-    nome = (profile.display_name if profile else "") or user.get_full_name() or user.username
-    lead.owner = nome
-    lead.mode = "HUMANO"
-    lead.save(update_fields=["owner", "mode"])
+    erro = _validar_lead_classificavel(lead)
+    if erro:
+        return erro
+    lead.owner = _nome_usuario(user)
+    lead.etapa_atendimento = "espera"
+    lead.save(update_fields=["owner", "etapa_atendimento"])
     return None
 
-def despachar_lead(lead_id, desfecho, user):
-    if desfecho not in dict(Lead.DESFECHO_CHOICES):
-        return "Classificação de despacho inválida."
-    lead = Lead.objects.filter(pk=lead_id).first()
+def mover_para_negociacao(lead_id, user):
+    """Qualificados OU Atendimentos em espera -> Em negociação. Se o lead ainda
+    não tem owner (vindo direto de Qualificados), quem está movendo se torna
+    owner agora -- é o botão 'Acompanhar' na tela de cadastro. Se já tem owner
+    (vindo de Em espera), só esse mesmo owner pode mover."""
+    lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
     if not lead:
         return "Lead não encontrado."
-    profile = getattr(user, "profile", None)
-    nome = (profile.display_name if profile else "") or user.get_full_name() or user.username
+    nome = _nome_usuario(user)
+    if lead.owner and lead.owner != nome:
+        return "Só quem assumiu este atendimento pode movê-lo."
+    erro = _validar_lead_classificavel(lead)
+    if erro:
+        return erro
+    lead.owner = nome
+    lead.mode = "HUMANO"
+    lead.etapa_atendimento = "negociacao"
+    lead.save(update_fields=["owner", "mode", "etapa_atendimento"])
+    return None
+
+def preparar_despacho(lead_id, desfecho, user, auto_falha=False):
+    """Qualificados, Em espera OU Em negociação -> Despacho: só RESERVA o
+    desfecho (desfecho_pendente), não finaliza ainda -- isso só acontece em
+    enviar_despachos (botão 'Enviar Despachos'). `auto_falha=True` é a
+    transição direta Qualificados -> Despacho (sem nunca ter negociado):
+    força 'falha', ignora o `desfecho` pedido."""
+    lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
+    if not lead:
+        return "Lead não encontrado."
+    nome = _nome_usuario(user)
     if lead.owner and lead.owner != nome:
         return "Só quem assumiu este atendimento pode despachá-lo."
-    lead.desfecho = desfecho
-    lead.next_action = ""
-    lead.save(update_fields=["desfecho", "next_action"])
+    erro = _validar_lead_classificavel(lead)
+    if erro:
+        return erro
+    desfecho_final = "falha" if auto_falha else desfecho
+    if desfecho_final not in dict(Lead.DESFECHO_CHOICES):
+        return "Classificação de despacho inválida."
+    lead.owner = nome
+    lead.etapa_atendimento = "despacho"
+    lead.desfecho_pendente = desfecho_final
+    lead.save(update_fields=["owner", "etapa_atendimento", "desfecho_pendente"])
     return None
+
+def liberar_lead(lead_id, user):
+    """Qualquer coluna já assumida -> de volta pra Qualificados: solta o owner
+    (que fica livre pra qualquer atendente reivindicar de novo). Só o próprio
+    owner pode se soltar -- mesma regra simétrica de mover."""
+    lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
+    if not lead:
+        return "Lead não encontrado."
+    nome = _nome_usuario(user)
+    if lead.owner and lead.owner != nome:
+        return "Só quem assumiu este atendimento pode devolvê-lo pra Qualificados."
+    lead.owner = ""
+    lead.mode = "AUTOMÁTICO"
+    lead.etapa_atendimento = ""
+    lead.desfecho_pendente = ""
+    lead.save(update_fields=["owner", "mode", "etapa_atendimento", "desfecho_pendente"])
+    return None
+
+@transaction.atomic
+def enviar_despachos(user, company):
+    """Botão 'Enviar Despachos': finaliza de uma vez TODOS os leads que este
+    atendente já reservou na coluna Despacho DESTA empresa (desfecho_pendente
+    -> desfecho definitivo). Devolve a quantidade enviada."""
+    nome = _nome_usuario(user)
+    leads = list(Lead.objects.select_for_update().filter(company=company, owner=nome, etapa_atendimento="despacho").exclude(desfecho_pendente=""))
+    for lead in leads:
+        lead.desfecho = lead.desfecho_pendente
+        lead.desfecho_pendente = ""
+        lead.etapa_atendimento = ""
+        lead.next_action = ""
+        lead.save(update_fields=["desfecho", "desfecho_pendente", "etapa_atendimento", "next_action"])
+    return len(leads)
 
 # --- Variáveis do Agente: peso (1-10) de cada pergunta sugere urgência ---
 # 10 níveis de peso / 5 classificações de Lead.TEMPERATURA_CHOICES = faixas

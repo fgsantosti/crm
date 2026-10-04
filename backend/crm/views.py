@@ -19,7 +19,11 @@ from .services import (
     solicitar_troca_email, confirmar_troca_email as confirmar_troca_email_service,
     redefinir_senha_atendente as redefinir_senha_atendente_service,
     agent_status, gerar_token_agente, revogar_token_agente,
-    assumir_lead as assumir_lead_service, despachar_lead as despachar_lead_service,
+    reivindicar_lead as reivindicar_lead_service,
+    mover_para_negociacao as mover_para_negociacao_service,
+    preparar_despacho as preparar_despacho_service,
+    liberar_lead as liberar_lead_service,
+    enviar_despachos as enviar_despachos_service,
     seed_roteiro_padrao,
 )
 
@@ -279,28 +283,62 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         if self.request.query_params.get("pending") == "1":
-            qs = qs.exclude(next_action="").exclude(mode="HUMANO").annotate(rank=Case(When(priority="Alta", then=Value(0)), When(priority="Média", then=Value(1)), default=Value(2), output_field=IntegerField())).order_by("rank", "return_at")
+            # "Pendências" = coluna "Atendimentos em espera" do Kanban: já classificado,
+            # já tem owner, mas ainda não entrou em negociação nem foi despachado.
+            qs = qs.filter(etapa_atendimento="espera").annotate(
+                rank=Case(When(priority="Alta", then=Value(0)), When(priority="Média", then=Value(1)), default=Value(2), output_field=IntegerField())
+            ).order_by("rank", "return_at")
         return qs
     @action(detail=True)
     def events(self, request, pk=None):
         return Response(EventSerializer(self.get_object().events.all(), many=True).data)
+    def _bloqueia_staff(self, request):
+        """Empresa/admin (is_staff) nunca opera o Kanban pós-triagem -- só atendente."""
+        return request.user.is_staff
     @action(detail=True, methods=["post"])
-    def assumir(self, request, pk=None):
-        """Empresa/admin (is_staff) nunca assume atendimento -- só atendente."""
-        if request.user.is_staff:
+    def reivindicar(self, request, pk=None):
+        """Qualificados -> Atendimentos em espera."""
+        if self._bloqueia_staff(request):
             return Response({"detail": "Esse perfil não assume atendimentos."}, status=403)
-        erro = assumir_lead_service(self.get_object().pk, request.user)
+        erro = reivindicar_lead_service(self.get_object().pk, request.user)
         if erro:
             return Response({"detail": erro}, status=400)
         return Response(LeadSerializer(self.get_object()).data)
     @action(detail=True, methods=["post"])
-    def despachar(self, request, pk=None):
-        if request.user.is_staff:
-            return Response({"detail": "Esse perfil não despacha atendimentos."}, status=403)
-        erro = despachar_lead_service(self.get_object().pk, request.data.get("desfecho"), request.user)
+    def negociar(self, request, pk=None):
+        """Qualificados ou Em espera -> Em negociação (botão 'Acompanhar')."""
+        if self._bloqueia_staff(request):
+            return Response({"detail": "Esse perfil não assume atendimentos."}, status=403)
+        erro = mover_para_negociacao_service(self.get_object().pk, request.user)
         if erro:
             return Response({"detail": erro}, status=400)
         return Response(LeadSerializer(self.get_object()).data)
+    @action(detail=True, methods=["post"], url_path="preparar-despacho")
+    def preparar_despacho(self, request, pk=None):
+        """Qualificados, Em espera ou Em negociação -> Despacho (ainda não definitivo)."""
+        if self._bloqueia_staff(request):
+            return Response({"detail": "Esse perfil não despacha atendimentos."}, status=403)
+        auto_falha = bool(request.data.get("auto_falha"))
+        erro = preparar_despacho_service(self.get_object().pk, request.data.get("desfecho"), request.user, auto_falha=auto_falha)
+        if erro:
+            return Response({"detail": erro}, status=400)
+        return Response(LeadSerializer(self.get_object()).data)
+    @action(detail=True, methods=["post"])
+    def liberar(self, request, pk=None):
+        """Qualquer coluna assumida -> de volta pra Qualificados (solta o owner)."""
+        if self._bloqueia_staff(request):
+            return Response({"detail": "Esse perfil não opera atendimentos."}, status=403)
+        erro = liberar_lead_service(self.get_object().pk, request.user)
+        if erro:
+            return Response({"detail": erro}, status=400)
+        return Response(LeadSerializer(self.get_object()).data)
+    @action(detail=False, methods=["post"], url_path="enviar-despachos")
+    def enviar_despachos(self, request):
+        """Botão 'Enviar Despachos': finaliza de uma vez todo o Despacho deste atendente."""
+        if self._bloqueia_staff(request):
+            return Response({"detail": "Esse perfil não despacha atendimentos."}, status=403)
+        enviados = enviar_despachos_service(request.user, self.company())
+        return Response({"enviados": enviados})
 
 class QuestionViewSet(TenantMixin, viewsets.ModelViewSet):
     queryset = Question.objects.all().order_by("id")

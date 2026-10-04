@@ -31,7 +31,7 @@ class LeadSerializer(serializers.ModelSerializer):
         # owner/mode só mudam via as actions assumir/despachar (services.py) --
         # nunca mais um PATCH livre de texto, pra garantir atomicidade real
         # na disputa por um lead entre atendentes.
-        read_only_fields = ["id", "company", "contact", "created_at", "state", "last_audio_id", "bot_closed", "last_contact", "owner", "mode", "desfecho", "variaveis_roteiro"]
+        read_only_fields = ["id", "company", "contact", "created_at", "state", "last_audio_id", "bot_closed", "last_contact", "owner", "mode", "desfecho", "variaveis_roteiro", "etapa_atendimento", "desfecho_pendente"]
 
     def validate(self, attrs):
         if attrs.get("mode") == "AUTOMÁTICO" and self.instance and self.instance.mode == "HUMANO":
