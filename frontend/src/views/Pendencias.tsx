@@ -86,7 +86,7 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
           </table>
         </div>
         {!busy && !visible.length && <div className="empty">Nenhuma pendência nesta empresa.</div>}
-        <p className="table-note">Casos em atendimento humano não aparecem aqui — veja em “Atendimento humano”.</p>
+        <p className="table-note">Casos em atendimento humano não aparecem aqui — veja em “Meus Atendimentos”.</p>
       </section>
     </>
   );

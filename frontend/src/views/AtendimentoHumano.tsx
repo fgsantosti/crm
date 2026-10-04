@@ -49,7 +49,6 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
       });
       setLeads((v) => [created, ...v]);
       setNovo(false);
-      (e.currentTarget as HTMLFormElement).reset();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -80,7 +79,7 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
       <header className="page-header" style={{ alignItems: 'flex-end' }}>
         <div>
           <small className="eyebrow">Escalonamento</small>
-          <h1>Atendimento humano</h1>
+          <h1>Meus Atendimentos</h1>
           <p>
             {leads.length} caso{leads.length === 1 ? '' : 's'} sob sua responsabilidade.
           </p>
@@ -174,9 +173,10 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
                   <button
                     key={opt.value}
                     type="button"
+                    className="desfecho-option"
                     onClick={() => despachar(l, opt.value)}
                     disabled={actionBusy === l.id}
-                    style={{ textAlign: 'left', borderColor: opt.color, color: opt.color, background: '#fff' }}
+                    style={{ '--cor': opt.color } as React.CSSProperties}
                   >
                     {actionBusy === l.id && <Spinner />}
                     <strong style={{ display: 'block' }}>{opt.label}</strong>

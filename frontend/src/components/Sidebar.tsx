@@ -48,7 +48,7 @@ export function Sidebar({
     { key: 'dashboard', label: 'Dashboard' },
     { key: 'leads', label: 'Todos os leads', count: leadsCount },
     { key: 'pendencias', label: 'Pendências', count: pendingCount },
-    { key: 'humano', label: 'Atendimento humano', count: humanCount },
+    { key: 'humano', label: 'Meus Atendimentos', count: humanCount },
   ];
   if (role === 'empresa') {
     items.push({ key: 'roteiro', label: 'Roteiro do agente' });
