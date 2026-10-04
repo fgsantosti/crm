@@ -90,9 +90,6 @@ code { font-family: 'DM Mono', monospace; background: var(--panel-muted); paddin
   position: absolute; inset: 0; opacity: .5; pointer-events: none;
   background-image: radial-gradient(rgba(255,255,255,.06) 1px, transparent 1px); background-size: 18px 18px;
 }
-.login-illustration-side .watermark {
-  position: absolute; right: -180px; top: 50%; transform: translateY(-50%); opacity: .07; pointer-events: none;
-}
 .login-illustration-side .content { position: relative; max-width: 460px; text-align: center; }
 .login-illustration-side .content h2 { font-size: 27px; color: #F3E9DD; margin: 0 0 14px; }
 .login-illustration-side .content p { color: #C9B6A4; font-size: 16px; line-height: 1.65; }
