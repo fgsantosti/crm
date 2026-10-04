@@ -14,7 +14,7 @@ from django.shortcuts import get_object_or_404
 from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, VariavelRoteiro, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
 from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer, VariavelRoteiroSerializer
 from .services import (
-    receive, escalate, create_invite,
+    receive, escalate, create_invite, contexto_agente,
     validar_convite as validar_convite_service,
     trocar_senha as trocar_senha_service,
     solicitar_troca_email, confirmar_troca_email as confirmar_troca_email_service,
@@ -254,6 +254,12 @@ class CompanyViewSet(viewsets.ModelViewSet):
                 "is_staff": u.is_staff, "is_superuser": u.is_superuser, "date_joined": u.date_joined,
             })
         return Response(result)
+    @action(detail=True, methods=["get"], url_path="agente/contexto")
+    def agente_contexto(self, request, pk=None):
+        """Roteiro, áreas e faixas de urgência pro agente conduzir a triagem. Leitura
+        pura; liberado pra conta de serviço do agente e membros humanos da empresa
+        (get_object já restringe às empresas do usuário -> 404 nas demais)."""
+        return Response(contexto_agente(self.get_object()))
     @action(detail=True, methods=["post"])
     def incoming(self, request, pk=None):
         company = self.get_object()
@@ -432,7 +438,7 @@ class QuestionViewSet(TenantMixin, viewsets.ModelViewSet):
 
 class VariavelViewSet(TenantMixin, viewsets.ModelViewSet):
     """Variáveis do Agente (peso 1-10, usadas na classificação de urgência --
-    ver services.calcular_urgencia_sugerida). Toda Question fica atrelada a
+    ver services.calcular_urgencia). Toda Question fica atrelada a
     uma dessas (on_delete=PROTECT), então apagar uma em uso falha com 400."""
     queryset = Variavel.objects.all()
     serializer_class = VariavelSerializer

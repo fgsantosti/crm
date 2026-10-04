@@ -10,7 +10,11 @@ class Company(models.Model):
     members = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="companies")
     initial_state = models.CharField(max_length=80, default="apresentacao", help_text="question_id inicial enviado no primeiro contato.")
     allow_transcription = models.BooleanField(default=False)
-    default_owner = models.CharField(max_length=120, blank=True)
+    numero_agente = models.CharField(
+        max_length=16, blank=True,
+        help_text="Número de WhatsApp (E.164) conectado ao agente. Normalmente é o mesmo número em que a equipe "
+        "faz os atendimentos; mensagens vindas dele mesmo nunca abrem lead.",
+    )
     agente_conversacional = models.BooleanField(
         default=True,
         help_text="Marcado: o agente envia o texto de apresentação e pode conversar livremente sobre a empresa "
@@ -32,8 +36,8 @@ class Variavel(models.Model):
     """Variável que a empresa define pra orientar a classificação de urgência
     do agente (tela "Variáveis do Agente"). Cada pergunta do roteiro fica
     sempre atrelada a uma dessas, com o peso valendo pra classificação --
-    ver services.calcular_urgencia_sugerida (10 níveis de peso / 5
-    classificações de urgência = faixas de 2 pontos cada)."""
+    ver services.calcular_urgencia (média das notas do agente ponderada pelos
+    pesos, convertida nas 5 faixas de services.FAIXAS_URGENCIA)."""
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="variaveis")
     name = models.CharField(max_length=120)
     peso = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(10)])
@@ -224,6 +228,7 @@ class Lead(models.Model):
     last_audio_id = models.CharField(max_length=250, blank=True)
     bot_closed = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
+    urgencia_detalhe = models.JSONField(default=dict, blank=True, help_text="Auditoria do CLASSIFICADO por notas: {notas, pesos, score, temperatura_calculada} (ver services.calcular_urgencia).")
     variaveis_roteiro = models.JSONField(default=dict, blank=True, help_text="slug->texto coletado nas perguntas com Variável de roteiro customizada (ver services.apply_fields/render_text). Os 3 builtin (nome/especialidade/tema) não usam isto -- já são campos próprios do Lead.")
     desfecho = models.CharField(max_length=20, choices=DESFECHO_CHOICES, blank=True, help_text="Definitivo: setado ao despachar (services.enviar_despachos) ou automaticamente ao classificar como Desqualificado/Desconfiado. Lead some do Kanban quando preenchido.")
     concluido_em = models.DateTimeField(null=True, blank=True, help_text="Quando o desfecho virou definitivo.")

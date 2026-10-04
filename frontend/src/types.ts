@@ -3,7 +3,8 @@ export type Company = {
   name: string;
   initial_state: string;
   allow_transcription: boolean;
-  default_owner: string;
+  /** Número de WhatsApp (E.164) conectado ao agente; mensagens dele mesmo nunca abrem lead. */
+  numero_agente: string;
   /** Marcado: agente conversa livremente sobre a empresa antes do funil. Desmarcado: vai direto pro funil com texto próprio. */
   agente_conversacional: boolean;
 };
@@ -29,6 +30,8 @@ export type Lead = {
   next_action: string;
   return_at: string | null;
   priority: 'Alta' | 'Média' | 'Baixa';
+  /** Auditoria do CLASSIFICADO por notas (vazio quando o agente mandou a temperatura direto). */
+  urgencia_detalhe: { notas?: Record<string, number>; pesos?: Record<string, number>; score?: number; temperatura_calculada?: string };
   /** id do usuário responsável -- compare com Me.id, nunca por nome. */
   owner: number | null;
   /** Só pra exibição. */
@@ -74,7 +77,7 @@ export type Question = {
 export type Variavel = {
   id: number;
   name: string;
-  /** 1-10, usado na média ponderada que sugere a urgência (ver services.calcular_urgencia_sugerida). */
+  /** 1-10, usado na média ponderada que sugere a urgência (ver services.calcular_urgencia). */
   peso: number;
 };
 
@@ -147,7 +150,7 @@ export type AdminCompany = {
   name: string;
   initial_state: string;
   allow_transcription: boolean;
-  default_owner: string;
+  numero_agente: string;
   member_count: number;
   tem_agente_ativo: boolean;
 };

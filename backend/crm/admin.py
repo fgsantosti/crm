@@ -10,12 +10,12 @@ from .models import Company, Lead, Question, CompanyInfo, Event, Area, Atendente
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
-    list_display = ["name", "initial_state", "default_owner", "allow_transcription", "member_count"]
+    list_display = ["name", "initial_state", "numero_agente", "allow_transcription", "member_count"]
     list_filter = ["allow_transcription"]
     search_fields = ["name"]
     filter_horizontal = ["members"]
     fieldsets = [
-        ("Dados gerais", {"fields": ["name", "initial_state", "default_owner", "allow_transcription"]}),
+        ("Dados gerais", {"fields": ["name", "initial_state", "numero_agente", "allow_transcription"]}),
         ("Membros", {"fields": ["members"]}),
     ]
     @admin.display(description="Members")

@@ -5,7 +5,7 @@ import type { Company, Lead, LeadEvent, Me } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 import { AreaSelect } from '../components/AreaSelect';
 
-// Mesma ordem de services.URGENCIA_POR_FAIXA no backend (menos urgente -> mais urgente).
+// Mesma ordem de services.FAIXAS_URGENCIA no backend (menos urgente -> mais urgente).
 export const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Remarketing: 2, Qualificado: 3, Quente: 4 };
 export const URGENCIA_COR: Record<string, string> = { Remarketing: '#2563EB', Qualificado: '#D4A72C', Quente: '#E2574C' };
 export const FORA_DO_KANBAN = new Set(['Desqualificado', 'Desconfiado']);
@@ -95,6 +95,39 @@ function TriagemResumo({ lead }: { lead: Lead }) {
         Demanda
         <input readOnly value={lead.demand || '—'} />
       </label>
+    </div>
+  );
+}
+
+/** Como o CRM chegou à temperatura: nota do agente × peso da variável de cada pergunta. */
+function UrgenciaDetalhe({ lead }: { lead: Lead }) {
+  const d = lead.urgencia_detalhe;
+  if (!d || d.score === undefined || !d.notas) return null;
+  const linhas = Object.entries(d.notas);
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <h3 style={{ margin: '0 0 8px' }}>Cálculo de urgência</h3>
+      <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 8px' }}>
+        Score <strong style={{ color: 'var(--ink)' }}>{d.score.toFixed(2)}</strong> de 10 → {d.temperatura_calculada} · Prioridade {lead.priority}
+      </p>
+      <table style={{ width: '100%', fontSize: 13 }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'left' }}>Pergunta</th>
+            <th style={{ textAlign: 'right' }}>Peso</th>
+            <th style={{ textAlign: 'right' }}>Nota</th>
+          </tr>
+        </thead>
+        <tbody>
+          {linhas.map(([qid, nota]) => (
+            <tr key={qid}>
+              <td style={{ fontFamily: "'DM Mono',monospace" }}>{qid}</td>
+              <td style={{ textAlign: 'right' }}>{d.pesos?.[qid] ?? '—'}</td>
+              <td style={{ textAlign: 'right' }}>{nota}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -478,6 +511,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
           )}
 
           <TriagemResumo lead={selected} />
+          <UrgenciaDetalhe lead={selected} />
           <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 20 }}>
             Esses dados vêm do agente durante a triagem — não são editáveis aqui. As transições de atendimento (reivindicar,
             negociar, despachar) acontecem arrastando o card entre as colunas do Kanban.

@@ -71,7 +71,7 @@ export function Admin({ api }: { api: Api }) {
         body: JSON.stringify({
           name: form.get('name'),
           initial_state: form.get('initial_state') || 'apresentacao',
-          default_owner: form.get('default_owner') || '',
+          numero_agente: form.get('numero_agente') || '',
           allow_transcription: form.get('allow_transcription') === 'on',
         }),
       });
@@ -97,7 +97,7 @@ export function Admin({ api }: { api: Api }) {
         body: JSON.stringify({
           name: form.get('name'),
           initial_state: form.get('initial_state'),
-          default_owner: form.get('default_owner'),
+          numero_agente: form.get('numero_agente'),
           allow_transcription: form.get('allow_transcription') === 'on',
         }),
       });
@@ -191,8 +191,9 @@ export function Admin({ api }: { api: Api }) {
                 <input name="initial_state" defaultValue="apresentacao" />
               </label>
               <label style={{ margin: 0, flex: '1 1 180px' }}>
-                Responsável padrão
-                <input name="default_owner" />
+                Número do agente (WhatsApp)
+                <input name="numero_agente" placeholder="+5586999999999" inputMode="tel" />
+                <small style={{ display: 'block', fontWeight: 400, color: 'var(--muted)', marginTop: 4 }}>Número conectado ao agente. Normalmente é o mesmo número em que a equipe faz os atendimentos.</small>
               </label>
               <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
                 <input type="checkbox" name="allow_transcription" style={{ width: 'auto' }} /> Permite transcrição de áudio
@@ -269,8 +270,9 @@ export function Admin({ api }: { api: Api }) {
                   <input name="initial_state" defaultValue={selected.initial_state} style={{ fontFamily: "'DM Mono',monospace", fontSize: 13 }} />
                 </label>
                 <label>
-                  Responsável padrão
-                  <input name="default_owner" defaultValue={selected.default_owner} />
+                  Número do agente (WhatsApp)
+                  <input name="numero_agente" defaultValue={selected.numero_agente} placeholder="+5586999999999" inputMode="tel" />
+                  <small style={{ display: 'block', fontWeight: 400, color: 'var(--muted)', marginTop: 4 }}>Número conectado ao agente. Normalmente é o mesmo número em que a equipe faz os atendimentos.</small>
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 20 }}>
                   <input type="checkbox" name="allow_transcription" defaultChecked={selected.allow_transcription} style={{ width: 'auto' }} /> Permite transcrição

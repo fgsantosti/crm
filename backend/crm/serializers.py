@@ -6,10 +6,10 @@ from .models import Company, Lead, Question, CompanyInfo, Event, Area, Atendente
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = Company
-        fields = ["id", "name", "initial_state", "allow_transcription", "default_owner", "agente_conversacional"]
+        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional"]
         # Só "agente_conversacional" é editável por aqui (tela Roteiro, aba "Opções
         # do Agente") -- os demais campos de Company continuam só pelo Django Admin.
-        read_only_fields = ["id", "name", "initial_state", "allow_transcription", "default_owner"]
+        read_only_fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente"]
 
 class AdminCompanySerializer(serializers.ModelSerializer):
     """Só para a tela interna da Axioma (IsSuperUser) -- cross-tenant de propósito."""
@@ -17,8 +17,13 @@ class AdminCompanySerializer(serializers.ModelSerializer):
     tem_agente_ativo = serializers.SerializerMethodField()
     class Meta:
         model = Company
-        fields = ["id", "name", "initial_state", "allow_transcription", "default_owner", "member_count", "tem_agente_ativo"]
+        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "member_count", "tem_agente_ativo"]
         read_only_fields = ["id", "member_count", "tem_agente_ativo"]
+    def validate_numero_agente(self, value):
+        value = (value or "").strip()
+        if value and not re.match(r"^\+[1-9]\d{7,14}$", value):
+            raise serializers.ValidationError("Use o formato internacional, ex.: +5586999999999.")
+        return value
     def get_member_count(self, obj):
         # Só atendentes/empresa ATIVOS -- uma conta desativada (ex.: via Django
         # Admin, fora do fluxo normal de "Desligar atendente") não deve inflar
@@ -45,7 +50,7 @@ class LeadSerializer(serializers.ModelSerializer):
         # owner/mode só mudam via as actions assumir/despachar (services.py) --
         # nunca mais um PATCH livre de texto, pra garantir atomicidade real
         # na disputa por um lead entre atendentes.
-        read_only_fields = ["id", "company", "contact", "created_at", "state", "last_audio_id", "bot_closed", "last_contact", "owner", "mode", "desfecho", "variaveis_roteiro", "etapa_atendimento", "desfecho_pendente", "origem_manual"]
+        read_only_fields = ["id", "company", "contact", "created_at", "state", "last_audio_id", "bot_closed", "last_contact", "owner", "mode", "desfecho", "variaveis_roteiro", "urgencia_detalhe", "etapa_atendimento", "desfecho_pendente", "origem_manual"]
 
     def validate(self, attrs):
         if attrs.get("mode") == "AUTOMÁTICO" and self.instance and self.instance.mode == "HUMANO":
@@ -156,6 +161,10 @@ class AgentFieldsSerializer(serializers.Serializer):
     # usado pra especialidade/Area. "validar" e "encerramento" continuam
     # reservados (nunca um "proxima" válido), também checado lá.
     proxima = serializers.CharField(max_length=80, required=False, allow_blank=True)
+    # CLASSIFICADO: nota 0-10 por question_id respondido; o CRM calcula a urgência
+    # ponderando pelos pesos das Variáveis (services.calcular_urgencia).
+    notas = serializers.DictField(child=serializers.FloatField(min_value=0, max_value=10), required=False)
+    variaveis_roteiro = serializers.DictField(child=serializers.CharField(max_length=300, allow_blank=True), required=False)
 
 class IncomingSerializer(serializers.Serializer):
     contact = serializers.RegexField(r"^\+[1-9]\d{7,14}$")
@@ -170,8 +179,8 @@ class IncomingSerializer(serializers.Serializer):
     def validate(self, attrs):
         if attrs["marker"] == "CLASSIFICADO":
             fields = attrs.get("fields") or {}
-            if not fields.get("temperatura") or not fields.get("prioridade"):
-                raise serializers.ValidationError("fields.temperatura e fields.prioridade são obrigatórios quando marker=CLASSIFICADO.")
+            if not fields.get("notas") and not (fields.get("temperatura") and fields.get("prioridade")):
+                raise serializers.ValidationError("CLASSIFICADO exige fields.notas (recomendado) ou fields.temperatura e fields.prioridade.")
         return attrs
 
 class DeliverySerializer(serializers.Serializer):

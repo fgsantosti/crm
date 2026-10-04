@@ -218,7 +218,7 @@ mensagem real (não reaproveitável entre mensagens diferentes).
 | `[[AXIOMA:REPETIR]]` | nada | reenvia o conteúdo da pergunta atual do lead (sem avançar) |
 | `[[AXIOMA:ATUALIZAR:{...}]]` | os campos conhecidos + **`proxima`** (obrigatório, um `question_id` cadastrado pela empresa na tela Roteiro) | grava os campos, avança o lead para `proxima`, devolve o conteúdo dela |
 | `[[AXIOMA:VALIDAR:{...}]]` | os campos conhecidos (sem `proxima`) | grava os campos, devolve a pergunta de confirmação fixa (`question_id="validar"`) |
-| `[[AXIOMA:CLASSIFICADO:{...}]]` | ao menos `temperatura` e `prioridade` (sem `proxima`) | grava os campos finais, **encerra o bot** (`bot_closed=true`), devolve a mensagem de encerramento (`question_id="encerramento"`) |
+| `[[AXIOMA:CLASSIFICADO:{...}]]` | **`notas`** (recomendado) **ou** `temperatura` + `prioridade` (sem `proxima`) | grava os campos finais, **encerra o bot** (`bot_closed=true`), devolve a mensagem de encerramento (`question_id="encerramento"`) |
 
 Campos aceitos dentro de `fields` (nomes exatamente como o agent emite):
 
@@ -231,6 +231,7 @@ Campos aceitos dentro de `fields` (nomes exatamente como o agent emite):
 | `interesse` | Interesse em seguir | `sim` \| `nao` \| `depois` |
 | `temperatura` | Classificação comercial | `Qualificado` \| `Quente` \| `Desconfiado` \| `Remarketing` \| `Desqualificado` |
 | `prioridade` | Prioridade de atendimento | `Alta` \| `Média` \| `Baixa` |
+| `notas` | **não é campo do lead** — só em `CLASSIFICADO`: dict `{"<question_id>": nota}` com nota de 0 a 10 para cada pergunta respondida (quão urgente/relevante foi a resposta) | O CRM calcula `score = Σ(nota × peso) / Σ(peso)` com o peso da Variável de cada pergunta e converte em temperatura pelas `faixas_urgencia` (ver seção 2.1). Esse cálculo **prevalece** sobre uma `temperatura` enviada junto; `prioridade`, se não vier, sai da temperatura (Quente→Alta, Qualificado→Média, demais→Baixa). `question_id` desconhecido ou sem variável é ignorado; se nenhum sobrar, o lead vai para atendimento humano. O detalhe fica em `Lead.urgencia_detalhe` para auditoria. |
 | `proxima` | **não é campo do lead** — só em `ATUALIZAR`, diz qual é o próximo `question_id` | **desde a tela Roteiro customizável**: qualquer `question_id` cadastrado pela empresa (3 sempre existem: `nome`, `situacao`, `demanda`; o resto é livre). Nunca `validar` nem `encerramento` — reservados. Um `question_id` que a empresa não cadastrou transfere o lead pra atendimento humano em vez de travar. |
 | `variaveis_roteiro` | **opcional**, dict `{"<slug>": "<texto>"}` — não é um campo fixo do lead, grava em `Lead.variaveis_roteiro` | só aceita slugs de Variáveis de roteiro **customizadas** já cadastradas pela empresa (tela Roteiro → aba Variáveis; `GET /api/variaveis-roteiro/?company={id}` lista as válidas, com `builtin=false`). Slug desconhecido, builtin ou valor não-texto é simplesmente ignorado (nunca trava o fluxo). Serve pra responder uma pergunta adicional do roteiro (fora das 3 obrigatórias) e reusar esse texto depois via `{slug}` em outra pergunta. |
 
@@ -251,6 +252,45 @@ vira string vazia — nunca aparece `{tema}` literal na mensagem.
 
 Envie só os campos que a resposta atual esclareceu — o CRM mantém os que já
 tinha. Isso já é como o `AGENTS.md` do agent descreve o preenchimento.
+
+## 2.1 Contexto do agente (roteiro, áreas e faixas de urgência)
+
+```
+GET /api/companies/{company_id}/agente/contexto/
+Authorization: Token <token>
+```
+
+Leitura pura (não cria lead nem evento), liberada para a conta de serviço do
+agente e para membros humanos da empresa; empresa de outro token → `404`.
+Use para conduzir o roteiro **na ordem configurada pela empresa** na tela
+"Perguntas de Roteiro" e para dar as `notas` do `CLASSIFICADO`:
+
+```jsonc
+{
+  "empresa": "Rufus Advocacia",
+  "agente_conversacional": false,
+  "numero_agente": "+558694238125",          // mensagens vindas dele mesmo nunca abrem lead
+  "areas": ["Consumidor", "Previdenciário", "Trabalhista"],
+  "perguntas": [                              // só o fluxo, por ordem; sem textos vazios
+    {"question_id": "nome", "ordem": 0, "texto": "Qual é o seu nome completo?", "obrigatoria": true,
+     "variavel": {"nome": "Geral", "peso": 5}, "variavel_roteiro": "nome"}
+  ],
+  "fora_do_fluxo": [{"question_id": "apresentacao", "texto": "Olá! ..."}],  // apresentacao, empresa, validar, encerramento
+  "faixas_urgencia": [
+    {"min": 0, "max_exclusivo": 3, "temperatura": "Desqualificado"},
+    {"min": 3, "max_exclusivo": 5, "temperatura": "Desconfiado"},
+    {"min": 5, "max_exclusivo": 7, "temperatura": "Remarketing"},
+    {"min": 7, "max_exclusivo": 9, "temperatura": "Qualificado"},
+    {"min": 9, "max_exclusivo": null, "temperatura": "Quente"}
+  ]
+}
+```
+
+`texto` vem cru (com placeholders): serve para o agente entender o que cada
+etapa pergunta — o que o contato recebe continua sendo sempre o `content`
+devolvido por `/incoming/`. Mensagem cujo `contact` é o próprio
+`numero_agente` volta `{"action": "NO_REPLY", "proprio_numero": true}` sem
+`lead_id`/`event_id` (não há entrega a confirmar).
 
 ## 3. Confirmação de entrega
 

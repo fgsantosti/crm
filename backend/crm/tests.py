@@ -329,14 +329,17 @@ class QualificationTests(TestCase):
         self.assertEqual(bloqueado.status_code, 400)
         liberado = c.delete(f"/api/company-info/{livre.pk}/?company={self.company.pk}")
         self.assertEqual(liberado.status_code, 204)
-    def test_calcular_urgencia_sugerida_bands_weights_into_five_levels(self):
-        from .services import calcular_urgencia_sugerida
-        self.assertEqual(calcular_urgencia_sugerida([1, 2]), "Desqualificado")
-        self.assertEqual(calcular_urgencia_sugerida([3, 4]), "Desconfiado")
-        self.assertEqual(calcular_urgencia_sugerida([5, 6]), "Remarketing")
-        self.assertEqual(calcular_urgencia_sugerida([7, 8]), "Qualificado")
-        self.assertEqual(calcular_urgencia_sugerida([9, 10]), "Quente")
-        self.assertIsNone(calcular_urgencia_sugerida([]))
+    def test_calcular_urgencia_pondera_notas_pelos_pesos_em_cinco_faixas(self):
+        from .services import calcular_urgencia
+        self.assertEqual(calcular_urgencia({"a": 2.9}, {"a": 5})[1], "Desqualificado")
+        self.assertEqual(calcular_urgencia({"a": 3}, {"a": 5})[1], "Desconfiado")
+        self.assertEqual(calcular_urgencia({"a": 5}, {"a": 5})[1], "Remarketing")
+        self.assertEqual(calcular_urgencia({"a": 7}, {"a": 5})[1], "Qualificado")
+        self.assertEqual(calcular_urgencia({"a": 9}, {"a": 5})[1], "Quente")
+        score, temp = calcular_urgencia({"situacao": 8, "renda": 10, "avaliar": 6}, {"situacao": 9, "renda": 7, "avaliar": 4})
+        self.assertAlmostEqual(score, (9 * 8 + 7 * 10 + 4 * 6) / 20)
+        self.assertEqual(temp, "Qualificado")
+        self.assertIsNone(calcular_urgencia({"x": 10}, {}))
     def test_atualizar_rejects_especialidade_not_registered_as_area(self):
         self.delivered(self.send())
         result = self.send("2", marker="ATUALIZAR", fields={"especialidade": "Área Inventada", "proxima": "nome"})
@@ -421,9 +424,11 @@ class QualificationTests(TestCase):
         created = c.post("/api/admin-companies/", {"name": "Nova Empresa Teste", "initial_state": "apresentacao"}, format="json")
         self.assertEqual(created.status_code, 201)
         company_id = created.json()["id"]
-        updated = c.patch(f"/api/admin-companies/{company_id}/", {"default_owner": "Fila Nova"}, format="json")
+        invalido = c.patch(f"/api/admin-companies/{company_id}/", {"numero_agente": "Fila Nova"}, format="json")
+        self.assertEqual(invalido.status_code, 400)
+        updated = c.patch(f"/api/admin-companies/{company_id}/", {"numero_agente": "+5586994238125"}, format="json")
         self.assertEqual(updated.status_code, 200)
-        self.assertEqual(updated.json()["default_owner"], "Fila Nova")
+        self.assertEqual(updated.json()["numero_agente"], "+5586994238125")
         # seed_roteiro_padrao: empresa nova já nasce com o mínimo pro funil funcionar.
         nova = Company.objects.get(pk=company_id)
         ids = set(Question.objects.filter(company=nova).values_list("question_id", flat=True))
@@ -1418,3 +1423,142 @@ class DespachoEConcluidosTests(TestCase):
         data = self.cliente(self.empresa).get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
         self.assertEqual(data["triagem_concluida"], 1)
         self.assertEqual(data["total"], 2)
+
+
+class AgenteContextoEUrgenciaTests(TestCase):
+    """Número do agente, GET /agente/contexto/ e CLASSIFICADO por notas × pesos."""
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from rest_framework.authtoken.models import Token
+        self.company = Company.objects.create(name="Rufus Teste", numero_agente="+5586994238125", agente_conversacional=False)
+        self.other = Company.objects.create(name="Outra")
+        Area.objects.create(company=self.company, name="Trabalhista")
+        Area.objects.create(company=self.company, name="Consumidor")
+        self.v_alta = Variavel.objects.create(company=self.company, name="Situação", peso=9)
+        self.v_media = Variavel.objects.create(company=self.company, name="Renda", peso=7)
+        self.v_baixa = Variavel.objects.create(company=self.company, name="Avaliar", peso=4)
+        Question.objects.create(company=self.company, question_id="apresentacao", text="Olá, {empresa}!")
+        Question.objects.create(company=self.company, question_id="validar", text="Confirma?")
+        Question.objects.create(company=self.company, question_id="encerramento", text="Obrigado.")
+        Question.objects.create(company=self.company, question_id="nome", text="Seu nome?", ordem=0, obrigatoria=True)
+        Question.objects.create(company=self.company, question_id="situacao", text="Qual a situação?", ordem=1, obrigatoria=True, variavel=self.v_alta)
+        Question.objects.create(company=self.company, question_id="afetou_renda", text="Afetou a renda?", ordem=2, variavel=self.v_media)
+        Question.objects.create(company=self.company, question_id="vazia", text="", ordem=3, variavel=self.v_media)
+        Question.objects.create(company=self.company, question_id="avaliar", text="Quer avaliação?", ordem=4, variavel=self.v_baixa)
+        agente = get_user_model().objects.create_user(username="agente.rufus-teste")
+        agente.groups.add(Group.objects.get_or_create(name="agente")[0])
+        self.company.members.add(agente)
+        self.agent_client = APIClient()
+        self.agent_client.credentials(HTTP_AUTHORIZATION=f"Token {Token.objects.create(user=agente).key}")
+
+    def send(self, mid, contact="+5585911113333", **kwargs):
+        data = {"contact": contact, "message_id": mid, "kind": "text", "marker": "Q", "question_id": "apresentacao",
+                "fields": {}, "human_required": False, "reason": "pedido humano", **kwargs}
+        return receive(self.company, data)
+
+    def ate_validar(self, contact="+5585911113333"):
+        for i, kw in enumerate([{}, {"marker": "ATUALIZAR", "fields": {"nome": "Ana", "proxima": "situacao"}},
+                                {"marker": "VALIDAR", "fields": {"tema": "verbas"}}], start=1):
+            r = self.send(f"v{i}", contact=contact, **kw)
+            Event.objects.filter(pk=r["event_id"]).update(delivery="SENT")
+
+    def test_mensagem_do_proprio_numero_do_agente_nao_cria_lead_nem_evento(self):
+        r = self.send("1", contact="+5586994238125")
+        self.assertEqual(r, {"action": "NO_REPLY", "proprio_numero": True})
+        self.assertEqual(Lead.objects.count(), 0)
+        self.assertEqual(Event.objects.count(), 0)
+
+    def test_lead_novo_nasce_sem_dono(self):
+        self.send("1")
+        self.assertIsNone(Lead.objects.get().owner)
+
+    def test_contexto_do_agente_lista_roteiro_areas_e_faixas(self):
+        resp = self.agent_client.get(f"/api/companies/{self.company.pk}/agente/contexto/")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["empresa"], "Rufus Teste")
+        self.assertFalse(body["agente_conversacional"])
+        self.assertEqual(body["numero_agente"], "+5586994238125")
+        self.assertEqual(body["areas"], ["Consumidor", "Trabalhista"])
+        self.assertEqual([p["question_id"] for p in body["perguntas"]], ["nome", "situacao", "afetou_renda", "avaliar"])
+        situacao = body["perguntas"][1]
+        self.assertEqual(situacao["variavel"], {"nome": "Situação", "peso": 9})
+        self.assertTrue(situacao["obrigatoria"])
+        self.assertEqual({q["question_id"] for q in body["fora_do_fluxo"]}, {"apresentacao", "validar", "encerramento"})
+        textos = {q["question_id"]: q["texto"] for q in body["fora_do_fluxo"]}
+        self.assertEqual(textos["apresentacao"], "Olá, {empresa}!")
+        self.assertEqual(body["faixas_urgencia"][0], {"min": 0, "max_exclusivo": 3, "temperatura": "Desqualificado"})
+        self.assertEqual(body["faixas_urgencia"][-1], {"min": 9, "max_exclusivo": None, "temperatura": "Quente"})
+        self.assertEqual(Lead.objects.count(), 0)
+        self.assertEqual(Event.objects.count(), 0)
+
+    def test_contexto_de_outra_empresa_da_404(self):
+        self.assertEqual(self.agent_client.get(f"/api/companies/{self.other.pk}/agente/contexto/").status_code, 404)
+        self.assertEqual(APIClient().get(f"/api/companies/{self.company.pk}/agente/contexto/").status_code, 401)
+
+    def test_contexto_liberado_para_membro_humano(self):
+        humano = get_user_model().objects.create_user(username="atendente-ctx")
+        self.company.members.add(humano)
+        c = APIClient()
+        c.force_authenticate(humano)
+        self.assertEqual(c.get(f"/api/companies/{self.company.pk}/agente/contexto/").status_code, 200)
+
+    def test_classificado_por_notas_calcula_no_crm_e_prevalece_sobre_temperatura_do_agente(self):
+        self.ate_validar()
+        r = self.send("c", marker="CLASSIFICADO", fields={
+            "notas": {"situacao": 8, "afetou_renda": 10, "avaliar": 6, "desconhecida": 10, "nome": 10},
+            "temperatura": "Desqualificado",
+        })
+        self.assertEqual(r["action"], "TEXTO")
+        lead = Lead.objects.get()
+        self.assertEqual(lead.temperature, "Qualificado")
+        self.assertEqual(lead.priority, "Média")
+        self.assertTrue(lead.bot_closed)
+        self.assertEqual(lead.urgencia_detalhe, {
+            "notas": {"situacao": 8.0, "afetou_renda": 10.0, "avaliar": 6.0},
+            "pesos": {"situacao": 9, "afetou_renda": 7, "avaliar": 4},
+            "score": 8.3,
+            "temperatura_calculada": "Qualificado",
+        })
+
+    def test_classificado_por_notas_quente_vira_prioridade_alta_e_respeita_prioridade_enviada(self):
+        self.ate_validar()
+        self.send("c", marker="CLASSIFICADO", fields={"notas": {"situacao": 10, "avaliar": 9}})
+        self.assertEqual((Lead.objects.get().temperature, Lead.objects.get().priority), ("Quente", "Alta"))
+        self.ate_validar(contact="+5585911114444")
+        self.send("c", contact="+5585911114444", marker="CLASSIFICADO", fields={"notas": {"situacao": 10}, "prioridade": "Baixa"})
+        self.assertEqual(Lead.objects.get(contact="+5585911114444").priority, "Baixa")
+
+    def test_classificado_com_notas_sem_peso_escala_para_humano(self):
+        self.ate_validar()
+        r = self.send("c", marker="CLASSIFICADO", fields={"notas": {"nome": 10, "inexistente": 9}})
+        self.assertEqual(r["action"], "NO_REPLY")
+        lead = Lead.objects.get()
+        self.assertEqual(lead.mode, "HUMANO")
+        self.assertFalse(lead.bot_closed)
+
+    def test_classificado_exige_notas_ou_temperatura_e_prioridade(self):
+        from .serializers import IncomingSerializer
+        base = {"contact": "+5585911113333", "message_id": "x", "marker": "CLASSIFICADO"}
+        self.assertFalse(IncomingSerializer(data={**base, "fields": {}}).is_valid())
+        self.assertFalse(IncomingSerializer(data={**base, "fields": {"temperatura": "Quente"}}).is_valid())
+        self.assertFalse(IncomingSerializer(data={**base, "fields": {"notas": {"situacao": 11}}}).is_valid())
+        self.assertTrue(IncomingSerializer(data={**base, "fields": {"notas": {"situacao": 7}}}).is_valid())
+        self.assertTrue(IncomingSerializer(data={**base, "fields": {"temperatura": "Quente", "prioridade": "Alta"}}).is_valid())
+
+    def test_numero_fica_mudo_apos_classificado_ate_o_despacho(self):
+        from .services import preparar_despacho, enviar_despachos
+        self.ate_validar()
+        self.send("c", marker="CLASSIFICADO", fields={"notas": {"situacao": 8}})
+        self.assertEqual(self.send("depois-1", marker="REPETIR")["action"], "NO_REPLY")
+        lead = Lead.objects.get()
+        atendente = get_user_model().objects.create_user(username="atendente-mudo")
+        self.company.members.add(atendente)
+        lead.owner = atendente
+        lead.mode = "HUMANO"
+        lead.save()
+        self.assertIsNone(preparar_despacho(lead.pk, "encerrado", atendente))
+        self.assertEqual(enviar_despachos(atendente, self.company), 1)
+        r = self.send("depois-2")
+        self.assertEqual(r["action"], "TEXTO")
+        self.assertNotEqual(r["lead_id"], str(lead.pk))

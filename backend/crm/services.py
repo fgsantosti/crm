@@ -148,6 +148,10 @@ def render_text(text, lead, company):
 def receive(company, data):
     # Serialize per company: protege a criação do primeiro contato e mensagens concorrentes.
     company = Company.objects.select_for_update().get(pk=company.pk)
+    # O próprio número do agente (normalmente o mesmo em que a equipe atende) nunca é
+    # lead: mensagem dele pra ele mesmo não cria lead nem evento.
+    if company.numero_agente and data["contact"] == company.numero_agente:
+        return {**NO_REPLY, "proprio_numero": True}
     # Só busca/reaproveita um lead ATIVO (desfecho em aberto) pra esse contato -- se o único
     # lead existente já foi despachado, o número está livre: cria um lead novo do zero em vez
     # de reabrir o histórico antigo. O lock da empresa acima garante que nunca nascem dois.
@@ -160,10 +164,7 @@ def receive(company, data):
             concluido_em__gte=timezone.now() - COOLDOWN_DESQUALIFICADO,
         ).order_by("-concluido_em").first()
     if not lead:
-        lead = Lead.objects.create(
-            company=company, contact=data["contact"], state=company.initial_state,
-            owner=resolver_usuario(company, company.default_owner),
-        )
+        lead = Lead.objects.create(company=company, contact=data["contact"], state=company.initial_state)
     previous = Event.objects.filter(lead=lead, message_id=data["message_id"]).first()
     if previous:
         return {**NO_REPLY, "duplicate": True, "lead_id": str(lead.pk)}
@@ -220,7 +221,9 @@ def receive(company, data):
                 escalate(lead, "CLASSIFICADO recebido sem VALIDAR anterior: revisar fluxo do agente")
                 question_id = None
             else:
-                field_error = apply_fields(lead, company, fields)
+                fields, field_error = _aplicar_notas_urgencia(lead, company, fields)
+                if not field_error:
+                    field_error = apply_fields(lead, company, fields)
                 if field_error:
                     escalate(lead, field_error)
                     question_id = None
@@ -468,20 +471,6 @@ def _nome_usuario(user):
     profile = getattr(user, "profile", None)
     return (profile.display_name if profile else "") or user.get_full_name() or user.username
 
-def resolver_usuario(company, texto):
-    """Texto livre (ex.: Company.default_owner) -> membro da empresa, por nome de
-    exibição, nome completo, primeiro nome ou username. Só aceita match único."""
-    texto = (texto or "").strip().lower()
-    if not texto:
-        return None
-    candidatos = []
-    for u in company.members.filter(is_active=True).exclude(groups__name="agente").select_related("profile"):
-        profile = getattr(u, "profile", None)
-        chaves = {(profile.display_name if profile else ""), u.get_full_name(), u.first_name, u.username}
-        if texto in {c.strip().lower() for c in chaves if c}:
-            candidatos.append(u)
-    return candidatos[0] if len(candidatos) == 1 else None
-
 def _validar_lead_classificavel(lead):
     """Checagem comum a toda transição pós-triagem do Kanban (Qualificados em
     diante): precisa ter terminado o funil -- ou ter sido escalado pra humano no
@@ -646,19 +635,18 @@ def enviar_despachos(user, company):
         lead.save(update_fields=["desfecho", "concluido_em", "desfecho_pendente", "etapa_atendimento", "next_action"])
     return len(leads)
 
-# --- Variáveis do Agente: peso (1-10) de cada pergunta sugere urgência ---
-# 10 níveis de peso / 5 classificações de Lead.TEMPERATURA_CHOICES = faixas
-# de 2 pontos cada. Ordem aqui é da menos pra mais urgente (ajuste se a ordem
-# de negócio real for outra -- não há essa ordenação registrada em nenhum
-# outro lugar do sistema hoje, TEMPERATURA_CHOICES é só uma lista solta).
-URGENCIA_POR_FAIXA = [
-    (1, 2, "Desqualificado"),
-    (3, 4, "Desconfiado"),
-    (5, 6, "Remarketing"),
-    (7, 8, "Qualificado"),
-    (9, 10, "Quente"),
+# --- Urgência: média das notas (0-10) do agente ponderada pelos pesos das Variáveis ---
+# Faixas contínuas sobre o score 0-10, da menos pra mais urgente. Mesma tabela é
+# exposta ao agente em GET /companies/{id}/agente/contexto/ (faixas_urgencia).
+FAIXAS_URGENCIA = [
+    (0, 3, "Desqualificado"),
+    (3, 5, "Desconfiado"),
+    (5, 7, "Remarketing"),
+    (7, 9, "Qualificado"),
+    (9, None, "Quente"),
 ]
-URGENCIA_RANK = {temp: i for i, (_, _, temp) in enumerate(URGENCIA_POR_FAIXA)}
+URGENCIA_RANK = {temp: i for i, (_, _, temp) in enumerate(FAIXAS_URGENCIA)}
+PRIORIDADE_POR_TEMPERATURA = {"Quente": "Alta", "Qualificado": "Média"}
 
 # O agente manda TODOS os leads pro CRM, até os desqualificados/desconfiados
 # -- mas esses dois nunca entram no fluxo operacional do Kanban nem podem ser
@@ -670,18 +658,75 @@ COOLDOWN_DESQUALIFICADO = timedelta(hours=24)
 # Comprometido e Falha também são conclusões, mas não de sucesso.
 DESFECHO_SUCESSO = "encerrado"
 
-def calcular_urgencia_sugerida(pesos):
-    """Sugestão auxiliar a partir da média dos pesos (1-10) das Variaveis das
-    perguntas já respondidas pelo lead. NÃO substitui o agente: CLASSIFICADO
-    continua sendo decidido por ele -- isso é só uma referência que pode
-    alimentar a legenda do Roteiro ou uma futura tela de apoio à decisão."""
-    if not pesos:
+def calcular_urgencia(notas, pesos):
+    """score = Σ(nota × peso) / Σ(peso), só sobre os question_id que têm peso.
+    Retorna (score, temperatura) ou None se nenhuma nota tiver peso conhecido."""
+    usados = [(float(notas[qid]), pesos[qid]) for qid in notas if qid in pesos and pesos[qid]]
+    if not usados:
         return None
-    media = sum(pesos) / len(pesos)
-    for minimo, maximo, temperatura in URGENCIA_POR_FAIXA:
-        if minimo <= media <= maximo:
-            return temperatura
-    return URGENCIA_POR_FAIXA[0][2] if media < 1 else URGENCIA_POR_FAIXA[-1][2]
+    score = sum(nota * peso for nota, peso in usados) / sum(peso for _, peso in usados)
+    for minimo, maximo_exclusivo, temperatura in FAIXAS_URGENCIA:
+        if score >= minimo and (maximo_exclusivo is None or score < maximo_exclusivo):
+            return score, temperatura
+    return score, FAIXAS_URGENCIA[0][2]
+
+def _aplicar_notas_urgencia(lead, company, fields):
+    """CLASSIFICADO com fields.notas: o CRM calcula temperatura (prevalece sobre a do
+    agente) e, se não vier, a prioridade; grava o detalhe pra auditoria. Retorna
+    (fields_atualizados, erro_ou_None)."""
+    notas = fields.get("notas") or {}
+    if not notas:
+        return fields, None
+    pesos = dict(
+        Question.objects.filter(company=company, question_id__in=list(notas), variavel__isnull=False)
+        .values_list("question_id", "variavel__peso")
+    )
+    calculo = calcular_urgencia(notas, pesos)
+    if calculo is None:
+        return fields, "Notas de urgência sem nenhuma pergunta com variável/peso cadastrado: revisar integração do agente"
+    score, temperatura = calculo
+    fields = {**fields, "temperatura": temperatura}
+    if not fields.get("prioridade"):
+        fields["prioridade"] = PRIORIDADE_POR_TEMPERATURA.get(temperatura, "Baixa")
+    usados = {qid: notas[qid] for qid in notas if qid in pesos}
+    lead.urgencia_detalhe = {
+        "notas": usados,
+        "pesos": {qid: pesos[qid] for qid in usados},
+        "score": round(score, 2),
+        "temperatura_calculada": temperatura,
+    }
+    return fields, None
+
+def contexto_agente(company):
+    """Tudo que o agente precisa pra conduzir o roteiro da empresa, sem efeitos colaterais."""
+    perguntas = []
+    fora_do_fluxo = []
+    for q in Question.objects.filter(company=company).select_related("variavel", "variavel_roteiro").order_by("ordem", "id"):
+        if not (q.text or "").strip():
+            continue
+        if q.question_id in MANDATORY_OFFFLOW_QUESTION_IDS:
+            fora_do_fluxo.append({"question_id": q.question_id, "texto": q.text})
+            continue
+        perguntas.append({
+            "question_id": q.question_id,
+            "ordem": q.ordem,
+            "texto": q.text,
+            "obrigatoria": q.obrigatoria,
+            "variavel": {"nome": q.variavel.name, "peso": q.variavel.peso} if q.variavel else None,
+            "variavel_roteiro": q.variavel_roteiro.slug if q.variavel_roteiro else None,
+        })
+    return {
+        "empresa": company.name,
+        "agente_conversacional": company.agente_conversacional,
+        "numero_agente": company.numero_agente,
+        "areas": list(company.areas.order_by("name").values_list("name", flat=True)),
+        "perguntas": perguntas,
+        "fora_do_fluxo": fora_do_fluxo,
+        "faixas_urgencia": [
+            {"min": minimo, "max_exclusivo": maximo, "temperatura": temperatura}
+            for minimo, maximo, temperatura in FAIXAS_URGENCIA
+        ],
+    }
 
 def _categoria_status(lead):
     """Categoria exclusiva (cada lead cai em exatamente uma) usada no donut/tiles
