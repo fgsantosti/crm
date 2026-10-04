@@ -457,7 +457,11 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
               onDragOver={(e) => canEdit && e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
-                if (dragId != null) reorder(dragId, q.id);
+                // Lê o id direto do dataTransfer (dado da sessão nativa de drag), não do state
+                // dragId por closure -- mais robusto contra qualquer timing entre o re-render do
+                // React e o evento nativo do navegador disparar.
+                const sourceId = Number(e.dataTransfer.getData('text/plain'));
+                if (sourceId) reorder(sourceId, q.id);
                 setDragId(null);
               }}
               style={{ opacity: dragId === q.id ? 0.5 : 1 }}

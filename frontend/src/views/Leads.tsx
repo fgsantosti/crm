@@ -329,7 +329,11 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     e.preventDefault();
-                    const lead = leads.find((l) => l.id === dragId) || null;
+                    // Lê o id direto do dataTransfer (sessão nativa de drag), não do state
+                    // dragId por closure -- mais robusto contra timing entre o React re-renderizar
+                    // e o navegador disparar o evento.
+                    const sourceId = e.dataTransfer.getData('text/plain');
+                    const lead = leads.find((l) => l.id === sourceId) || null;
                     onDropEm(col.key, lead);
                   }}
                 >
@@ -347,7 +351,11 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
                         key={l.id}
                         className={`kanban-card${selected?.id === l.id ? ' selected' : ''}`}
                         draggable={podeArrastar(l)}
-                        onDragStart={() => setDragId(l.id)}
+                        onDragStart={(e) => {
+                          e.dataTransfer.effectAllowed = 'move';
+                          e.dataTransfer.setData('text/plain', l.id);
+                          setDragId(l.id);
+                        }}
                         onDragEnd={() => setDragId(null)}
                         onClick={() => !bloqueado && setSelected(l)}
                         tabIndex={bloqueado ? -1 : 0}
