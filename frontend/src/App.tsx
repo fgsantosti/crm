@@ -93,22 +93,28 @@ export function App() {
     if (!company) return;
     let active = true;
     // Só os `count` (total no servidor) -- nunca contar em cima de results, que é só a 1ª página.
-    Promise.all([
-      api(`/leads/?company=${company.id}&ativos=1`),
-      api(`/leads/?company=${company.id}&pending=1`),
-      api(`/leads/?company=${company.id}&meus=1`),
-    ])
-      .then(([ativos, pending, meus]: [Paginated<Lead>, Paginated<Lead>, Paginated<Lead>]) => {
-        if (!active) return;
-        setLeadsCount(ativos.count);
-        setHumanCount(meus.count);
-        setPendingCount(pending.count);
-      })
-      .catch(() => {});
+    // Recarrega ao trocar de tela e a cada 30s, senão os números ficam velhos depois de
+    // "Pegar Lead", despacho, arraste no Kanban etc.
+    const carregar = () =>
+      Promise.all([
+        api(`/leads/?company=${company.id}&ativos=1`),
+        api(`/leads/?company=${company.id}&pending=1`),
+        api(`/leads/?company=${company.id}&meus=1`),
+      ])
+        .then(([ativos, pending, meus]: [Paginated<Lead>, Paginated<Lead>, Paginated<Lead>]) => {
+          if (!active) return;
+          setLeadsCount(ativos.count);
+          setHumanCount(meus.count);
+          setPendingCount(pending.count);
+        })
+        .catch(() => {});
+    carregar();
+    const timer = window.setInterval(carregar, 30000);
     return () => {
       active = false;
+      window.clearInterval(timer);
     };
-  }, [company?.id]);
+  }, [company?.id, view]);
 
   useEffect(() => {
     if (role === 'atendente' && (view === 'roteiro' || view === 'dados-empresa' || view === 'equipe')) setView('dashboard');

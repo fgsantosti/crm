@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import Case, When, Value, IntegerField, Q
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action, api_view, permission_classes, parser_classes
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
@@ -230,6 +231,9 @@ class CompanyViewSet(viewsets.ModelViewSet):
         # próprio no @action.
         if self.action == "partial_update":
             return [permissions.IsAdminUser(), NotAgentAccount()]
+        if self.action == "equipe":
+            # Lista e-mails da equipe: nunca para a conta de serviço do agente.
+            return [permissions.IsAuthenticated(), NotAgentAccount()]
         return [permissions.IsAuthenticated()]
     @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated, NotAgentAccount])
     def equipe(self, request, pk=None):
@@ -353,6 +357,11 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
                 Q(etapa_atendimento__in=["negociacao", "despacho"]) | Q(origem_manual=True)
             )
         return qs
+    def perform_update(self, serializer):
+        # Atendente só edita lead que ele mesmo assumiu; Empresa (staff) pode editar qualquer um.
+        if not self.request.user.is_staff and serializer.instance.owner_id != self.request.user.id:
+            raise PermissionDenied("Só quem assumiu este atendimento pode editá-lo.")
+        serializer.save()
     def perform_destroy(self, instance):
         # "Fechar lead" (painel da Empresa): apaga o lead e os eventos dele de uma vez. Sem
         # lead ativo, a próxima mensagem desse número abre um lead novo e a triagem recomeça.
@@ -621,8 +630,8 @@ class AtendenteInviteViewSet(TenantMixin, viewsets.ModelViewSet):
     serializer_class = AtendenteInviteSerializer
     http_method_names = ["get", "post", "delete", "head", "options"]
     def get_permissions(self):
-        base = [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
-        return base + [NotAgentAccount()]
+        # Lista nomes/e-mails de convidados: só a Empresa (a tela Equipe não existe pro atendente).
+        return [permissions.IsAdminUser(), NotAgentAccount()]
     def perform_create(self, serializer):
         company = self.company()
         try:

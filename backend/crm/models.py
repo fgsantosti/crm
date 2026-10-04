@@ -266,7 +266,10 @@ class Event(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     summary = models.CharField(max_length=160)
     result = models.JSONField(default=dict)
+    # NOT_REQUIRED | PENDING | SENT | FAILED | EXPIRADO (pendente há 90s+ e superado por um marcador novo)
     delivery = models.CharField(max_length=15, default="NOT_REQUIRED")
+    # Marcador do agente que gerou o evento (Q/REPETIR/...); base da contagem de repetições.
+    marker = models.CharField(max_length=20, blank=True, default="")
     class Meta:
         constraints = [models.UniqueConstraint(fields=["lead", "message_id"], name="unique_lead_message")]
         ordering = ["created_at"]

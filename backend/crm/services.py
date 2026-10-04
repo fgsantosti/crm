@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password, check_password
 from django.contrib.auth.models import Group
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.authtoken.models import Token
@@ -172,6 +173,23 @@ def avaliar_contato(company, contact):
         return lead, False, "classificado"
     return lead, True, "em_triagem"
 
+MAX_REPETICOES = 3
+JANELA_ENTREGA_PENDENTE = timedelta(seconds=90)
+
+def contar_repeticoes(lead, excluir_pk=None):
+    """REPETIR consecutivos desde o último marcador que não foi REPETIR."""
+    if lead is None:
+        return 0
+    qs = Event.objects.filter(lead=lead).exclude(marker="").order_by("-created_at", "-pk")
+    if excluir_pk:
+        qs = qs.exclude(pk=excluir_pk)
+    total = 0
+    for marker in qs.values_list("marker", flat=True):
+        if marker != "REPETIR":
+            break
+        total += 1
+    return total
+
 def ultima_pergunta(lead):
     """question_id da etapa em que o lead está (ou da última pergunta enviada a ele)."""
     if lead.state and Question.objects.filter(company_id=lead.company_id, question_id=lead.state).exists():
@@ -189,6 +207,7 @@ def status_contato(company, contact):
         "aceita_agente": aceita,
         "motivo": motivo,
         "ultima_pergunta": ultima_pergunta(lead) if lead and motivo == "em_triagem" else None,
+        "repeticoes": contar_repeticoes(lead) if lead and motivo == "em_triagem" else 0,
     }
 
 @transaction.atomic
@@ -208,16 +227,24 @@ def receive(company, data):
         return {**NO_REPLY, "duplicate": True, "lead_id": str(lead.pk), "lead_novo": False}
     lead.last_contact = timezone.now()
     lead.save()
-    event = Event.objects.create(lead=lead, message_id=data["message_id"], summary=f"Marcador recebido: {data['marker']}")
+    event = Event.objects.create(
+        lead=lead, message_id=data["message_id"], marker=data["marker"],
+        summary=f"Marcador recebido: {data['marker']}",
+    )
     result = dict(NO_REPLY)
+    pendentes = Event.objects.filter(lead=lead, delivery="PENDING").exclude(pk=event.pk)
 
     if not aceita:
         pass
     elif data["human_required"]:
         escalate(lead, data["reason"])
-    elif Event.objects.filter(lead=lead, delivery="PENDING").exclude(pk=event.pk).exists():
-        escalate(lead, "Entrega anterior pendente: verificar integração")
+    elif pendentes.filter(created_at__gte=timezone.now() - JANELA_ENTREGA_PENDENTE).exists():
+        # Contato mandou várias mensagens em sequência enquanto a resposta anterior ainda
+        # está saindo: ignora esta sem escalar (escalar aqui travava o lead em HUMANO).
+        event.summary = "Mensagem em sequência: entrega anterior ainda pendente"
     else:
+        # Pendência antiga (90s+): a confirmação se perdeu; não deixa ela travar a triagem.
+        pendentes.update(delivery="EXPIRADO")
         marker = data["marker"]
         fields = data.get("fields") or {}
         if lead_novo and not (marker == "Q" and data["question_id"] == company.initial_state):
@@ -225,6 +252,7 @@ def receive(company, data):
             # que "lembra" de uma triagem já apagada) mande outro marcador.
             event.summary = f"Lead novo: começando pela apresentação (marcador {marker} ignorado)"
             marker, fields = "Q", {}
+            event.marker = "Q"
             data = {**data, "question_id": company.initial_state}
         if marker == "Q":
             question_id = data["question_id"]
@@ -234,8 +262,14 @@ def receive(company, data):
             else:
                 lead.state = question_id
         elif marker == "REPETIR":
-            question_id = lead.state
-            event.summary = "Entrada ambígua ou fora do roteiro; repetindo pergunta atual"
+            if contar_repeticoes(lead, excluir_pk=event.pk) >= MAX_REPETICOES:
+                # Último recurso: a ponte avança antes disso; aqui nunca reenvia em loop.
+                escalate(lead, "Triagem travada: contato não respondeu a pergunta após 3 repetições")
+                question_id = None
+            else:
+                # Na validação o estado é "VALIDANDO", mas a pergunta reenviada é "validar".
+                question_id = "validar" if lead.state == "VALIDANDO" else lead.state
+                event.summary = "Entrada ambígua ou fora do roteiro; repetindo pergunta atual"
         elif marker == "ATUALIZAR":
             field_error = apply_fields(lead, company, fields)
             if field_error:
@@ -249,6 +283,14 @@ def receive(company, data):
                 elif question_id in RESERVED_QUESTION_IDS:
                     escalate(lead, f"'{question_id}' é reservado (validar/encerramento não são 'proxima' válidos): revisar fluxo do agente")
                     question_id = None
+                elif question_id == lead.state:
+                    # Avançar para a mesma pergunta é uma repetição disfarçada: conta no mesmo limite.
+                    event.marker = "REPETIR"
+                    if contar_repeticoes(lead, excluir_pk=event.pk) >= MAX_REPETICOES:
+                        escalate(lead, "Triagem travada: contato não respondeu a pergunta após 3 repetições")
+                        question_id = None
+                    else:
+                        event.summary = "Mesma pergunta pedida de novo; contada como repetição"
                 else:
                     lead.state = question_id
                     lead.funnel_stage = "Triagem"
@@ -261,11 +303,15 @@ def receive(company, data):
                 question_id = "validar"
                 lead.state = "VALIDANDO"
         elif marker == "CLASSIFICADO":
-            if lead.state != "VALIDANDO":
+            antecipado = bool(fields.get("encerramento_antecipado"))
+            if lead.state != "VALIDANDO" and not antecipado:
                 escalate(lead, "CLASSIFICADO recebido sem VALIDAR anterior: revisar fluxo do agente")
                 question_id = None
             else:
-                fields, field_error = _aplicar_notas_urgencia(lead, company, fields)
+                if antecipado:
+                    fields, field_error = _aplicar_encerramento_antecipado(lead, company, fields)
+                else:
+                    fields, field_error = _aplicar_notas_urgencia(lead, company, fields)
                 if not field_error:
                     field_error = apply_fields(lead, company, fields)
                 if field_error:
@@ -318,7 +364,7 @@ def create_invite(company, name, email):
     o mesmo hasher usado para senha) nem retornado pela API -- só vai no e-mail.
     """
     User = get_user_model()
-    if User.objects.filter(username=email).exists():
+    if User.objects.filter(Q(username__iexact=email) | Q(email__iexact=email)).exists():
         raise ValueError("Já existe uma conta com este e-mail.")
     code = f"{secrets.randbelow(1_000_000):06d}"
     invite = AtendenteInvite.objects.create(
@@ -378,7 +424,7 @@ MAX_EMAIL_CHANGE_ATTEMPTS = 5
 
 def solicitar_troca_email(user, new_email):
     User = get_user_model()
-    if User.objects.filter(email=new_email).exclude(pk=user.pk).exists():
+    if User.objects.filter(Q(email__iexact=new_email) | Q(username__iexact=new_email)).exclude(pk=user.pk).exists():
         raise ValueError("Já existe uma conta usando este e-mail.")
     code = f"{secrets.randbelow(1_000_000):06d}"
     request = EmailChangeRequest.objects.create(
@@ -407,11 +453,17 @@ def confirmar_troca_email(user, code):
         request.save(update_fields=["attempts"])
         return {"ok": False, "detail": "Código incorreto."}
     User = get_user_model()
-    if User.objects.filter(email=request.new_email).exclude(pk=user.pk).exists():
+    if User.objects.filter(Q(email__iexact=request.new_email) | Q(username__iexact=request.new_email)).exclude(pk=user.pk).exists():
         request.save(update_fields=["attempts"])
         return {"ok": False, "detail": "Já existe uma conta usando este e-mail."}
+    # O login é pelo username, que nas contas criadas por convite é o próprio e-mail:
+    # sem atualizar os dois juntos, a pessoa trocava o e-mail e não conseguia entrar com ele.
+    campos = ["email"]
+    if "@" in (user.username or ""):
+        user.username = request.new_email
+        campos.append("username")
     user.email = request.new_email
-    user.save(update_fields=["email"])
+    user.save(update_fields=campos)
     request.confirmed_at = timezone.now()
     request.save(update_fields=["attempts", "confirmed_at"])
     return {"ok": True, "detail": "E-mail atualizado."}
@@ -740,6 +792,43 @@ def _aplicar_notas_urgencia(lead, company, fields):
         "temperatura_calculada": temperatura,
     }
     return fields, None
+
+def _aplicar_encerramento_antecipado(lead, company, fields):
+    """Contato desistiu no meio da triagem: classifica com as notas que houver (perguntas
+    não respondidas não entram); sem nenhuma nota válida, Desqualificado/Baixa. Nunca escala."""
+    fields, erro = _aplicar_notas_urgencia(lead, company, fields)
+    if erro or (not fields.get("notas") and not fields.get("temperatura")):
+        fields = {**fields, "temperatura": "Desqualificado", "prioridade": "Baixa"}
+        lead.urgencia_detalhe = {"notas": {}, "pesos": {}, "score": None, "temperatura_calculada": "Desqualificado"}
+    elif not fields.get("prioridade"):
+        fields = {**fields, "prioridade": PRIORIDADE_POR_TEMPERATURA.get(fields["temperatura"], "Baixa")}
+        if not lead.urgencia_detalhe or "temperatura_calculada" not in lead.urgencia_detalhe:
+            lead.urgencia_detalhe = {"notas": {}, "pesos": {}, "score": None, "temperatura_calculada": fields["temperatura"]}
+    lead.urgencia_detalhe = {**(lead.urgencia_detalhe or {}), "motivo": "encerramento_antecipado"}
+    return fields, None
+
+TRIAGEM_ABANDONADA_APOS = timedelta(hours=24)
+
+def classificar_triagens_abandonadas(agora=None):
+    """Triagem automática parada há 24h+ sem resposta do contato: classifica como
+    Remarketing/Baixa e entrega à equipe, pra nenhum lead ficar preso na triagem.
+    Idempotente (só pega leads ainda em triagem). Retorna quantos foram classificados."""
+    agora = agora or timezone.now()
+    leads = Lead.objects.filter(
+        desfecho="", bot_closed=False, origem_manual=False, last_contact__lt=agora - TRIAGEM_ABANDONADA_APOS,
+    ).exclude(mode="HUMANO")
+    total = 0
+    for lead in leads:
+        lead.temperature = "Remarketing"
+        lead.priority = "Baixa"
+        lead.bot_closed = True
+        lead.state = "ENCERRADO_CLASSIFICADO"
+        lead.funnel_stage = "Triagem concluída"
+        lead.next_action = "Triagem abandonada pelo contato: retomar contato"
+        lead.urgencia_detalhe = {"motivo": "abandono", "score": None}
+        lead.save(update_fields=["temperature", "priority", "bot_closed", "state", "funnel_stage", "next_action", "urgencia_detalhe"])
+        total += 1
+    return total
 
 def contexto_agente(company):
     """Tudo que o agente precisa pra conduzir o roteiro da empresa, sem efeitos colaterais."""

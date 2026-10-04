@@ -169,6 +169,8 @@ class AgentFieldsSerializer(serializers.Serializer):
     # CLASSIFICADO: nota 0-10 por question_id respondido; o CRM calcula a urgência
     # ponderando pelos pesos das Variáveis (services.calcular_urgencia).
     notas = serializers.DictField(child=serializers.FloatField(min_value=0, max_value=10), required=False)
+    # CLASSIFICADO direto (sem VALIDAR) quando o contato desiste no meio da triagem.
+    encerramento_antecipado = serializers.BooleanField(required=False)
     variaveis_roteiro = serializers.DictField(child=serializers.CharField(max_length=300, allow_blank=True), required=False)
 
 class IncomingSerializer(serializers.Serializer):
@@ -184,6 +186,8 @@ class IncomingSerializer(serializers.Serializer):
     def validate(self, attrs):
         if attrs["marker"] == "CLASSIFICADO":
             fields = attrs.get("fields") or {}
+            if fields.get("encerramento_antecipado"):
+                return attrs
             if not fields.get("notas") and not (fields.get("temperatura") and fields.get("prioridade")):
                 raise serializers.ValidationError("CLASSIFICADO exige fields.notas (recomendado) ou fields.temperatura e fields.prioridade.")
         return attrs

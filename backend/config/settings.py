@@ -88,4 +88,11 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+# Sincronizado no banco pelo DatabaseScheduler do django_celery_beat ao subir o beat.
+CELERY_BEAT_SCHEDULE = {
+    "classificar-triagens-abandonadas": {
+        "task": "crm.tasks.classificar_triagens_abandonadas_task",
+        "schedule": 30 * 60,
+    },
+}
 CHANNEL_LAYERS = {"default": {"BACKEND": "channels_redis.core.RedisChannelLayer", "CONFIG": {"hosts": [os.getenv("CHANNEL_REDIS_URL", "redis://localhost:6379/2")]}}}

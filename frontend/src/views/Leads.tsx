@@ -469,9 +469,8 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
           </div>
         )}
         <p className="table-note">
-          Exibindo até 100 leads por consulta.
           {desqualificadosCount > 0 && (
-            <> · {desqualificadosCount} lead{desqualificadosCount === 1 ? '' : 's'} desqualificado{desqualificadosCount === 1 ? '' : 's'}/desconfiado{desqualificadosCount === 1 ? '' : 's'} (fora do fluxo, ver Dashboard)</>
+            <>{desqualificadosCount} lead{desqualificadosCount === 1 ? '' : 's'} desqualificado{desqualificadosCount === 1 ? '' : 's'}/desconfiado{desqualificadosCount === 1 ? '' : 's'} (fora do fluxo, ver Dashboard)</>
           )}
         </p>
       </section>

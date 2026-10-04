@@ -117,10 +117,129 @@ class QualificationTests(TestCase):
         self.assertEqual(result["action"], "AUDIO_GRAVADO")
         self.assertEqual(result["content"], "apresentacao.ogg")
         self.assertEqual(Lead.objects.get().last_audio_id, "apresentacao.ogg")
-    def test_pending_delivery_blocks_progress(self):
+    def test_pending_delivery_recente_ignora_sem_escalar(self):
+        # Contato manda várias mensagens seguidas enquanto a resposta anterior sai: ignora, não trava.
         self.send()
-        self.send("2", marker="ATUALIZAR", fields={"nome": "Maria", "proxima": "nome"})
-        self.assertEqual(Lead.objects.get().mode, "HUMANO")
+        result = self.send("2", marker="ATUALIZAR", fields={"nome": "Maria", "proxima": "nome"})
+        self.assertEqual(result["action"], "NO_REPLY")
+        lead = Lead.objects.get()
+        self.assertEqual(lead.mode, "AUTOMÁTICO")
+        self.assertEqual(lead.state, "apresentacao")
+    def test_pending_delivery_antiga_expira_e_processa(self):
+        first = self.send()
+        Event.objects.filter(pk=first["event_id"]).update(created_at=timezone.now() - timedelta(seconds=120))
+        result = self.send("2", marker="ATUALIZAR", fields={"nome": "Maria", "proxima": "nome"})
+        self.assertEqual(result["action"], "TEXTO")
+        self.assertEqual(result["question_id"], "nome")
+        self.assertEqual(Event.objects.get(pk=first["event_id"]).delivery, "EXPIRADO")
+        self.assertEqual(Lead.objects.get().mode, "AUTOMÁTICO")
+    def test_repetir_conta_e_escala_na_quarta(self):
+        from .services import status_contato
+        self.delivered(self.send())
+        for i in range(3):
+            r = self.send(f"r{i}", marker="REPETIR")
+            self.assertEqual(r["action"], "TEXTO")
+            self.delivered(r)
+        self.assertEqual(status_contato(self.company, "+5585999999999")["repeticoes"], 3)
+        r = self.send("r3", marker="REPETIR")
+        self.assertEqual(r["action"], "NO_REPLY")
+        lead = Lead.objects.get()
+        self.assertEqual(lead.mode, "HUMANO")
+        self.assertIn("3 repetições", lead.next_action)
+    def test_repeticoes_zera_com_marcador_de_avanco(self):
+        from .services import status_contato
+        self.delivered(self.send())
+        self.delivered(self.send("r1", marker="REPETIR"))
+        self.delivered(self.send("a1", marker="ATUALIZAR", fields={"proxima": "nome"}))
+        self.assertEqual(status_contato(self.company, "+5585999999999")["repeticoes"], 0)
+        self.assertEqual(status_contato(self.company, "+5500000000001")["repeticoes"], 0)
+    def test_atualizar_para_a_mesma_pergunta_conta_como_repeticao(self):
+        from .services import status_contato
+        self.delivered(self.send())
+        self.delivered(self.send("a0", marker="ATUALIZAR", fields={"proxima": "nome"}))
+        for i in range(3):
+            r = self.send(f"a{i + 1}", marker="ATUALIZAR", fields={"proxima": "nome"})
+            self.assertEqual(r["question_id"], "nome")
+            self.delivered(r)
+        self.assertEqual(status_contato(self.company, "+5585999999999")["repeticoes"], 3)
+        r = self.send("a4", marker="ATUALIZAR", fields={"proxima": "nome"})
+        self.assertEqual(r["action"], "NO_REPLY")
+        self.assertIn("3 repetições", Lead.objects.get().next_action)
+    def test_repetir_na_validacao_reenvia_validar(self):
+        self.delivered(self.send())
+        self.delivered(self.send("v1", marker="VALIDAR", fields={"nome": "Ana"}))
+        r = self.send("v2", marker="REPETIR")
+        self.assertEqual(r["action"], "TEXTO")
+        self.assertEqual(r["question_id"], "validar")
+        self.assertEqual(Lead.objects.get().mode, "AUTOMÁTICO")
+    def _peso_em_nome(self, peso=9):
+        v = Variavel.objects.create(company=self.company, name="Urgência", peso=peso)
+        Question.objects.filter(company=self.company, question_id="nome").update(variavel=v)
+    def test_encerramento_antecipado_com_notas_parciais(self):
+        self._peso_em_nome()
+        self.delivered(self.send())
+        self.delivered(self.send("2", marker="ATUALIZAR", fields={"proxima": "nome"}))
+        r = self.send("3", marker="CLASSIFICADO", fields={"encerramento_antecipado": True, "notas": {"nome": 9.5, "inexistente": 2}})
+        self.assertEqual(r["question_id"], "encerramento")
+        lead = Lead.objects.get()
+        self.assertTrue(lead.bot_closed)
+        self.assertEqual(lead.temperature, "Quente")
+        self.assertEqual(lead.priority, "Alta")
+        self.assertEqual(lead.urgencia_detalhe["motivo"], "encerramento_antecipado")
+    def test_encerramento_antecipado_sem_notas_vira_desqualificado(self):
+        self.delivered(self.send())
+        r = self.send("2", marker="CLASSIFICADO", fields={"encerramento_antecipado": True})
+        self.assertEqual(r["action"], "TEXTO")
+        lead = Lead.objects.get()
+        self.assertEqual((lead.temperature, lead.priority, lead.mode), ("Desqualificado", "Baixa", "AUTOMÁTICO"))
+        self.assertEqual(lead.desfecho, "desqualificado")
+        self.assertEqual(lead.urgencia_detalhe["motivo"], "encerramento_antecipado")
+    def test_encerramento_antecipado_pela_api_aceita_sem_notas(self):
+        token_user = get_user_model().objects.create_user(username="agente-x")
+        self.company.members.add(token_user)
+        c = APIClient(); c.force_authenticate(token_user)
+        base = f"/api/companies/{self.company.pk}/incoming/"
+        payload = {"contact": "+5585911112222", "message_id": "m1", "marker": "Q", "question_id": "apresentacao"}
+        r1 = c.post(base, payload, format="json").json()
+        Event.objects.filter(pk=r1["event_id"]).update(delivery="SENT")
+        r2 = c.post(base, {**payload, "message_id": "m2", "marker": "CLASSIFICADO", "fields": {"encerramento_antecipado": True}}, format="json")
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(Lead.objects.get(contact="+5585911112222").temperature, "Desqualificado")
+        r3 = c.post(base, {**payload, "message_id": "m3", "marker": "CLASSIFICADO", "fields": {}}, format="json")
+        self.assertEqual(r3.status_code, 400)
+    def test_triagem_abandonada_vira_remarketing_e_e_idempotente(self):
+        from .services import classificar_triagens_abandonadas
+        self.delivered(self.send())
+        parado = Lead.objects.get()
+        Lead.objects.filter(pk=parado.pk).update(last_contact=timezone.now() - timedelta(hours=25))
+        recente = Lead.objects.create(company=self.company, contact="+5585900000002", state="nome", last_contact=timezone.now())
+        humano = Lead.objects.create(company=self.company, contact="+5585900000003", mode="HUMANO", last_contact=timezone.now() - timedelta(days=3))
+        manual = Lead.objects.create(company=self.company, contact="+5585900000004", origem_manual=True, last_contact=timezone.now() - timedelta(days=3))
+        self.assertEqual(classificar_triagens_abandonadas(), 1)
+        parado.refresh_from_db()
+        self.assertEqual((parado.temperature, parado.priority, parado.state), ("Remarketing", "Baixa", "ENCERRADO_CLASSIFICADO"))
+        self.assertTrue(parado.bot_closed)
+        self.assertEqual(parado.urgencia_detalhe, {"motivo": "abandono", "score": None})
+        self.assertEqual(parado.next_action, "Triagem abandonada pelo contato: retomar contato")
+        for outro in (recente, humano, manual):
+            outro.refresh_from_db()
+            self.assertFalse(outro.bot_closed)
+        self.assertEqual(classificar_triagens_abandonadas(), 0)
+        self.assertEqual(self.send("9")["action"], "NO_REPLY")
+    def test_classificado_sempre_em_uma_das_cinco_temperaturas(self):
+        from .services import calcular_urgencia
+        cinco = {"Desqualificado", "Desconfiado", "Remarketing", "Qualificado", "Quente"}
+        for decimos in range(0, 101):
+            _, temperatura = calcular_urgencia({"q": decimos / 10}, {"q": 7})
+            self.assertIn(temperatura, cinco)
+        self._peso_em_nome(peso=4)
+        for i, notas in enumerate([{"nome": 0}, {"nome": 4}, {"nome": 6}, {"nome": 8}, {"nome": 10}]):
+            contato = f"+55859000001{i:02d}"
+            base = {"contact": contato, "kind": "text", "question_id": "apresentacao", "fields": {}, "human_required": False, "reason": "pedido humano"}
+            for mid, marker, fields in [("a", "Q", {}), ("b", "VALIDAR", {}), ("c", "CLASSIFICADO", {"notas": notas})]:
+                r = receive(self.company, {**base, "message_id": f"{contato}{mid}", "marker": marker, "fields": fields})
+                Event.objects.filter(pk=r["event_id"]).update(delivery="SENT")
+            self.assertIn(Lead.objects.filter(contact=contato).latest("created_at").temperature, cinco)
     def test_tenant_isolation(self):
         self.assertEqual(self.client.get(f"/api/leads/?company={self.other.pk}").status_code, 404)
         self.assertEqual(self.client.post(f"/api/companies/{self.other.pk}/incoming/", {}).status_code, 404)
@@ -898,6 +1017,23 @@ class QualificationTests(TestCase):
         ok = c.post("/api/me/email/confirmar/", {"code": code}, format="json")
         self.assertEqual(ok.status_code, 200)
         self.assertEqual(get_user_model().objects.get(pk=user.pk).email, "novo@example.com")
+    def test_trocar_email_atualiza_o_login_de_conta_por_email(self):
+        user = get_user_model().objects.create_user(username="ana@example.com", password="senha-atual-123", email="ana@example.com")
+        c = APIClient()
+        c.force_authenticate(user)
+        c.post("/api/me/email/", {"email": "ana.nova@example.com"}, format="json")
+        code = mail.outbox[-1].body.split("Código de confirmação: ")[1].split("\n")[0]
+        self.assertEqual(c.post("/api/me/email/confirmar/", {"code": code}, format="json").status_code, 200)
+        user.refresh_from_db()
+        self.assertEqual((user.username, user.email), ("ana.nova@example.com", "ana.nova@example.com"))
+        login = Client().post("/api/login/", {"username": "ana.nova@example.com", "password": "senha-atual-123"}, content_type="application/json")
+        self.assertEqual(login.status_code, 200)
+    def test_trocar_email_rejeita_email_usado_como_login_de_outra_conta(self):
+        get_user_model().objects.create_user(username="outro@example.com", email="")
+        user = get_user_model().objects.create_user(username="eu@example.com", password="x", email="eu@example.com")
+        c = APIClient()
+        c.force_authenticate(user)
+        self.assertEqual(c.post("/api/me/email/", {"email": "outro@example.com"}, format="json").status_code, 400)
     def test_trocar_email_rejects_address_already_in_use(self):
         get_user_model().objects.create_user(username="ja-existe", email="ocupado@example.com")
         user = get_user_model().objects.create_user(username="dono-conta-2", password="x", email="meu@example.com")
@@ -1616,7 +1752,7 @@ class ContatoFecharDonoPendenciasTests(TestCase):
 
     def test_contato_cobre_todos_os_motivos_com_a_mesma_regra_do_incoming(self):
         r = self.contato("+5585911114444").json()
-        self.assertEqual(r, {"contact": "+5585911114444", "lead_id": None, "aceita_agente": True, "motivo": "sem_lead", "ultima_pergunta": None})
+        self.assertEqual(r, {"contact": "+5585911114444", "lead_id": None, "aceita_agente": True, "motivo": "sem_lead", "ultima_pergunta": None, "repeticoes": 0})
         self.send("a1")
         self.send("a2", marker="ATUALIZAR", fields={"proxima": "nome"})
         r = self.contato("+5585911114444").json()
@@ -1695,3 +1831,35 @@ class ContatoFecharDonoPendenciasTests(TestCase):
         self.assertIn(str(classif.pk), meus)
         pend = [l["id"] for l in ana.get(f"/api/leads/?company={self.company.pk}&pending=1").json()["results"]]
         self.assertEqual(pend, [str(espera.pk)])
+
+class PermissoesValidacaoTests(TestCase):
+    """Matriz de permissões validada no dev local: regressões encontradas na varredura por papel."""
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        U = get_user_model()
+        self.company = Company.objects.create(name="Empresa Perm")
+        self.empresa = U.objects.create_user(username="empresa-perm", is_staff=True)
+        self.ana = U.objects.create_user(username="ana-perm")
+        self.bia = U.objects.create_user(username="bia-perm")
+        self.agente = U.objects.create_user(username="agente-perm")
+        self.agente.groups.add(Group.objects.get_or_create(name="agente")[0])
+        self.company.members.add(self.empresa, self.ana, self.bia, self.agente)
+        self.lead = Lead.objects.create(company=self.company, contact="+5586900001111", owner=self.ana, bot_closed=True, etapa_atendimento="espera")
+    def client_for(self, user):
+        c = APIClient(); c.force_authenticate(user); return c
+    def test_agente_nao_lista_equipe(self):
+        url = f"/api/companies/{self.company.pk}/equipe/"
+        self.assertEqual(self.client_for(self.agente).get(url).status_code, 403)
+        self.assertEqual(self.client_for(self.empresa).get(url).status_code, 200)
+        self.assertEqual(self.client_for(self.ana).get(url).status_code, 200)
+    def test_atendente_so_edita_lead_proprio(self):
+        url = f"/api/leads/{self.lead.pk}/?company={self.company.pk}"
+        self.assertEqual(self.client_for(self.bia).patch(url, {"priority": "Baixa"}, format="json").status_code, 403)
+        self.assertEqual(self.client_for(self.ana).patch(url, {"priority": "Baixa"}, format="json").status_code, 200)
+        self.assertEqual(self.client_for(self.empresa).patch(url, {"priority": "Alta"}, format="json").status_code, 200)
+        self.assertEqual(self.client_for(self.agente).patch(url, {"priority": "Alta"}, format="json").status_code, 403)
+    def test_convites_so_para_empresa(self):
+        url = f"/api/convites/?company={self.company.pk}"
+        self.assertEqual(self.client_for(self.ana).get(url).status_code, 403)
+        self.assertEqual(self.client_for(self.agente).get(url).status_code, 403)
+        self.assertEqual(self.client_for(self.empresa).get(url).status_code, 200)

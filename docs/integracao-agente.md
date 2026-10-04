@@ -226,7 +226,7 @@ mensagem real (não reaproveitável entre mensagens diferentes).
 | `[[AXIOMA:REPETIR]]` | nada | reenvia o conteúdo da pergunta atual do lead (sem avançar) |
 | `[[AXIOMA:ATUALIZAR:{...}]]` | os campos conhecidos + **`proxima`** (obrigatório, um `question_id` cadastrado pela empresa na tela Roteiro) | grava os campos, avança o lead para `proxima`, devolve o conteúdo dela |
 | `[[AXIOMA:VALIDAR:{...}]]` | os campos conhecidos (sem `proxima`) | grava os campos, devolve a pergunta de confirmação fixa (`question_id="validar"`) |
-| `[[AXIOMA:CLASSIFICADO:{...}]]` | **`notas`** (recomendado) **ou** `temperatura` + `prioridade` (sem `proxima`) | grava os campos finais, **encerra o bot** (`bot_closed=true`), devolve a mensagem de encerramento (`question_id="encerramento"`) |
+| `[[AXIOMA:CLASSIFICADO:{...}]]` | **`notas`** (recomendado) **ou** `temperatura` + `prioridade` (sem `proxima`). Com `"encerramento_antecipado": true`, pode vir **antes** do `VALIDAR` (contato desistiu no meio: "não quero mais", "depois vejo") e com notas parciais ou nenhuma | grava os campos finais, **encerra o bot** (`bot_closed=true`), devolve a mensagem de encerramento (`question_id="encerramento"`). Sem `VALIDAR` anterior e sem a flag, transfere para humano. No encerramento antecipado, perguntas não respondidas ficam fora do cálculo; sem nenhuma nota válida vira `Desqualificado`/`Baixa` (nunca escala) e `urgencia_detalhe.motivo="encerramento_antecipado"` |
 
 Campos aceitos dentro de `fields` (nomes exatamente como o agent emite):
 
@@ -319,9 +319,16 @@ chame `/incoming/`). É exatamente a regra que `/incoming/` usa para decidir
   "lead_id": "uuid-do-lead" | null,
   "aceita_agente": true,
   "motivo": "em_triagem",       // ver tabela
-  "ultima_pergunta": "nome"     // só em "em_triagem"; null nos demais
+  "ultima_pergunta": "nome",    // só em "em_triagem"; null nos demais
+  "repeticoes": 2               // REPETIR consecutivos na etapa atual; 0 sem lead/fora da triagem
 }
 ```
+
+`repeticoes` existe para o agente não ficar preso repetindo a mesma pergunta:
+com 2 ou mais, avance (ou encerre antecipadamente) em vez de mandar outro
+`REPETIR`. O CRM é o último recurso: o **4º `REPETIR` seguido** não é
+reenviado — o lead vai para atendimento humano com o motivo "Triagem travada:
+contato não respondeu a pergunta após 3 repetições".
 
 | `motivo` | `aceita_agente` | Quando |
 | --- | --- | --- |
@@ -344,8 +351,22 @@ Content-Type: application/json
 
 Chame isso **depois** de efetivamente enviar a mensagem/áudio ao WhatsApp.
 `"FAILED"` transfere o lead para atendimento humano automaticamente — não há
-retry automático. Sem essa confirmação, o próximo marcador para esse lead
-retorna `NO_REPLY` (trava de segurança contra duplicidade).
+retry automático. Enquanto uma entrega está `PENDING`:
+
+- **menos de 90s:** um marcador novo do mesmo lead volta `NO_REPLY` e é
+  ignorado, **sem** transferir para humano (o contato mandou várias mensagens
+  seguidas enquanto a resposta anterior saía);
+- **90s ou mais:** a pendência é marcada `EXPIRADO` (a confirmação se perdeu) e
+  o marcador novo é processado normalmente — a triagem nunca trava por isso.
+  Uma confirmação que chegue depois para um evento `EXPIRADO` não muda nada.
+
+### Triagem abandonada
+
+A cada 30 minutos o CRM classifica sozinho os leads em triagem automática sem
+mensagem do contato há mais de 24h: `temperatura=Remarketing`,
+`prioridade=Baixa`, bot encerrado e `next_action="Triagem abandonada pelo
+contato: retomar contato"` (`urgencia_detalhe.motivo="abandono"`). O lead
+entra no Kanban da equipe; nenhum lead fica parado na triagem.
 
 ## 4. Exemplo de conversa completa (testado de ponta a ponta)
 
