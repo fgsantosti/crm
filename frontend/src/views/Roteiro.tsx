@@ -180,7 +180,9 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
   const [vrCheckboxOverride, setVrCheckboxOverride] = useState<Record<number, boolean>>({});
 
   const isOffflow = (q: Question) => (OFFFLOW_IDS as readonly string[]).includes(q.question_id);
-  const flowQuestions = questions.filter((q) => !isOffflow(q));
+  // Ordena por `ordem` (não pela posição no array): o reorder só atualiza o campo, então sem isso
+  // a nova ordem era salva no backend mas a tela continuava igual até recarregar.
+  const flowQuestions = questions.filter((q) => !isOffflow(q)).sort((a, b) => a.ordem - b.ordem || a.id - b.id);
   const offflowQuestions = questions.filter(isOffflow);
 
   function load() {

@@ -24,6 +24,10 @@ export function Admin({ api }: { api: Api }) {
   const [validadeDias, setValidadeDias] = useState(180);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
 
+  const [confirmDelete, setConfirmDelete] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+
   const selected = companies.find((c) => c.id === selectedId) || null;
 
   function loadCompanies() {
@@ -43,6 +47,8 @@ export function Admin({ api }: { api: Api }) {
   useEffect(() => {
     setGeneratedKey(null);
     setAgentError('');
+    setConfirmDelete('');
+    setDeleteError('');
     if (!selected) {
       setAgentStatus(null);
       return;
@@ -136,6 +142,21 @@ export function Admin({ api }: { api: Api }) {
       setAgentError((err as Error).message);
     } finally {
       setAgentBusy(false);
+    }
+  }
+
+  async function excluirEmpresa() {
+    if (!selected || confirmDelete.trim() !== selected.name.trim()) return;
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      await api(`/admin-companies/${selected.id}/`, { method: 'DELETE', body: JSON.stringify({ confirmar_nome: confirmDelete.trim() }) });
+      setCompanies((v) => v.filter((c) => c.id !== selected.id));
+      setSelectedId(null);
+    } catch (err) {
+      setDeleteError((err as Error).message);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -340,6 +361,31 @@ export function Admin({ api }: { api: Api }) {
                     <strong style={{ fontFamily: "'DM Mono',monospace", fontSize: '12.5px' }}>/api/companies/{selected.id}/delivery/</strong>
                   </div>
                 </div>
+              </div>
+
+              <div className="section-divider" />
+
+              <div>
+                <h3 style={{ fontSize: 15, marginBottom: 4, color: 'var(--danger)' }}>Excluir empresa</h3>
+                <p style={{ fontSize: 13, marginBottom: 10 }}>
+                  Apaga a empresa e tudo que é dela: leads, histórico, roteiro, variáveis, áreas, dados da empresa e a chave do agente.
+                  Contas que pertencem só a esta empresa também são excluídas. Não dá para desfazer.
+                </p>
+                {deleteError && <p className="error">{deleteError}</p>}
+                <label>
+                  Digite <strong>{selected.name}</strong> para confirmar
+                  <input value={confirmDelete} onChange={(e) => setConfirmDelete(e.target.value)} autoComplete="off" />
+                </label>
+                <button
+                  type="button"
+                  className="danger-outline"
+                  onClick={excluirEmpresa}
+                  disabled={deleting || confirmDelete.trim() !== selected.name.trim()}
+                  style={{ marginTop: 10 }}
+                >
+                  {deleting && <Spinner />}
+                  Excluir empresa definitivamente
+                </button>
               </div>
             </form>
           )}
