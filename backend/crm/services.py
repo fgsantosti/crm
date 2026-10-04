@@ -359,6 +359,8 @@ def assumir_lead(lead_id, user):
         return "Lead não encontrado."
     if lead.owner:
         return "Este atendimento já foi assumido por outro atendente."
+    if lead.temperature in FORA_DO_KANBAN:
+        return "Leads classificados como Desqualificado ou Desconfiado não entram na fila de atendimento humano."
     profile = getattr(user, "profile", None)
     nome = (profile.display_name if profile else "") or user.get_full_name() or user.username
     lead.owner = nome
@@ -393,6 +395,13 @@ URGENCIA_POR_FAIXA = [
     (7, 8, "Qualificado"),
     (9, 10, "Quente"),
 ]
+URGENCIA_RANK = {temp: i for i, (_, _, temp) in enumerate(URGENCIA_POR_FAIXA)}
+
+# O agente manda TODOS os leads pro CRM, até os desqualificados/desconfiados
+# -- mas esses dois nunca entram no fluxo operacional do Kanban nem podem ser
+# assumidos por atendente, só contam nas estatísticas do dashboard.
+FORA_DO_KANBAN = {"Desqualificado", "Desconfiado"}
+PODE_ASSUMIR_A_PARTIR_DE = "Remarketing"
 
 def calcular_urgencia_sugerida(pesos):
     """Sugestão auxiliar a partir da média dos pesos (1-10) das Variaveis das

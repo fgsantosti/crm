@@ -183,6 +183,16 @@ class QualificationTests(TestCase):
         # agora sem nenhuma pergunta usando -- pode excluir
         agora_livre = c.delete(f"/api/variaveis/{variavel_id}/?company={self.company.pk}")
         self.assertEqual(agora_livre.status_code, 204)
+    def test_companyinfo_create_accepts_blank_content(self):
+        # Bug real: "+ Nova entrada" no frontend manda content="" (preenche
+        # depois); content não tinha blank=True, então todo POST de uma
+        # entrada nova dava 400 antes de o admin digitar qualquer coisa.
+        staff = get_user_model().objects.create_user(username="empresa-dados-2", is_staff=True)
+        self.company.members.add(staff)
+        c = APIClient()
+        c.force_authenticate(staff)
+        resp = c.post(f"/api/company-info/?company={self.company.pk}", {"title": "Novo título", "content": ""}, format="json")
+        self.assertEqual(resp.status_code, 201)
     def test_companyinfo_mandatory_entries_cannot_be_deleted(self):
         staff = get_user_model().objects.create_user(username="empresa-dados", is_staff=True)
         self.company.members.add(staff)
@@ -316,6 +326,25 @@ class QualificationTests(TestCase):
         self.assertEqual(muito_longo.status_code, 400)
         muito_curto = c.post(f"/api/admin-companies/{self.company.pk}/agente/", {"validade_dias": 0}, format="json")
         self.assertEqual(muito_curto.status_code, 400)
+    def test_assumir_lead_blocks_desqualificado_e_desconfiado(self):
+        self.delivered(self.send())
+        self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": "nome"}))
+        self.delivered(self.send("3", marker="VALIDAR"))
+        self.send("4", marker="CLASSIFICADO", fields={"temperatura": "Desqualificado", "prioridade": "Baixa"})
+        lead = Lead.objects.get()
+        atendente = get_user_model().objects.create_user(username="atendente-urgencia")
+        self.company.members.add(atendente)
+        client = APIClient()
+        client.force_authenticate(atendente)
+        negado = client.post(f"/api/leads/{lead.pk}/assumir/?company={self.company.pk}")
+        self.assertEqual(negado.status_code, 400)
+        lead.refresh_from_db()
+        self.assertEqual(lead.owner, "")
+
+        lead.temperature = "Remarketing"
+        lead.save()
+        ok = client.post(f"/api/leads/{lead.pk}/assumir/?company={self.company.pk}")
+        self.assertEqual(ok.status_code, 200)
     def test_assumir_lead_claims_it_atomically_and_blocks_staff(self):
         self.delivered(self.send())
         self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": "nome"}))

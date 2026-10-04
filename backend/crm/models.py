@@ -63,7 +63,7 @@ class CompanyInfo(models.Model):
     MANDATORY_TITLES = ["Nome da empresa", "Áreas de atendimento", "Disponibilidade de horários"]
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="info_entries")
     title = models.CharField(max_length=160)
-    content = models.TextField()
+    content = models.TextField(blank=True)
     updated_at = models.DateTimeField(auto_now=True)
     obrigatorio = models.BooleanField(default=False)
     class Meta:
