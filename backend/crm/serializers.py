@@ -15,13 +15,18 @@ class AdminCompanySerializer(serializers.ModelSerializer):
     """Só para a tela interna da Axioma (IsSuperUser) -- cross-tenant de propósito."""
     member_count = serializers.SerializerMethodField()
     tem_agente_ativo = serializers.SerializerMethodField()
+    # Entrada livre (com espaços/traços); validate_numero_agente normaliza para E.164 (<= 16).
+    numero_agente = serializers.CharField(max_length=40, allow_blank=True, required=False)
     class Meta:
         model = Company
         fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "member_count", "tem_agente_ativo"]
         read_only_fields = ["id", "member_count", "tem_agente_ativo"]
     def validate_numero_agente(self, value):
-        value = (value or "").strip()
-        if value and not re.match(r"^\+[1-9]\d{7,14}$", value):
+        # Aceita como a pessoa digita ("+55 (86) 9423-8125", "5586...") e grava em E.164.
+        bruto = (value or "").strip()
+        digits = re.sub(r"\D", "", bruto)
+        value = f"+{digits}" if digits else ""
+        if bruto and not re.match(r"^\+[1-9]\d{7,14}$", value):
             raise serializers.ValidationError("Use o formato internacional, ex.: +5586999999999.")
         return value
     def get_member_count(self, obj):

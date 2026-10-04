@@ -431,6 +431,11 @@ class QualificationTests(TestCase):
         updated = c.patch(f"/api/admin-companies/{company_id}/", {"numero_agente": "+5586994238125"}, format="json")
         self.assertEqual(updated.status_code, 200)
         self.assertEqual(updated.json()["numero_agente"], "+5586994238125")
+        formatado = c.patch(f"/api/admin-companies/{company_id}/", {"numero_agente": "+55 (86) 9423-8125"}, format="json")
+        self.assertEqual(formatado.status_code, 200)
+        self.assertEqual(formatado.json()["numero_agente"], "+558694238125")
+        vazio = c.patch(f"/api/admin-companies/{company_id}/", {"numero_agente": ""}, format="json")
+        self.assertEqual(vazio.json()["numero_agente"], "")
         # seed_roteiro_padrao: empresa nova já nasce com o mínimo pro funil funcionar.
         nova = Company.objects.get(pk=company_id)
         ids = set(Question.objects.filter(company=nova).values_list("question_id", flat=True))
