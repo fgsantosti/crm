@@ -49,6 +49,17 @@ export type Question = {
   question_id: string;
   text: string;
   audio_asset: string;
+  /** Variável (peso 1-10) que esta pergunta alimenta na classificação de urgência. */
+  variavel: number;
+  /** nome/situacao/demanda — fixas em todo roteiro, não podem ser excluídas. */
+  obrigatoria: boolean;
+};
+
+export type Variavel = {
+  id: number;
+  name: string;
+  /** 1-10, usado na média ponderada que sugere a urgência (ver services.calcular_urgencia_sugerida). */
+  peso: number;
 };
 
 export type CompanyInfoEntry = {
@@ -57,6 +68,8 @@ export type CompanyInfoEntry = {
   title: string;
   content: string;
   updated_at: string;
+  /** Nome da empresa / Áreas de atendimento / Disponibilidade de horários — fixas, não podem ser excluídas. */
+  obrigatorio: boolean;
 };
 
 export type Paginated<T> = { count: number; next: string | null; previous: string | null; results: T[] };

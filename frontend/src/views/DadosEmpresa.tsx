@@ -103,8 +103,13 @@ export function DadosEmpresa({ api, company }: { api: Api; company: Company }) {
           <form key={entry.id} className="step-card" onSubmit={(e) => save(entry, e)} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <label style={{ margin: 0 }}>
               Título
-              <input name="title" defaultValue={entry.title} required style={{ fontWeight: 600 }} />
+              <input name="title" defaultValue={entry.title} required readOnly={entry.obrigatorio} style={{ fontWeight: 600 }} />
             </label>
+            {entry.obrigatorio && (
+              <small style={{ color: 'var(--muted)' }}>
+                Campo obrigatório — o agente precisa dele pronto para responder clientes que perguntarem sobre a empresa.
+              </small>
+            )}
             <label style={{ margin: 0 }}>
               Texto
               <textarea name="content" defaultValue={entry.content} rows={3} />
@@ -114,9 +119,11 @@ export function DadosEmpresa({ api, company }: { api: Api; company: Company }) {
                 {savingId === entry.id && <Spinner />}
                 Salvar
               </button>
-              <button type="button" className="danger-outline" onClick={() => remove(entry)} disabled={savingId === entry.id}>
-                Excluir
-              </button>
+              {!entry.obrigatorio && (
+                <button type="button" className="danger-outline" onClick={() => remove(entry)} disabled={savingId === entry.id}>
+                  Excluir
+                </button>
+              )}
             </div>
           </form>
         ))}
