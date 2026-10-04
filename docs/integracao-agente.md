@@ -1,19 +1,27 @@
-# Integração do agente Axioma com o CRM
+# Integração de um agent com o Conecta CRM
 
-Este documento é para quem for adaptar o agente Axioma (OpenClaw, hospedado na
-Hostinger) e o plugin `ephemeral-whatsapp-gate` para gravar leads no CRM via
-API, em vez de na planilha "Funil de Atendimentos".
+Este documento é **genérico**: serve para integrar **qualquer agent**
+(qualquer nome, qualquer plataforma/runtime de agent — OpenClaw ou outro) e
+seu Gateway WhatsApp ao Conecta CRM via API, em vez de planilha ou qualquer
+outro armazenamento local. Não é específico de nenhuma instância de agent
+nem de nenhum plugin — se você está montando um Gateway do zero, ver também
+`BUILD_PROMPT.md`.
 
-## O que muda em relação à planilha
+**Nota sobre o prefixo `AXIOMA` nos marcadores:** `[[AXIOMA:...]]` é uma
+constante fixa do protocolo desta API (definida pelo backend do Conecta
+CRM), não o nome do agent que você está integrando — mantenha-a como está,
+independente de como o seu agent se chama.
 
-Hoje o plugin escreve diretamente numa aba de planilha. A partir daqui, ele
-deve fazer **uma chamada HTTP por marcador emitido pelo Axioma** para
-`POST /api/companies/{id}/incoming/`, e usar a resposta para saber o que
-enviar ao contato. O CRM passa a ser quem resolve `question_id → texto/áudio
-aprovado` — o plugin não precisa mais manter esse mapeamento sozinho (isso é
-o que antes vivia nas colunas da planilha ou em `axioma-audios/`).
+## Como funciona
 
-Depois de efetivamente enviar a mensagem ao WhatsApp, o plugin confirma com
+O Gateway nunca guarda estado de roteiro/lead localmente. Ele faz **uma
+chamada HTTP por marcador emitido pelo agent** para
+`POST /api/companies/{id}/incoming/`, e usa a resposta para saber o que
+enviar ao contato. O CRM é sempre quem resolve `question_id → texto/áudio
+aprovado` — o Gateway nunca mantém esse mapeamento sozinho, em planilha, em
+arquivo local ou em qualquer outro cache de longo prazo.
+
+Depois de efetivamente enviar a mensagem ao WhatsApp, o Gateway confirma com
 `POST /api/companies/{id}/delivery/`. Enquanto essa confirmação não chega, o
 CRM não libera avanço na conversa — se a entrega falhar, o caso é transferido
 automaticamente para atendimento humano.
@@ -77,6 +85,23 @@ Alternativa sem shell: criar o usuário pelo Django Admin (`/admin/`), vincular
 agora é exclusivo do frontend humano e devolve um par de tokens JWT de curta
 duração (`access`/`refresh`), não o token fixo que o agente usa.
 
+**Confirmar que um token é de produção:** não existe uma marcação especial
+no token pra isso — a distinção é só o host que você chama (`api_base_url`
+de dev vs. de produção) e qual banco de dados aquele token foi gerado em
+(dev e produção são bancos completamente separados; um token de dev nunca
+autentica em produção e vice-versa, porque o `Token`/usuário simplesmente
+não existe no outro banco). Pra confirmar com certeza antes de ativar
+tráfego real, use o preflight (`GET /api/companies/{id}/` — ver seção 2)
+contra o `api_base_url` de produção: um `401` significa token/host errado,
+`200` com o `company_id` esperado confirma que está correto.
+
+**Revogação e rotação:** revogar de verdade é **apagar o `Token`** no Django
+Admin (não existe "desativar temporariamente" — ou o token existe e
+autentica, ou não existe e dá `401` imediatamente, sem período de carência).
+Pra rotacionar sem downtime: gere o token novo primeiro, atualize o
+SecretRef do Gateway pro valor novo, confirme com o preflight, e só então
+apague o token antigo — nessa ordem, nunca o contrário.
+
 ## 2. Contrato de `/incoming/`
 
 ```
@@ -85,7 +110,7 @@ Authorization: Token <token>
 Content-Type: application/json
 ```
 
-Corpo da requisição — um por marcador emitido pelo Axioma:
+Corpo da requisição — um por marcador emitido pelo agent:
 
 ```jsonc
 {
@@ -117,13 +142,77 @@ Resposta (sempre 200, mesmo em `NO_REPLY`):
   atendimento humano, entrega anterior ainda pendente, ou falta de
   `question_id`/`Question` cadastrado (nesses casos o CRM já move o lead para
   atendimento humano sozinho).
-- `action="TEXTO"` → envie `content` literalmente.
-- `action="AUDIO_GRAVADO"` → `content` é o identificador do OGG/Opus aprovado
-  (resolva no seu catálogo de áudios e envie sem legenda/TTS).
+- `action="TEXTO"` → envie `content` literalmente (texto já com os
+  placeholders resolvidos — ver seção de placeholders abaixo).
+- `action="AUDIO_GRAVADO"` → `content` é um **identificador opaco de texto
+  livre** (`Question.audio_asset`, cadastrado pela própria empresa na tela
+  Roteiro — não é uma URL nem um asset gerenciado pelo CRM). **O catálogo
+  de verdade (identificador → arquivo/URL/MIME real) é responsabilidade do
+  Gateway**, combinado com a empresa na implantação — o CRM só guarda a
+  string que a empresa decidiu usar como referência. Se o Gateway receber
+  um identificador que não existe no seu catálogo, trate como erro
+  (fail-closed — ver `BUILD_PROMPT.md`), nunca envie algo sem ter certeza.
+
+### Idempotência e retentativas
+
+- **Chave de idempotência de `/incoming/`** é `(lead ativo, message_id)` —
+  reenviar o mesmo `message_id` pro mesmo contato nunca duplica efeito;
+  a resposta vira `{"action": "NO_REPLY", "duplicate": true, "lead_id":
+  "..."}`, **sem `event_id`** (nenhum evento novo é criado) — não chame
+  `/delivery/` para esse caso, não há nada pra confirmar. Não há TTL: a
+  deduplicação vale para sempre dentro do histórico daquele lead.
+- **`/delivery/` também é idempotente por `event_id`**: se o evento já não
+  está `PENDING` (já foi confirmado `SENT` ou `FAILED` antes), chamar de
+  novo não tem efeito — só devolve o status atual. Seguro reenviar.
+- Eventos de resposta `NO_REPLY` (fora do caso de duplicata) **não exigem
+  confirmação de entrega** — nada foi enviado ao contato, então não há
+  `/delivery/` a fazer para esses `event_id`.
+- **Quando o Gateway pode retentar** `/incoming/`: só em falha de rede/timeout
+  **antes** de receber qualquer resposta — e sempre com o **mesmo**
+  `message_id` original (nunca gere um `message_id` novo para reenviar o
+  mesmo marcador; isso criaria um evento novo e duplicaria efeito). Se a
+  resposta já chegou (mesmo um erro HTTP do CRM), não retente automaticamente
+  — trate como erro e fail-closed (ver `BUILD_PROMPT.md`).
+
+### Erros e códigos HTTP
+
+Este contrato usa só estes códigos — não espere `403` nem `409` de nenhuma
+rota abaixo:
+
+| Código | Quando acontece | O que o Gateway deve fazer |
+| --- | --- | --- |
+| `401` | Token ausente, inválido ou expirado (`AgentTokenExpiry`) | Fail-closed, alertar, nunca tentar de novo sem token novo |
+| `404` | `company_id` não existe ou não pertence ao token usado (nunca `403` — o CRM não distingue "existe mas não é seu" de "não existe") | Fail-closed, revisar configuração (token trocado de empresa?) |
+| `400` | Payload fora do schema (`IncomingSerializer`/`DeliverySerializer`) — inclui `CLASSIFICADO` sem `temperatura`/`prioridade`, `contact` fora do padrão E.164, `status` fora de `SENT`/`FAILED` em `/delivery/` | Fail-closed, é bug de integração do Gateway, não reenviar sem corrigir o payload |
+| `429` | Mais de 60 chamadas/minuto por conta de serviço (`throttle_scope="agent-incoming"`) | Esperar e reenviar depois — seguro, já que `/incoming/` é idempotente pelo mesmo `message_id` |
+| `5xx` | Erro interno do CRM | Fail-closed, alertar; retentar depois é seguro (mesma idempotência), não há retry automático do lado do CRM |
+
+### Preflight seguro (validar credencial sem efeito de negócio)
+
+Não existe uma rota dedicada de "ping" — use `GET /api/companies/{company_id}/`
+(já existe, sem side-effect, mesma autenticação) antes de qualquer tráfego
+real: `200` confirma token válido e vinculado àquela empresa; `401`/`404`
+apontam exatamente o problema (token vs. empresa errada), sem nunca criar
+lead ou evento. Não há endpoint de "whoami" separado — este serve.
+
+### Versão do contrato
+
+Não há negociação de versão em runtime (sem header/campo de versão na API).
+Este documento é a única fonte de verdade do contrato vigente — qualquer
+mudança futura incompatível será um anúncio explícito aqui, nunca algo que
+o Gateway deva detectar ou negociar automaticamente.
+
+### Identidade/correlação do contato no WhatsApp
+
+De onde vêm o E.164, o id da mensagem inbound e a chave de sessão é decisão
+de **qual runtime/plataforma** está hospedando o Gateway, não do CRM — ver
+`BUILD_PROMPT.md` → "Sessão por contato". O CRM só exige que `contact` já
+chegue normalizado em E.164 e que `message_id` seja estável e único por
+mensagem real (não reaproveitável entre mensagens diferentes).
 
 ### Mapeamento por marcador
 
-| Marcador do Axioma | O que mandar em `fields` | O que o CRM faz |
+| Marcador | O que mandar em `fields` | O que o CRM faz |
 | --- | --- | --- |
 | `[[AXIOMA:Q:<id>]]` | nada (`question_id` vai fora de `fields`) | marca o lead nesse `question_id` e devolve o conteúdo aprovado dele |
 | `[[AXIOMA:REPETIR]]` | nada | reenvia o conteúdo da pergunta atual do lead (sem avançar) |
@@ -131,7 +220,7 @@ Resposta (sempre 200, mesmo em `NO_REPLY`):
 | `[[AXIOMA:VALIDAR:{...}]]` | os campos conhecidos (sem `proxima`) | grava os campos, devolve a pergunta de confirmação fixa (`question_id="validar"`) |
 | `[[AXIOMA:CLASSIFICADO:{...}]]` | ao menos `temperatura` e `prioridade` (sem `proxima`) | grava os campos finais, **encerra o bot** (`bot_closed=true`), devolve a mensagem de encerramento (`question_id="encerramento"`) |
 
-Campos aceitos dentro de `fields` (nomes exatamente como o Axioma emite):
+Campos aceitos dentro de `fields` (nomes exatamente como o agent emite):
 
 | Campo em `fields` | Vai para o quê no Lead | Valores aceitos |
 | --- | --- | --- |
@@ -148,7 +237,7 @@ Campos aceitos dentro de `fields` (nomes exatamente como o Axioma emite):
 ### Placeholders no texto aprovado
 
 O texto de qualquer `Question` pode usar placeholders entre chaves, que o CRM
-substitui antes de devolver `content`. Nunca precisa pedir isso ao Axioma —
+substitui antes de devolver `content`. Nunca precisa pedir isso ao agent —
 é resolvido automaticamente pelo backend:
 
 | Placeholder | Resolvido a partir de |
@@ -161,7 +250,7 @@ Um placeholder sem valor ainda (ex.: `{tema}` antes de o lead informar o tema)
 vira string vazia — nunca aparece `{tema}` literal na mensagem.
 
 Envie só os campos que a resposta atual esclareceu — o CRM mantém os que já
-tinha. Isso já é como o `AGENTS.md` do Axioma descreve o preenchimento.
+tinha. Isso já é como o `AGENTS.md` do agent descreve o preenchimento.
 
 ## 3. Confirmação de entrega
 
@@ -210,7 +299,18 @@ curl -s -X POST -H "Authorization: Token $TOKEN" -H "Content-Type: application/j
   $BASE/incoming/
 ```
 
-## 5. O que falta cadastrar antes de ligar ao agente real
+## 5. Futuro: envio de áudio por TTS (ainda não implementado)
+
+Vai existir uma opção futura na tela Roteiro → "Opções do Agente" (mesmo
+lugar de `Agente conversacional`), algo como **"Agente envia áudio"**, que
+quando marcada faria o plugin enviar a resposta como áudio sintetizado (TTS)
+ao WhatsApp mesmo em `action="TEXTO"`. Isso ainda **não existe** — nem o
+campo em `Company`, nem um novo valor de `action`, nem a lógica de síntese.
+Citado aqui só como aviso: quem for integrar agora não deve supor que
+`action="TEXTO"` sempre significa "manda texto puro" de um jeito difícil de
+estender depois. Trabalho futuro, fora do escopo deste contrato por ora.
+
+## 6. O que falta cadastrar antes de ligar ao agente real
 
 O catálogo de `question_id → texto/áudio` ainda está com conteúdo de teste.
 Antes de apontar o agente real da Rufus Advocacia (ou qualquer empresa)
@@ -222,6 +322,6 @@ Admin, modelo `Question`):
 `tipo_de_situacao`, `afetou_renda`, `equipe_avaliar_situacao`, `validar`,
 `encerramento`.
 
-Se o Axioma pedir um `question_id` sem `Question` cadastrada para aquela
+Se o agent pedir um `question_id` sem `Question` cadastrada para aquela
 empresa, o CRM devolve `NO_REPLY` e transfere o lead para atendimento humano
 — não inventa texto.
