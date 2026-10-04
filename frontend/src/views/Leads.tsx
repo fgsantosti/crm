@@ -3,35 +3,43 @@ import type { Api } from '../api';
 import type { Company, Lead, LeadEvent, Paginated } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 
-export function Leads({ api, company }: { api: Api; company: Company }) {
+const PRIORITY_RANK: Record<string, number> = { Alta: 0, Média: 1, Baixa: 2 };
+
+const DESFECHO_OPTIONS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string; help: string }[] = [
+  { value: 'encerrado', label: 'Encerrado', color: 'var(--success)', help: 'Sucesso de comunicação — o cliente conseguiu realizar o que desejava.' },
+  { value: 'comprometido', label: 'Comprometido', color: 'var(--warn)', help: 'Algo não saiu conforme o planejado; o cliente pode voltar ou não dar continuidade.' },
+  { value: 'falha', label: 'Falha durante o atendimento', color: 'var(--danger)', help: 'O cliente desistiu ou cessou o contato durante o atendimento humano.' },
+];
+
+export function Leads({ api, company, role }: { api: Api; company: Company; role: 'atendente' | 'empresa' | 'admin' }) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Lead | null>(null);
   const [events, setEvents] = useState<LeadEvent[]>([]);
   const [busy, setBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState('');
+  const [despachando, setDespachando] = useState(false);
 
-  useEffect(() => {
-    let active = true;
+  const podeAtender = role === 'atendente';
+
+  function load() {
     setBusy(true);
-    setSelected(null);
     setError('');
     api(`/leads/?company=${company.id}`)
-      .then((d: Paginated<Lead>) => {
-        if (active) setLeads(d.results);
-      })
-      .catch((e) => {
-        if (active) setError(e.message);
-      })
-      .finally(() => {
-        if (active) setBusy(false);
-      });
-    return () => {
-      active = false;
-    };
+      .then((d: Paginated<Lead>) => setLeads(d.results))
+      .catch((e) => setError(e.message))
+      .finally(() => setBusy(false));
+  }
+
+  useEffect(() => {
+    load();
+    setSelected(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company.id]);
 
   useEffect(() => {
+    setDespachando(false);
     if (!selected) {
       setEvents([]);
       return;
@@ -66,20 +74,61 @@ export function Leads({ api, company }: { api: Api; company: Company }) {
     }
   }
 
-  const visible = leads.filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()));
+  async function assumir() {
+    if (!selected) return;
+    setActionBusy(true);
+    setError('');
+    try {
+      const updated = await api(`/leads/${selected.id}/assumir/?company=${company.id}`, { method: 'POST' });
+      setLeads((v) => v.map((l) => (l.id === updated.id ? updated : l)));
+      setSelected(updated);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setActionBusy(false);
+    }
+  }
 
-  const columnOf = (l: Lead): 'novo' | 'triagem' | 'humano' | 'classificado' => {
+  async function despachar(desfecho: 'encerrado' | 'comprometido' | 'falha') {
+    if (!selected) return;
+    setActionBusy(true);
+    setError('');
+    try {
+      const updated = await api(`/leads/${selected.id}/despachar/?company=${company.id}`, { method: 'POST', body: JSON.stringify({ desfecho }) });
+      setLeads((v) => v.map((l) => (l.id === updated.id ? updated : l)));
+      setSelected(updated);
+      setDespachando(false);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  const visible = leads
+    .filter((l) => !l.desfecho)
+    .filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()));
+
+  const columnOf = (l: Lead): 'novo' | 'triagem' | 'espera' | 'humano' => {
     if (l.mode === 'HUMANO') return 'humano';
-    if (l.bot_closed) return 'classificado';
+    if (l.bot_closed) return 'espera';
     if (l.funnel_stage === 'Novo lead') return 'novo';
     return 'triagem';
   };
   const columns: { key: ReturnType<typeof columnOf>; label: string }[] = [
     { key: 'novo', label: 'Novo lead' },
     { key: 'triagem', label: 'Em triagem' },
+    { key: 'espera', label: 'Atendimentos em espera' },
     { key: 'humano', label: 'Atendimento humano' },
-    { key: 'classificado', label: 'Classificado' },
   ];
+
+  function orderedItems(key: ReturnType<typeof columnOf>) {
+    const items = visible.filter((l) => columnOf(l) === key);
+    if (key === 'espera') {
+      return [...items].sort((a, b) => (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9));
+    }
+    return items;
+  }
 
   return (
     <>
@@ -109,7 +158,7 @@ export function Leads({ api, company }: { api: Api; company: Company }) {
         ) : (
           <div className="kanban">
             {columns.map((col) => {
-              const items = visible.filter((l) => columnOf(l) === col.key);
+              const items = orderedItems(col.key);
               return (
                 <div key={col.key} className="kanban-col">
                   <div className="kanban-col-head">
@@ -145,6 +194,9 @@ export function Leads({ api, company }: { api: Api; company: Company }) {
                               {l.demand}
                             </small>
                           )}
+                          {col.key === 'humano' && l.owner && (
+                            <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>em execução · {l.owner}</small>
+                          )}
                         </div>
                       </article>
                     ))}
@@ -171,18 +223,62 @@ export function Leads({ api, company }: { api: Api; company: Company }) {
               Fechar
             </button>
           </div>
-          <p style={{ marginBottom: 20 }}>
+          <p style={{ marginBottom: 16 }}>
             Estado: <strong style={{ color: 'var(--ink)' }}>{selected.state}</strong> · Bot {selected.bot_closed ? 'encerrado' : 'ativo'}
+            {selected.owner && (
+              <>
+                {' '}
+                · Responsável: <strong style={{ color: 'var(--ink)' }}>{selected.owner}</strong>
+              </>
+            )}
           </p>
+
+          {podeAtender && (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
+              {selected.bot_closed && !selected.owner && (
+                <button type="button" onClick={assumir} disabled={actionBusy} style={{ background: '#2563EB', borderColor: '#2563EB' }}>
+                  {actionBusy && <Spinner />}
+                  Seguir com o contato
+                </button>
+              )}
+              {selected.contact && (
+                <a href={`https://wa.me/${selected.contact.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                  <button type="button" style={{ background: '#25D366', borderColor: '#25D366' }}>
+                    Conversar
+                  </button>
+                </a>
+              )}
+              {selected.mode === 'HUMANO' && (
+                <button type="button" className="danger-outline" onClick={() => setDespachando((v) => !v)}>
+                  Despachar
+                </button>
+              )}
+            </div>
+          )}
+
+          {despachando && (
+            <div className="panel" style={{ padding: 16, marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <h3 style={{ margin: 0, fontSize: 15 }}>Classificar desfecho</h3>
+              {DESFECHO_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => despachar(opt.value)}
+                  disabled={actionBusy}
+                  style={{ textAlign: 'left', borderColor: opt.color, color: opt.color, background: '#fff' }}
+                >
+                  <strong style={{ display: 'block' }}>{opt.label}</strong>
+                  <small style={{ color: 'var(--muted)', fontWeight: 400 }}>{opt.help}</small>
+                </button>
+              ))}
+            </div>
+          )}
+
           <form key={selected.id} onSubmit={save}>
             <div className="fields">
               <label>
                 Nome
                 <input name="name" defaultValue={selected.name} />
-              </label>
-              <label>
-                Responsável
-                <input name="owner" defaultValue={selected.owner} />
               </label>
               <label>
                 Prioridade
@@ -209,10 +305,12 @@ export function Leads({ api, company }: { api: Api; company: Company }) {
               Observações
               <textarea name="notes" defaultValue={selected.notes} />
             </label>
-            <button disabled={busy}>
-              {busy && <Spinner />}
-              Salvar alterações
-            </button>
+            {podeAtender && (
+              <button disabled={busy}>
+                {busy && <Spinner />}
+                Salvar alterações
+              </button>
+            )}
           </form>
           <h3 style={{ margin: '26px 0 10px' }}>Histórico operacional</h3>
           {events.length ? (

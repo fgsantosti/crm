@@ -194,9 +194,9 @@ export function App() {
         )}
         <div key={view} className="view-enter">
           {view === 'dashboard' && <Dashboard api={api} company={company} role={role === 'atendente' ? 'atendente' : 'empresa'} />}
-          {view === 'leads' && <Leads api={api} company={company} />}
+          {view === 'leads' && <Leads api={api} company={company} role={role} />}
           {view === 'pendencias' && <Pendencias api={api} company={company} />}
-          {view === 'humano' && <AtendimentoHumano api={api} company={company} />}
+          {view === 'humano' && <AtendimentoHumano api={api} company={company} me={me} />}
           {view === 'roteiro' && <Roteiro api={api} company={company} canEdit={role !== 'atendente'} />}
           {view === 'dados-empresa' && <DadosEmpresa api={api} company={company} />}
           {view === 'equipe' && <Equipe api={api} company={company} />}

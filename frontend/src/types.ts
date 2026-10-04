@@ -32,6 +32,7 @@ export type Lead = {
   last_audio_id: string;
   bot_closed: boolean;
   notes: string;
+  desfecho: 'encerrado' | 'comprometido' | 'falha' | '';
 };
 
 export type LeadEvent = {
