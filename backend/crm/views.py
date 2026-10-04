@@ -10,7 +10,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
-from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, MANDATORY_QUESTION_IDS
+from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
 from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer
 from .services import (
     receive, escalate, create_invite,
@@ -20,6 +20,7 @@ from .services import (
     redefinir_senha_atendente as redefinir_senha_atendente_service,
     agent_status, gerar_token_agente, revogar_token_agente,
     assumir_lead as assumir_lead_service, despachar_lead as despachar_lead_service,
+    seed_roteiro_padrao,
 )
 
 def _avatar_url(request, profile):
@@ -317,6 +318,8 @@ class QuestionViewSet(TenantMixin, viewsets.ModelViewSet):
         question = self.get_object()
         if question.question_id in MANDATORY_QUESTION_IDS:
             return Response({"detail": f"'{question.question_id}' é uma pergunta obrigatória do roteiro e não pode ser excluída."}, status=400)
+        if question.question_id in MANDATORY_OFFFLOW_QUESTION_IDS:
+            return Response({"detail": f"'{question.question_id}' é um texto obrigatório fora do fluxo e não pode ser excluído."}, status=400)
         return super().destroy(request, *args, **kwargs)
 
 class VariavelViewSet(TenantMixin, viewsets.ModelViewSet):
@@ -370,6 +373,10 @@ class AdminCompanyViewSet(viewsets.ModelViewSet):
     # destroy() é desligado explicitamente abaixo pra isso não virar exclusão
     # de empresa (destrutivo demais pra expor sem uma tela própria de confirmação).
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def perform_create(self, serializer):
+        company = serializer.save()
+        seed_roteiro_padrao(company)
 
     def destroy(self, request, *args, **kwargs):
         return Response({"detail": "Exclusão de empresa não é suportada por aqui."}, status=405)

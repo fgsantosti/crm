@@ -1,6 +1,6 @@
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel
+from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, MANDATORY_OFFFLOW_QUESTION_IDS
 
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
@@ -46,10 +46,12 @@ class VariavelSerializer(serializers.ModelSerializer):
 
 class QuestionSerializer(serializers.ModelSerializer):
     # Declarado explícito: variavel é null=True só pra migração não quebrar
-    # perguntas antigas (ver crm/migrations/0009), mas na API continua sempre
-    # obrigatório -- sem isso o ModelSerializer relaxa "required" sozinho
-    # pra qualquer campo com null=True no modelo.
-    variavel = serializers.PrimaryKeyRelatedField(queryset=Variavel.objects.all())
+    # perguntas antigas (ver crm/migrations/0009) e pros 4 textos fora do fluxo
+    # (MANDATORY_OFFFLOW_QUESTION_IDS, que não são classificáveis), mas pra
+    # qualquer pergunta de FLUXO a API continua exigindo -- sem isso o
+    # ModelSerializer relaxa "required" sozinho pra qualquer campo com
+    # null=True no modelo (ver validate() abaixo pra regra condicional real).
+    variavel = serializers.PrimaryKeyRelatedField(queryset=Variavel.objects.all(), required=False, allow_null=True)
     class Meta:
         model = Question
         fields = "__all__"
@@ -58,9 +60,18 @@ class QuestionSerializer(serializers.ModelSerializer):
         # "uma pergunta SEMPRE estará atrelada a uma variável" -- nunca aceita
         # variável de outra empresa (o FK sozinho não garante isolamento de tenant).
         company = self.context.get("company")
-        if company and variavel.company_id != company.id:
+        if variavel and company and variavel.company_id != company.id:
             raise serializers.ValidationError("Variável não pertence a esta empresa.")
         return variavel
+    def validate(self, attrs):
+        question_id = attrs.get("question_id") or (self.instance.question_id if self.instance else "")
+        is_offflow = question_id in MANDATORY_OFFFLOW_QUESTION_IDS
+        variavel = attrs.get("variavel", self.instance.variavel if self.instance else None)
+        if not is_offflow and not variavel:
+            raise serializers.ValidationError({"variavel": "Toda pergunta do fluxo precisa de uma variável vinculada."})
+        if is_offflow and variavel:
+            raise serializers.ValidationError({"variavel": "Textos fora do fluxo não têm variável (não são classificáveis)."})
+        return attrs
 
 class CompanyInfoSerializer(serializers.ModelSerializer):
     class Meta:

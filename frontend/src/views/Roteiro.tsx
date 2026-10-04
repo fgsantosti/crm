@@ -20,6 +20,18 @@ const MANDATORY_LABELS: Record<string, string> = {
   demanda: 'Demanda',
 };
 
+// Fora do fluxo de triagem: o cliente vê "apresentacao" antes de entrar em qualquer
+// etapa, "empresa" é o fallback usado enquanto ele ainda não entrou no fluxo (só
+// vendo o que o agente responde sobre a empresa), e "validar"/"encerramento" fecham
+// a triagem. Nenhum dos 4 é classificável, então não tem Variável (ver backend).
+const OFFFLOW_IDS = ['apresentacao', 'empresa', 'validar', 'encerramento'] as const;
+const OFFFLOW_LABELS: Record<string, { title: string; help: string }> = {
+  apresentacao: { title: 'Texto de apresentação', help: 'Primeira mensagem enviada quando o cliente entra em contato.' },
+  empresa: { title: 'Resposta sobre a empresa', help: 'Usado enquanto o cliente ainda não entrou no fluxo de perguntas — só o que o agente responde sobre a empresa.' },
+  validar: { title: 'Confirmação dos dados', help: 'Resumo enviado para o cliente confirmar antes de encerrar a triagem.' },
+  encerramento: { title: 'Encerramento', help: 'Mensagem final, enviada quando a triagem é concluída e classificada.' },
+};
+
 const TOKEN_RE = /(<br\s*\/?>)|(\{[a-zA-Z_]+\})/g;
 
 // Quem edita o roteiro (na tela ou direto no Django Admin) não precisa saber HTML
@@ -97,7 +109,7 @@ function Legenda({ areas, variaveis }: { areas: Area[]; variaveis: Variavel[] })
 }
 
 export function Roteiro({ api, company, canEdit }: { api: Api; company: Company; canEdit: boolean }) {
-  const [tab, setTab] = useState<'perguntas' | 'variaveis'>('perguntas');
+  const [tab, setTab] = useState<'perguntas' | 'fora-do-fluxo' | 'variaveis'>('perguntas');
   const [questions, setQuestions] = useState<Question[]>([]);
   const [variaveis, setVariaveis] = useState<Variavel[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
@@ -107,6 +119,11 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
   const [savingV, setSavingV] = useState<number | 'new' | null>(null);
   const [newQ, setNewQ] = useState({ question_id: '', text: '', variavel: '' });
   const [newV, setNewV] = useState({ name: '', peso: '5' });
+  const [dragId, setDragId] = useState<number | null>(null);
+
+  const isOffflow = (q: Question) => (OFFFLOW_IDS as readonly string[]).includes(q.question_id);
+  const flowQuestions = questions.filter((q) => !isOffflow(q));
+  const offflowQuestions = questions.filter(isOffflow);
 
   function load() {
     setBusy(true);
@@ -140,6 +157,27 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
       setError((err as Error).message);
     } finally {
       setSavingQ(null);
+    }
+  }
+
+  async function reorder(sourceId: number, targetId: number) {
+    if (sourceId === targetId) return;
+    const current = flowQuestions;
+    const sourceIndex = current.findIndex((q) => q.id === sourceId);
+    const targetIndex = current.findIndex((q) => q.id === targetId);
+    if (sourceIndex === -1 || targetIndex === -1) return;
+    const reordered = [...current];
+    const [moved] = reordered.splice(sourceIndex, 1);
+    reordered.splice(targetIndex, 0, moved);
+    const withOrdem = reordered.map((q, i) => ({ ...q, ordem: i }));
+    setQuestions((v) => v.map((q) => withOrdem.find((w) => w.id === q.id) || q));
+    try {
+      await Promise.all(
+        withOrdem.map((q) => api(`/questions/${q.id}/?company=${company.id}`, { method: 'PATCH', body: JSON.stringify({ ordem: q.ordem }) })),
+      );
+    } catch (err) {
+      setError((err as Error).message);
+      load();
     }
   }
 
@@ -243,9 +281,12 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
 
       <Legenda areas={areas} variaveis={variaveis} />
 
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
         <button type="button" className={tab === 'perguntas' ? '' : 'secondary'} onClick={() => setTab('perguntas')}>
           Perguntas do roteiro
+        </button>
+        <button type="button" className={tab === 'fora-do-fluxo' ? '' : 'secondary'} onClick={() => setTab('fora-do-fluxo')}>
+          Textos fora do fluxo
         </button>
         <button type="button" className={tab === 'variaveis' ? '' : 'secondary'} onClick={() => setTab('variaveis')}>
           Variáveis do agente
@@ -256,9 +297,25 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
 
       {tab === 'perguntas' && (
         <section className="section">
-          {questions.map((q) => (
-            <article key={q.id} className="step-card">
+          {canEdit && flowQuestions.length > 1 && (
+            <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>Arraste os cartões pelo ⠿ para reordenar o fluxo.</p>
+          )}
+          {flowQuestions.map((q) => (
+            <article
+              key={q.id}
+              className="step-card"
+              draggable={canEdit}
+              onDragStart={() => setDragId(q.id)}
+              onDragOver={(e) => canEdit && e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragId != null) reorder(dragId, q.id);
+                setDragId(null);
+              }}
+              style={{ opacity: dragId === q.id ? 0.5 : 1, cursor: canEdit ? 'grab' : undefined }}
+            >
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+                {canEdit && <span aria-hidden style={{ color: 'var(--muted)', cursor: 'grab' }}>⠿</span>}
                 <span className="step-tag">{MANDATORY_LABELS[q.question_id] || q.question_id}</span>
                 {q.obrigatoria && <span className="chip chip-neutral">obrigatória</span>}
                 {q.audio_asset && <span className="chip chip-neutral">áudio: {q.audio_asset}</span>}
@@ -301,7 +358,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
               )}
             </article>
           ))}
-          {!busy && !questions.length && <div className="empty">Nenhuma pergunta cadastrada para esta empresa ainda.</div>}
+          {!busy && !flowQuestions.length && <div className="empty">Nenhuma pergunta cadastrada para esta empresa ainda.</div>}
 
           {canEdit && (
             <form onSubmit={createQuestion} className="step-card" style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
@@ -343,6 +400,41 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
               </button>
             </form>
           )}
+        </section>
+      )}
+
+      {tab === 'fora-do-fluxo' && (
+        <section className="section">
+          <p style={{ marginBottom: 16 }}>
+            Enquanto o cliente ainda não está no fluxo de perguntas, ele só vê o que o agente responde com base nestes
+            4 textos — nenhum deles entra na classificação de urgência, por isso não têm variável.
+          </p>
+          {OFFFLOW_IDS.map((id) => {
+            const q = offflowQuestions.find((x) => x.question_id === id);
+            const label = OFFFLOW_LABELS[id];
+            return (
+              <article key={id} className="step-card">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 6 }}>
+                  <span className="step-tag">{label.title}</span>
+                  <span className="chip chip-neutral">obrigatória</span>
+                </div>
+                <small style={{ display: 'block', color: 'var(--muted)', marginBottom: 10 }}>{label.help}</small>
+                {!q ? (
+                  <p style={{ fontSize: 13, color: 'var(--warn)' }}>Carregando…</p>
+                ) : canEdit ? (
+                  <textarea
+                    defaultValue={q.text}
+                    rows={2}
+                    onBlur={(e) => {
+                      if (e.target.value !== q.text) saveQuestion(q, { text: e.target.value });
+                    }}
+                  />
+                ) : (
+                  <p style={{ color: 'var(--ink)', fontSize: 15 }}>“{q.text ? destacarTexto(q.text) : 'Sem texto cadastrado'}”</p>
+                )}
+              </article>
+            );
+          })}
         </section>
       )}
 

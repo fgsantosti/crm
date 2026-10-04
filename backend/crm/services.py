@@ -9,10 +9,24 @@ from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.authtoken.models import Token
 from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
-from .models import Lead, Question, Event, Company, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel
+from .models import Lead, Question, Event, Company, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
 
 NO_REPLY = {"action": "NO_REPLY"}
 RESERVED_QUESTION_IDS = {"validar", "encerramento"}
+
+def seed_roteiro_padrao(company):
+    """Garante o mínimo pra uma empresa nova conseguir operar o funil: a Variavel
+    padrão, as 3 perguntas obrigatórias de triagem (nome/situacao/demanda), os 4
+    textos fora do fluxo (apresentacao/empresa/validar/encerramento) e os 3 campos
+    obrigatórios de Dados da empresa. Chamado na criação de empresa (AdminCompanyViewSet)
+    e pela migração 0012 pras empresas que já existiam antes dessa feature."""
+    variavel, _ = Variavel.objects.get_or_create(company=company, name="Geral", defaults={"peso": 5})
+    for ordem, question_id in enumerate(MANDATORY_QUESTION_IDS):
+        Question.objects.get_or_create(company=company, question_id=question_id, defaults={"obrigatoria": True, "variavel": variavel, "ordem": ordem})
+    for question_id in MANDATORY_OFFFLOW_QUESTION_IDS:
+        Question.objects.get_or_create(company=company, question_id=question_id, defaults={"obrigatoria": True, "variavel": None})
+    for title in CompanyInfo.MANDATORY_TITLES:
+        CompanyInfo.objects.get_or_create(company=company, title=title, defaults={"obrigatorio": True})
 
 # Mapa dos campos que o agente Axioma envia em ATUALIZAR/VALIDAR/CLASSIFICADO
 # para os campos reais do Lead. 'proxima' nunca é um campo do Lead: é o

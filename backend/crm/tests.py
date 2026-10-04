@@ -183,6 +183,52 @@ class QualificationTests(TestCase):
         # agora sem nenhuma pergunta usando -- pode excluir
         agora_livre = c.delete(f"/api/variaveis/{variavel_id}/?company={self.company.pk}")
         self.assertEqual(agora_livre.status_code, 204)
+    def test_offflow_questions_have_no_variavel_and_cannot_be_deleted(self):
+        staff = get_user_model().objects.create_user(username="empresa-roteiro-2", is_staff=True)
+        self.company.members.add(staff)
+        c = APIClient()
+        c.force_authenticate(staff)
+
+        variavel = c.post(f"/api/variaveis/?company={self.company.pk}", {"name": "Urgência 2", "peso": 6}, format="json")
+        variavel_id = variavel.json()["id"]
+
+        # "apresentacao" já existe (criada em setUp) sem variável -- editar o texto
+        # não deve exigir nem aceitar uma variável, porque é fora do fluxo.
+        apresentacao_pk = Question.objects.get(company=self.company, question_id="apresentacao").pk
+        com_variavel = c.patch(f"/api/questions/{apresentacao_pk}/?company={self.company.pk}", {"variavel": variavel_id}, format="json")
+        self.assertEqual(com_variavel.status_code, 400)
+        so_texto = c.patch(f"/api/questions/{apresentacao_pk}/?company={self.company.pk}", {"text": "Olá! Em que posso ajudar?"}, format="json")
+        self.assertEqual(so_texto.status_code, 200)
+
+        bloqueado = c.delete(f"/api/questions/{apresentacao_pk}/?company={self.company.pk}")
+        self.assertEqual(bloqueado.status_code, 400)
+
+        # criar um novo texto fora do fluxo (ex.: "empresa") não aceita variável
+        com_variavel_nova = c.post(
+            f"/api/questions/?company={self.company.pk}",
+            {"question_id": "empresa", "text": "Somos uma empresa...", "variavel": variavel_id},
+            format="json",
+        )
+        self.assertEqual(com_variavel_nova.status_code, 400)
+        sem_variavel_offflow = c.post(
+            f"/api/questions/?company={self.company.pk}", {"question_id": "empresa", "text": "Somos uma empresa..."}, format="json"
+        )
+        self.assertEqual(sem_variavel_offflow.status_code, 201)
+        self.assertIsNone(sem_variavel_offflow.json()["variavel"])
+    def test_question_ordem_can_be_updated_for_drag_and_drop(self):
+        from .models import Variavel
+        staff = get_user_model().objects.create_user(username="empresa-roteiro-3", is_staff=True)
+        self.company.members.add(staff)
+        c = APIClient()
+        c.force_authenticate(staff)
+        variavel = Variavel.objects.create(company=self.company, name="Geral 3", peso=5)
+        nome = Question.objects.get(company=self.company, question_id="nome")
+        nome.variavel = variavel
+        nome.save(update_fields=["variavel"])
+        resp = c.patch(f"/api/questions/{nome.pk}/?company={self.company.pk}", {"ordem": 3}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        nome.refresh_from_db()
+        self.assertEqual(nome.ordem, 3)
     def test_companyinfo_create_accepts_blank_content(self):
         # Bug real: "+ Nova entrada" no frontend manda content="" (preenche
         # depois); content não tinha blank=True, então todo POST de uma
@@ -279,6 +325,13 @@ class QualificationTests(TestCase):
         updated = c.patch(f"/api/admin-companies/{company_id}/", {"default_owner": "Fila Nova"}, format="json")
         self.assertEqual(updated.status_code, 200)
         self.assertEqual(updated.json()["default_owner"], "Fila Nova")
+        # seed_roteiro_padrao: empresa nova já nasce com o mínimo pro funil funcionar.
+        nova = Company.objects.get(pk=company_id)
+        ids = set(Question.objects.filter(company=nova).values_list("question_id", flat=True))
+        self.assertEqual(ids, {"nome", "situacao", "demanda", "apresentacao", "empresa", "validar", "encerramento"})
+        self.assertTrue(Question.objects.filter(company=nova, question_id="nome", obrigatoria=True, variavel__isnull=False).exists())
+        self.assertTrue(Question.objects.filter(company=nova, question_id="apresentacao", obrigatoria=True, variavel__isnull=True).exists())
+        self.assertEqual(CompanyInfo.objects.filter(company=nova, obrigatorio=True).count(), 3)
     def test_admin_agente_gerar_status_revogar_token(self):
         superuser = get_user_model().objects.create_user(username="super-teste-3", is_staff=True, is_superuser=True)
         c = APIClient()

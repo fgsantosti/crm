@@ -15,6 +15,12 @@ class Company(models.Model):
 
 MANDATORY_QUESTION_IDS = ["nome", "situacao", "demanda"]
 
+# Textos fora do fluxo de triagem: apresentação (1ª mensagem, question_id = initial_state
+# padrão), fallback sobre a empresa (perguntas livres durante o fluxo), confirmação dos
+# dados coletados (VALIDAR) e encerramento (CLASSIFICADO). Não contam resposta do lead
+# pra classificação, então não ficam atreladas a uma Variavel (ver QuestionSerializer).
+MANDATORY_OFFFLOW_QUESTION_IDS = ["apresentacao", "empresa", "validar", "encerramento"]
+
 class Variavel(models.Model):
     """Variável que a empresa define pra orientar a classificação de urgência
     do agente (tela "Variáveis do Agente"). Cada pergunta do roteiro fica
@@ -38,18 +44,22 @@ class Question(models.Model):
 
     3 question_id são obrigatórias em toda empresa (MANDATORY_QUESTION_IDS) e
     não podem ser excluídas (ver views.QuestionViewSet.destroy): nome,
-    situacao e demanda. Toda pergunta -- obrigatória ou não -- fica sempre
-    atrelada a uma Variavel com peso, nunca null (on_delete=PROTECT: não dá
-    pra apagar uma variável ainda em uso por uma pergunta).
+    situacao e demanda. Toda pergunta do FLUXO (obrigatória ou não) fica
+    sempre atrelada a uma Variavel com peso, nunca null (on_delete=PROTECT:
+    não dá pra apagar uma variável ainda em uso por uma pergunta) -- exceto
+    os 4 textos fora do fluxo (MANDATORY_OFFFLOW_QUESTION_IDS), que não
+    coletam resposta classificável e por isso não têm Variavel.
     """
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     question_id = models.CharField(max_length=80, help_text="Ex.: apresentacao, empresa, nome, situacao, ainda_na_empresa, tipo_de_situacao, afetou_renda, equipe_avaliar_situacao, demanda, validar, encerramento, repetir.")
     text = models.TextField(blank=True)
     audio_asset = models.CharField(max_length=250, blank=True, help_text="Identificador do OGG/Opus pré-gravado, usado quando a entrada do contato for áudio.")
-    variavel = models.ForeignKey(Variavel, on_delete=models.PROTECT, related_name="perguntas", null=True)
+    variavel = models.ForeignKey(Variavel, on_delete=models.PROTECT, related_name="perguntas", null=True, blank=True)
     obrigatoria = models.BooleanField(default=False)
+    ordem = models.PositiveIntegerField(default=0, help_text="Posição no fluxo de perguntas, definida por arrastar-e-soltar na tela Roteiro; sem efeito nos textos fora do fluxo.")
     class Meta:
         constraints = [models.UniqueConstraint(fields=["company", "question_id"], name="unique_company_question")]
+        ordering = ["ordem", "id"]
 
 class CompanyInfo(models.Model):
     """Entrada de 'Dados da empresa': título + texto que o agente pode consultar
