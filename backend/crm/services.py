@@ -415,7 +415,6 @@ def revogar_token_agente(company):
 # --- Ciclo de vida pós-triagem: assumir e despachar (kanban "Atendimentos em
 # Espera" -> "Atendimento humano" -> encerrado/comprometido/falha) ---
 
-@transaction.atomic
 def _nome_usuario(user):
     profile = getattr(user, "profile", None)
     return (profile.display_name if profile else "") or user.get_full_name() or user.username
@@ -430,6 +429,7 @@ def _validar_lead_classificavel(lead):
         return "Leads classificados como Desqualificado ou Desconfiado não entram na fila de atendimento humano."
     return None
 
+@transaction.atomic
 def reivindicar_lead(lead_id, user):
     """Qualificados -> Atendimentos em espera: atendente reserva um lead
     classificado e ainda sem responsável (ainda não é negociação -- só
@@ -448,6 +448,7 @@ def reivindicar_lead(lead_id, user):
     lead.save(update_fields=["owner", "etapa_atendimento"])
     return None
 
+@transaction.atomic
 def mover_para_negociacao(lead_id, user):
     """Qualificados OU Atendimentos em espera -> Em negociação. Se o lead ainda
     não tem owner (vindo direto de Qualificados), quem está movendo se torna
@@ -468,6 +469,7 @@ def mover_para_negociacao(lead_id, user):
     lead.save(update_fields=["owner", "mode", "etapa_atendimento"])
     return None
 
+@transaction.atomic
 def preparar_despacho(lead_id, desfecho, user, auto_falha=False):
     """Qualificados, Em espera OU Em negociação -> Despacho: só RESERVA o
     desfecho (desfecho_pendente), não finaliza ainda -- isso só acontece em
@@ -492,6 +494,7 @@ def preparar_despacho(lead_id, desfecho, user, auto_falha=False):
     lead.save(update_fields=["owner", "etapa_atendimento", "desfecho_pendente"])
     return None
 
+@transaction.atomic
 def liberar_lead(lead_id, user):
     """Qualquer coluna já assumida -> de volta pra Qualificados: solta o owner
     (que fica livre pra qualquer atendente reivindicar de novo). Só o próprio
