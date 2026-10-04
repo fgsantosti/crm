@@ -367,19 +367,39 @@ class QualificationTests(TestCase):
         from django.contrib.auth.models import Group
         staff = get_user_model().objects.create_user(username="empresa-staff", is_staff=True)
         atendente = get_user_model().objects.create_user(username="atendente-real", is_staff=False)
+        desativado = get_user_model().objects.create_user(username="atendente-desativado", is_staff=False, is_active=False)
         agent_group, _ = Group.objects.get_or_create(name="agente")
         agent_user = get_user_model().objects.create_user(username="agente.empresa-a")
         agent_user.groups.add(agent_group)
-        for u in (staff, atendente, agent_user):
+        for u in (staff, atendente, desativado, agent_user):
             self.company.members.add(u)
         response = self.client.get(f"/api/companies/{self.company.pk}/equipe/")
         self.assertEqual(response.status_code, 200)
         usernames = {m["username"] for m in response.json()}
         # self.user ("operador", setUp) também é atendente real (is_staff=False) -- esperado aparecer junto.
+        # Conta desativada e conta de agente nunca aparecem aqui.
         self.assertEqual(usernames, {"operador", "atendente-real"})
         row = next(m for m in response.json() if m["username"] == "atendente-real")
         self.assertIn("display_name", row)
         self.assertIn("avatar_url", row)
+    def test_admin_company_member_count_ignores_inactive_and_agent(self):
+        from django.contrib.auth.models import Group
+        superuser = get_user_model().objects.create_user(username="super-teste-count", is_staff=True, is_superuser=True)
+        c = APIClient()
+        c.force_authenticate(superuser)
+
+        atendente = get_user_model().objects.create_user(username="atendente-count", is_staff=False)
+        desativado = get_user_model().objects.create_user(username="atendente-count-off", is_staff=False, is_active=False)
+        agent_group, _ = Group.objects.get_or_create(name="agente")
+        agent_user = get_user_model().objects.create_user(username="agente.count")
+        agent_user.groups.add(agent_group)
+        for u in (atendente, desativado, agent_user):
+            self.company.members.add(u)
+
+        resp = c.get("/api/admin-companies/")
+        row = next(r for r in resp.json()["results"] if r["id"] == self.company.pk)
+        # self.user ("operador") + atendente-count ativos = 2; desativado e agente não contam.
+        self.assertEqual(row["member_count"], 2)
     def test_admin_companies_requires_superuser_not_just_staff(self):
         staff = get_user_model().objects.create_user(username="empresa-staff-admin-test", is_staff=True)
         self.company.members.add(staff)

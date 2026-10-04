@@ -19,7 +19,10 @@ class AdminCompanySerializer(serializers.ModelSerializer):
         fields = ["id", "name", "initial_state", "allow_transcription", "default_owner", "member_count", "tem_agente_ativo"]
         read_only_fields = ["id", "member_count", "tem_agente_ativo"]
     def get_member_count(self, obj):
-        return obj.members.exclude(groups__name="agente").count()
+        # Só atendentes/empresa ATIVOS -- uma conta desativada (ex.: via Django
+        # Admin, fora do fluxo normal de "Desligar atendente") não deve inflar
+        # essa contagem, e a conta de serviço do agente nunca conta aqui.
+        return obj.members.filter(is_active=True).exclude(groups__name="agente").count()
     def get_tem_agente_ativo(self, obj):
         from .services import agent_status
         status = agent_status(obj)

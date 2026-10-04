@@ -230,11 +230,18 @@ class CompanyViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated()]
     @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated, NotAgentAccount])
     def equipe(self, request, pk=None):
-        """Só atendentes (is_staff=False) -- nem a conta de serviço do agente,
-        nem os usuários com papel Empresa/Admin aparecem aqui, já que esta tela
-        existe pra Empresa gerenciar o time de atendentes, não a si mesma."""
+        """Só atendentes ATIVOS (is_staff=False) -- nem a conta de serviço do
+        agente, nem os usuários com papel Empresa/Admin, nem contas desativadas
+        (ex.: via Django Admin, fora do fluxo normal de "Desligar atendente")
+        aparecem aqui, já que esta tela existe pra Empresa gerenciar o time de
+        atendentes em atividade, não a si mesma."""
         company = self.get_object()
-        members = company.members.exclude(groups__name="agente").filter(is_staff=False).select_related("profile").order_by("username")
+        members = (
+            company.members.filter(is_staff=False, is_active=True)
+            .exclude(groups__name="agente")
+            .select_related("profile")
+            .order_by("username")
+        )
         result = []
         for u in members:
             profile = getattr(u, "profile", None)
