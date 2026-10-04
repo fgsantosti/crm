@@ -196,7 +196,7 @@ export function Admin({ api }: { api: Api }) {
                   <thead>
                     <tr>
                       <th>Empresa</th>
-                      <th>Atendentes</th>
+                      <th>Contas</th>
                       <th>Agente</th>
                     </tr>
                   </thead>
@@ -236,7 +236,7 @@ export function Admin({ api }: { api: Api }) {
                   {selected.tem_agente_ativo ? 'Agente ativo' : 'Sem agente'}
                 </span>
               </div>
-              <p style={{ fontSize: '13.5px', marginBottom: 18 }}>{selected.member_count} atendente(s) vinculado(s).</p>
+              <p style={{ fontSize: '13.5px', marginBottom: 18 }}>{selected.member_count} conta(s) vinculada(s).</p>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <label>
