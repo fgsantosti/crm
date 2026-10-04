@@ -75,7 +75,11 @@ code { font-family: 'DM Mono', monospace; background: var(--panel-muted); paddin
 .login-form-side p.tagline { margin: 0 0 40px; font-size: 17px; }
 .login-illustration-side {
   flex: 1 1 480px; min-width: 340px; min-height: 100vh; position: relative; overflow: hidden;
-  background: var(--ink); color: #F3E9DD; display: flex; align-items: center; justify-content: center; padding: 6vw;
+  /* Foto esmaecida como camada mais baixa: o degradê de --ink por cima dela (mesma propriedade
+     background, numa pilha só) a deixa só sutilmente visível, sem competir com glow/dots/content,
+     que continuam renderizando acima dela normalmente. */
+  background: linear-gradient(rgba(36,26,18,.88), rgba(36,26,18,.88)), url('./assets/login-bg.png') center/cover no-repeat, var(--ink);
+  color: #F3E9DD; display: flex; align-items: center; justify-content: center; padding: 6vw;
 }
 .login-illustration-side .glow {
   position: absolute; inset: 0; pointer-events: none;
@@ -85,6 +89,9 @@ code { font-family: 'DM Mono', monospace; background: var(--panel-muted); paddin
 .login-illustration-side .dots {
   position: absolute; inset: 0; opacity: .5; pointer-events: none;
   background-image: radial-gradient(rgba(255,255,255,.06) 1px, transparent 1px); background-size: 18px 18px;
+}
+.login-illustration-side .watermark {
+  position: absolute; right: -180px; top: 50%; transform: translateY(-50%); opacity: .07; pointer-events: none;
 }
 .login-illustration-side .content { position: relative; max-width: 460px; text-align: center; }
 .login-illustration-side .content h2 { font-size: 27px; color: #F3E9DD; margin: 0 0 14px; }
