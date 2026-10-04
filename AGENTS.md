@@ -159,9 +159,39 @@ Mude para `Modo de atendimento=HUMANO` e não responda automaticamente quando ho
 
 Registre a ocorrência, atualize `Responsável`, `Prioridade` e `Próxima ação`. Não retome a automação sem comando privado autorizado.
 
+## Depois do `CLASSIFICADO`: Kanban humano (Qualificados → Despacho)
+
+O seu trabalho **termina** quando você emite `[[AXIOMA:CLASSIFICADO:{...}]]` e
+o CRM marca `Bot encerrado=SIM`. A partir daí, o lead entra num Kanban
+inteiramente operado por humanos no painel do Conecta CRM — **você nunca
+participa dessas etapas, nunca chama API nenhuma pra isso, e nenhum marcador
+novo existe pra elas**:
+
+1. **Qualificados** — estado inicial pós-classificação, sem responsável ainda.
+2. **Atendimentos em espera** — um atendente reivindicou o lead (vira
+   `Responsável`), mas ainda não começou a negociar.
+3. **Em negociação** — o atendente confirmou que vai conduzir o contato
+   humano (`Modo de atendimento` vira `HUMANO` só *aqui*, não antes).
+4. **Despacho** — o atendente já decidiu o desfecho (Encerrado/Comprometido/
+   Falha), mas ainda não confirmou o envio final.
+5. **Concluído** — desfecho definitivo; o lead sai do Kanban.
+
+Isso não muda nada do que você já faz: `Bot encerrado=SIM` já bloqueia toda
+resposta automática (ver "Máquina de estados" acima), independente de qual
+dessas 5 etapas o lead está. Se o CRM te devolver um erro de permissão numa
+dessas rotas (ex.: tentando reivindicar, negociar ou despachar um lead), é
+sinal de bug de integração — essas ações são exclusivas de contas humanas de
+atendente, uma conta de serviço do agente nunca tem acesso a elas.
+
 ## Pendências
 
-Crie uma aba/visão de pendências derivada da tabela principal, sem duplicar o CRM. Exiba somente leads com `Próxima ação` preenchida e `Modo de atendimento` diferente de `HUMANO`, ordenados por `Prioridade` e `Data de retorno`.
+A visão de pendências (etapa "Atendimentos em espera" do Kanban acima) já é
+gerida inteiramente pelo painel do Conecta CRM — você não precisa (e não
+deve) manter nada equivalente por conta própria. Se estiver integrando este
+AGENTS.md a outro CRM sem esse Kanban pronto, crie uma visão derivada da
+tabela principal, sem duplicar dados: leads com `Próxima ação` preenchida e
+`Modo de atendimento` diferente de `HUMANO`, ordenados por `Prioridade` e
+`Data de retorno`.
 
 Sugestão de colunas: `Prioridade`, `Lead`, `Etapa`, `Último contato`, `Próxima ação`, `Data de retorno`, `Responsável`.
 

@@ -82,6 +82,12 @@ Antes de responder, verifique no CRM pelo menos:
 
 Se `Modo de atendimento=HUMANO`, `Bot encerrado=SIM` ou o estado estiver encerrado, registre somente a entrada recebida e retorne `NO_REPLY`.
 
+Depois de `Bot encerrado=SIM`, o lead passa a viver num Kanban de atendimento
+humano dentro do CRM (reivindicar → negociar → despachar → concluído — ver
+"Depois do CLASSIFICADO" em `AGENTS.md`). Você nunca participa disso: nenhuma
+dessas etapas tem marcador, API ou ação sua associada — `Bot encerrado=SIM`
+já é suficiente pra você permanecer em silêncio em qualquer uma delas.
+
 ## Áudio
 
 Quando `Canal de saída=AUDIO_GRAVADO`, envie apenas o ativo pré-aprovado da etapa seguinte, sem texto, legenda ou TTS.
