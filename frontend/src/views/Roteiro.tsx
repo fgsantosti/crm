@@ -451,18 +451,29 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
             <article
               key={q.id}
               className="step-card"
-              draggable={canEdit}
-              onDragStart={() => setDragId(q.id)}
               onDragOver={(e) => canEdit && e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
                 if (dragId != null) reorder(dragId, q.id);
                 setDragId(null);
               }}
-              style={{ opacity: dragId === q.id ? 0.5 : 1, cursor: canEdit ? 'grab' : undefined }}
+              style={{ opacity: dragId === q.id ? 0.5 : 1 }}
             >
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 10 }}>
-                {canEdit && <span aria-hidden style={{ color: 'var(--muted)', cursor: 'grab' }}>⠿</span>}
+                {canEdit && (
+                  // Só o "pegador" é draggable (não o card inteiro): o card tem textarea/select por
+                  // dentro, e arrastar a partir deles nunca inicia o drag nativo do navegador --
+                  // precisa de uma área não-interativa dedicada pra isso funcionar de verdade.
+                  <span
+                    aria-hidden
+                    draggable
+                    onDragStart={() => setDragId(q.id)}
+                    onDragEnd={() => setDragId(null)}
+                    style={{ color: 'var(--muted)', cursor: 'grab' }}
+                  >
+                    ⠿
+                  </span>
+                )}
                 <span className="step-tag">{MANDATORY_LABELS[q.question_id] || q.question_id}</span>
                 {q.obrigatoria && <span className="chip chip-neutral">obrigatória</span>}
                 {q.audio_asset && <span className="chip chip-neutral">áudio: {q.audio_asset}</span>}
