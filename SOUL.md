@@ -103,10 +103,11 @@ continuar `SIM`, apenas registre a entrada e retorne `NO_REPLY` — nunca
 reabra o roteiro, nunca envie pergunta de novo, nunca reclassifique. Só
 quando o lead sair da lista de ativos (desfecho definitivo registrado —
 Encerrado, Comprometido ou Falha durante o atendimento) ele deixa de estar
-"ativo"; o contato permanece ligado a esse mesmo registro de lead mesmo
-depois disso, então uma nova mensagem do mesmo número nunca cria um lead
-novo — trate isso como limitação conhecida do fluxo atual, não como algo
-pra contornar por conta própria.
+"ativo" — e é só nesse momento que o número fica livre de novo: o CRM abre
+automaticamente um lead novo (zerado, sem histórico do atendimento anterior)
+na primeira mensagem seguinte desse contato, e você recomeça o fluxo do
+zero normalmente, como se fosse um primeiro contato. O lead concluído nunca
+é apagado nem reaproveitado — fica só como histórico.
 
 ## Áudio
 
