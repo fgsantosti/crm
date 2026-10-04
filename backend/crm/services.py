@@ -433,6 +433,31 @@ def revogar_token_agente(company):
     if user:
         Token.objects.filter(user=user).delete()
 
+@transaction.atomic
+def excluir_empresa(company):
+    """Exclui a empresa e tudo que é dela. Contas que pertencem SÓ a ela (conta de
+    serviço do agente, atendentes, conta Empresa) são excluídas junto; contas
+    vinculadas a outra empresa e superusers nunca são tocados."""
+    User = get_user_model()
+    company = Company.objects.select_for_update().get(pk=company.pk)
+    candidatos = set(company.members.values_list("pk", flat=True))
+    candidatos.update(User.objects.filter(username=_agent_username(company)).values_list("pk", flat=True))
+    exclusivos = [
+        u.pk for u in User.objects.filter(pk__in=candidatos, is_superuser=False)
+        if not u.companies.exclude(pk=company.pk).exists()
+    ]
+    resumo = {
+        "empresa": company.name,
+        "leads": Lead.objects.filter(company=company).count(),
+        "usuarios_excluidos": len(exclusivos),
+    }
+    # Question.variavel / Question.variavel_roteiro são PROTECT: sem apagar as
+    # perguntas antes, o cascade de Company trava em ProtectedError.
+    Question.objects.filter(company=company).delete()
+    company.delete()
+    User.objects.filter(pk__in=exclusivos).delete()
+    return resumo
+
 # --- Ciclo de vida pós-triagem: assumir e despachar (kanban "Atendimentos em
 # Espera" -> "Atendimento humano" -> encerrado/comprometido/falha) ---
 

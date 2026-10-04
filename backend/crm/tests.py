@@ -495,12 +495,12 @@ class QualificationTests(TestCase):
         self.assertEqual(revogado.status_code, 200)
         agent_client.credentials(HTTP_AUTHORIZATION=f"Token {novo_token}")
         self.assertEqual(agent_client.get("/api/me/").status_code, 401)
-    def test_admin_companies_destroy_is_disabled(self):
+    def test_admin_companies_destroy_sem_confirmacao_nao_exclui(self):
         superuser = get_user_model().objects.create_user(username="super-teste-5", is_staff=True, is_superuser=True)
         c = APIClient()
         c.force_authenticate(superuser)
         resp = c.delete(f"/api/admin-companies/{self.company.pk}/")
-        self.assertEqual(resp.status_code, 405)
+        self.assertEqual(resp.status_code, 400)
         self.assertTrue(Company.objects.filter(pk=self.company.pk).exists())
     def test_admin_agente_validade_dias_bounds(self):
         superuser = get_user_model().objects.create_user(username="super-teste-4", is_staff=True, is_superuser=True)
@@ -1248,3 +1248,67 @@ class VarreduraFixesTests(TestCase):
         meus = maria.get(f"/api/leads/?company={self.company.pk}&meus=1").json()
         self.assertEqual(meus["count"], 2)
         self.assertTrue(all(l["owner"] == self.maria.pk for l in meus["results"]))
+
+class ExcluirEmpresaTests(TestCase):
+    def setUp(self):
+        from .services import seed_roteiro_padrao, gerar_token_agente
+        User = get_user_model()
+        self.su = User.objects.create_superuser(username="root-exclusao", password="x")
+        self.empresa = Company.objects.create(name="Empresa Apagavel")
+        seed_roteiro_padrao(self.empresa)
+        Area.objects.create(company=self.empresa, name="Trabalhista")
+        CompanyInfo.objects.create(company=self.empresa, title="Horário", content="8-18")
+        self.outra = Company.objects.create(name="Empresa Que Fica")
+        seed_roteiro_padrao(self.outra)
+        self.exclusivo = User.objects.create_user(username="so-daqui@x.com")
+        self.compartilhado = User.objects.create_user(username="duas-empresas@x.com")
+        self.empresa.members.add(self.exclusivo, self.compartilhado, self.su)
+        self.outra.members.add(self.compartilhado)
+        self.token = gerar_token_agente(self.empresa, 30)["token"]
+        receive(self.empresa, {"contact": "+5585911112222", "message_id": "m1", "kind": "text", "marker": "Q",
+                               "question_id": "apresentacao", "fields": {}, "human_required": False, "reason": "pedido humano"})
+        Lead.objects.filter(company=self.empresa).update(owner=self.exclusivo)
+        receive(self.outra, {"contact": "+5585933334444", "message_id": "m2", "kind": "text", "marker": "Q",
+                             "question_id": "apresentacao", "fields": {}, "human_required": False, "reason": "pedido humano"})
+        self.client_su = APIClient()
+        self.client_su.force_authenticate(self.su)
+
+    def url(self):
+        return f"/api/admin-companies/{self.empresa.pk}/"
+
+    def test_exclui_empresa_e_tudo_dela_preservando_contas_compartilhadas(self):
+        resp = self.client_su.delete(self.url(), {"confirmar_nome": "Empresa Apagavel"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        User = get_user_model()
+        self.assertFalse(Company.objects.filter(pk=self.empresa.pk).exists())
+        for model in (Lead, Question, Area, CompanyInfo, Variavel, VariavelRoteiro):
+            self.assertFalse(model.objects.filter(company_id=self.empresa.pk).exists(), model.__name__)
+        self.assertFalse(Event.objects.filter(lead__company_id=self.empresa.pk).exists())
+        self.assertFalse(User.objects.filter(username="so-daqui@x.com").exists())
+        self.assertFalse(User.objects.filter(username__startswith="agente.empresa-apagavel").exists())
+        from rest_framework.authtoken.models import Token
+        self.assertFalse(Token.objects.filter(key=self.token).exists())
+        self.assertTrue(User.objects.filter(pk=self.compartilhado.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.su.pk).exists())
+        self.assertEqual(Lead.objects.filter(company=self.outra).count(), 1)
+        self.assertTrue(Question.objects.filter(company=self.outra).exists())
+
+    def test_token_do_agente_da_empresa_excluida_para_de_autenticar(self):
+        self.client_su.delete(self.url(), {"confirmar_nome": "Empresa Apagavel"}, format="json")
+        agente = APIClient()
+        agente.credentials(HTTP_AUTHORIZATION=f"Token {self.token}")
+        self.assertEqual(agente.get(self.url().replace("admin-companies", "companies")).status_code, 401)
+
+    def test_exige_nome_exato_como_confirmacao(self):
+        for body in ({}, {"confirmar_nome": "empresa apagavel"}, {"confirmar_nome": "Outra"}):
+            self.assertEqual(self.client_su.delete(self.url(), body, format="json").status_code, 400)
+        self.assertTrue(Company.objects.filter(pk=self.empresa.pk).exists())
+
+    def test_so_superuser_pode_excluir(self):
+        User = get_user_model()
+        staff = User.objects.create_user(username="empresa-staff@x.com", is_staff=True)
+        self.empresa.members.add(staff)
+        c = APIClient()
+        c.force_authenticate(staff)
+        self.assertEqual(c.delete(self.url(), {"confirmar_nome": "Empresa Apagavel"}, format="json").status_code, 403)
+        self.assertTrue(Company.objects.filter(pk=self.empresa.pk).exists())

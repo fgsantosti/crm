@@ -19,7 +19,7 @@ from .services import (
     trocar_senha as trocar_senha_service,
     solicitar_troca_email, confirmar_troca_email as confirmar_troca_email_service,
     redefinir_senha_atendente as redefinir_senha_atendente_service,
-    agent_status, gerar_token_agente, revogar_token_agente,
+    agent_status, gerar_token_agente, revogar_token_agente, excluir_empresa,
     reivindicar_lead as reivindicar_lead_service,
     mover_para_negociacao as mover_para_negociacao_service,
     preparar_despacho as preparar_despacho_service,
@@ -496,9 +496,6 @@ class AdminCompanyViewSet(viewsets.ModelViewSet):
     queryset = Company.objects.all().order_by("name")
     serializer_class = AdminCompanySerializer
     permission_classes = [IsSuperUser]
-    # "delete" precisa ficar habilitado pra action "agente" (revogar token) --
-    # destroy() é desligado explicitamente abaixo pra isso não virar exclusão
-    # de empresa (destrutivo demais pra expor sem uma tela própria de confirmação).
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def perform_create(self, serializer):
@@ -506,7 +503,11 @@ class AdminCompanyViewSet(viewsets.ModelViewSet):
         seed_roteiro_padrao(company)
 
     def destroy(self, request, *args, **kwargs):
-        return Response({"detail": "Exclusão de empresa não é suportada por aqui."}, status=405)
+        company = self.get_object()
+        confirmacao = str(request.data.get("confirmar_nome") or "") if hasattr(request.data, "get") else ""
+        if confirmacao.strip() != company.name.strip():
+            return Response({"detail": "Confirme digitando o nome exato da empresa."}, status=400)
+        return Response(excluir_empresa(company))
 
     @action(detail=True, methods=["get", "post", "delete"])
     def agente(self, request, pk=None):
