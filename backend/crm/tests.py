@@ -4,7 +4,7 @@ from django.core import mail
 from django.test import Client, TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
-from .models import Company, Question, Lead, Event, Area, AtendenteInvite, PasswordChangeRequired, AgentTokenExpiry
+from .models import Company, Question, Lead, Event, Area, AtendenteInvite, PasswordChangeRequired, AgentTokenExpiry, CompanyInfo
 from .services import receive
 
 class QualificationTests(TestCase):
@@ -141,6 +141,67 @@ class QualificationTests(TestCase):
         self.assertEqual(len(response.json()["results"]), 1)
         self.assertEqual(self.client.get(f"/api/company-info/?company={self.other.pk}").status_code, 404)
         self.assertEqual(self.client.post(f"/api/company-info/?company={self.company.pk}", {"title": "Endereço", "content": "Rua X, 123"}, format="json").status_code, 403)
+    def test_atualizar_rejects_reserved_proxima_values(self):
+        self.delivered(self.send())
+        for reservado in ["validar", "encerramento"]:
+            result = self.send(f"m-{reservado}", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": reservado})
+            self.assertEqual(result["action"], "NO_REPLY")
+            lead = Lead.objects.get()
+            self.assertEqual(lead.mode, "HUMANO")
+            lead.mode = "AUTOMÁTICO"
+            lead.next_action = ""
+            lead.save()
+    def test_question_create_requires_variavel_and_delete_blocks_mandatory(self):
+        staff = get_user_model().objects.create_user(username="empresa-roteiro", is_staff=True)
+        self.company.members.add(staff)
+        c = APIClient()
+        c.force_authenticate(staff)
+
+        sem_variavel = c.post(f"/api/questions/?company={self.company.pk}", {"question_id": "nova", "text": "Oi"}, format="json")
+        self.assertEqual(sem_variavel.status_code, 400)
+
+        variavel = c.post(f"/api/variaveis/?company={self.company.pk}", {"name": "Urgência", "peso": 7}, format="json")
+        self.assertEqual(variavel.status_code, 201)
+        variavel_id = variavel.json()["id"]
+
+        criada = c.post(f"/api/questions/?company={self.company.pk}", {"question_id": "extra", "text": "Pergunta extra", "variavel": variavel_id}, format="json")
+        self.assertEqual(criada.status_code, 201)
+        self.assertFalse(criada.json()["obrigatoria"])
+        extra_id = criada.json()["id"]
+
+        nome_pk = Question.objects.get(company=self.company, question_id="nome").pk
+        bloqueado = c.delete(f"/api/questions/{nome_pk}/?company={self.company.pk}")
+        self.assertEqual(bloqueado.status_code, 400)
+
+        # variável ainda em uso pela pergunta "extra" -- não pode excluir
+        protegida = c.delete(f"/api/variaveis/{variavel_id}/?company={self.company.pk}")
+        self.assertEqual(protegida.status_code, 400)
+
+        liberado = c.delete(f"/api/questions/{extra_id}/?company={self.company.pk}")
+        self.assertEqual(liberado.status_code, 204)
+
+        # agora sem nenhuma pergunta usando -- pode excluir
+        agora_livre = c.delete(f"/api/variaveis/{variavel_id}/?company={self.company.pk}")
+        self.assertEqual(agora_livre.status_code, 204)
+    def test_companyinfo_mandatory_entries_cannot_be_deleted(self):
+        staff = get_user_model().objects.create_user(username="empresa-dados", is_staff=True)
+        self.company.members.add(staff)
+        c = APIClient()
+        c.force_authenticate(staff)
+        obrigatoria = CompanyInfo.objects.create(company=self.company, title="Nome da empresa", content="", obrigatorio=True)
+        livre = CompanyInfo.objects.create(company=self.company, title="Promoção", content="10% off", obrigatorio=False)
+        bloqueado = c.delete(f"/api/company-info/{obrigatoria.pk}/?company={self.company.pk}")
+        self.assertEqual(bloqueado.status_code, 400)
+        liberado = c.delete(f"/api/company-info/{livre.pk}/?company={self.company.pk}")
+        self.assertEqual(liberado.status_code, 204)
+    def test_calcular_urgencia_sugerida_bands_weights_into_five_levels(self):
+        from .services import calcular_urgencia_sugerida
+        self.assertEqual(calcular_urgencia_sugerida([1, 2]), "Desqualificado")
+        self.assertEqual(calcular_urgencia_sugerida([3, 4]), "Desconfiado")
+        self.assertEqual(calcular_urgencia_sugerida([5, 6]), "Remarketing")
+        self.assertEqual(calcular_urgencia_sugerida([7, 8]), "Qualificado")
+        self.assertEqual(calcular_urgencia_sugerida([9, 10]), "Quente")
+        self.assertIsNone(calcular_urgencia_sugerida([]))
     def test_atualizar_rejects_especialidade_not_registered_as_area(self):
         self.delivered(self.send())
         result = self.send("2", marker="ATUALIZAR", fields={"especialidade": "Área Inventada", "proxima": "nome"})

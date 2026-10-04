@@ -1,6 +1,6 @@
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite
+from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel
 
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
@@ -38,17 +38,35 @@ class LeadSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Retomada exige comando administrativo autorizado; indisponível nesta versão.")
         return attrs
 
+class VariavelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Variavel
+        fields = ["id", "name", "peso"]
+        read_only_fields = ["id"]
+
 class QuestionSerializer(serializers.ModelSerializer):
+    # Declarado explícito: variavel é null=True só pra migração não quebrar
+    # perguntas antigas (ver crm/migrations/0009), mas na API continua sempre
+    # obrigatório -- sem isso o ModelSerializer relaxa "required" sozinho
+    # pra qualquer campo com null=True no modelo.
+    variavel = serializers.PrimaryKeyRelatedField(queryset=Variavel.objects.all())
     class Meta:
         model = Question
         fields = "__all__"
-        read_only_fields = ["company"]
+        read_only_fields = ["company", "obrigatoria"]
+    def validate_variavel(self, variavel):
+        # "uma pergunta SEMPRE estará atrelada a uma variável" -- nunca aceita
+        # variável de outra empresa (o FK sozinho não garante isolamento de tenant).
+        company = self.context.get("company")
+        if company and variavel.company_id != company.id:
+            raise serializers.ValidationError("Variável não pertence a esta empresa.")
+        return variavel
 
 class CompanyInfoSerializer(serializers.ModelSerializer):
     class Meta:
         model = CompanyInfo
         fields = "__all__"
-        read_only_fields = ["company", "updated_at"]
+        read_only_fields = ["company", "updated_at", "obrigatorio"]
 
 class EventSerializer(serializers.ModelSerializer):
     class Meta:
@@ -66,20 +84,13 @@ class AgentFieldsSerializer(serializers.Serializer):
     interesse = serializers.ChoiceField(choices=[c[0] for c in Lead.INTERESSE_CHOICES], required=False, allow_blank=True)
     temperatura = serializers.ChoiceField(choices=[c[0] for c in Lead.TEMPERATURA_CHOICES], required=False, allow_blank=True)
     prioridade = serializers.ChoiceField(choices=["Alta", "Média", "Baixa"], required=False, allow_blank=True)
-    proxima = serializers.ChoiceField(
-        choices=[
-            "apresentacao",
-            "empresa",
-            "nome",
-            "situacao",
-            "ainda_na_empresa",
-            "tipo_de_situacao",
-            "afetou_renda",
-            "equipe_avaliar_situacao",
-        ],
-        required=False,
-        allow_blank=True,
-    )
+    # Antes era um ChoiceField fixo com os 8 question_id do roteiro da Rufus.
+    # Agora a empresa adiciona/remove perguntas (Roteiro), então a lista de
+    # question_id válidos é por empresa -- validado dinamicamente em
+    # services.receive() contra os Question cadastrados, mesmo padrão já
+    # usado pra especialidade/Area. "validar" e "encerramento" continuam
+    # reservados (nunca um "proxima" válido), também checado lá.
+    proxima = serializers.CharField(max_length=80, required=False, allow_blank=True)
 
 class IncomingSerializer(serializers.Serializer):
     contact = serializers.RegexField(r"^\+[1-9]\d{7,14}$")

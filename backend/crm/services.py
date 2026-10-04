@@ -9,9 +9,10 @@ from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.authtoken.models import Token
 from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
-from .models import Lead, Question, Event, Company, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry
+from .models import Lead, Question, Event, Company, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel
 
 NO_REPLY = {"action": "NO_REPLY"}
+RESERVED_QUESTION_IDS = {"validar", "encerramento"}
 
 # Mapa dos campos que o agente Axioma envia em ATUALIZAR/VALIDAR/CLASSIFICADO
 # para os campos reais do Lead. 'proxima' nunca é um campo do Lead: é o
@@ -117,6 +118,9 @@ def receive(company, data):
                 question_id = fields.get("proxima", "")
                 if not question_id:
                     escalate(lead, "ATUALIZAR sem 'proxima': configurar roteiro aprovado")
+                    question_id = None
+                elif question_id in RESERVED_QUESTION_IDS:
+                    escalate(lead, f"'{question_id}' é reservado (validar/encerramento não são 'proxima' válidos): revisar fluxo do agente")
                     question_id = None
                 else:
                     lead.state = question_id
@@ -376,3 +380,29 @@ def despachar_lead(lead_id, desfecho, user):
     lead.next_action = ""
     lead.save(update_fields=["desfecho", "next_action"])
     return None
+
+# --- Variáveis do Agente: peso (1-10) de cada pergunta sugere urgência ---
+# 10 níveis de peso / 5 classificações de Lead.TEMPERATURA_CHOICES = faixas
+# de 2 pontos cada. Ordem aqui é da menos pra mais urgente (ajuste se a ordem
+# de negócio real for outra -- não há essa ordenação registrada em nenhum
+# outro lugar do sistema hoje, TEMPERATURA_CHOICES é só uma lista solta).
+URGENCIA_POR_FAIXA = [
+    (1, 2, "Desqualificado"),
+    (3, 4, "Desconfiado"),
+    (5, 6, "Remarketing"),
+    (7, 8, "Qualificado"),
+    (9, 10, "Quente"),
+]
+
+def calcular_urgencia_sugerida(pesos):
+    """Sugestão auxiliar a partir da média dos pesos (1-10) das Variaveis das
+    perguntas já respondidas pelo lead. NÃO substitui o agente: CLASSIFICADO
+    continua sendo decidido por ele -- isso é só uma referência que pode
+    alimentar a legenda do Roteiro ou uma futura tela de apoio à decisão."""
+    if not pesos:
+        return None
+    media = sum(pesos) / len(pesos)
+    for minimo, maximo, temperatura in URGENCIA_POR_FAIXA:
+        if minimo <= media <= maximo:
+            return temperatura
+    return URGENCIA_POR_FAIXA[0][2] if media < 1 else URGENCIA_POR_FAIXA[-1][2]

@@ -10,8 +10,8 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
-from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile
-from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer
+from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, MANDATORY_QUESTION_IDS
+from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer
 from .services import (
     receive, escalate, create_invite,
     validar_convite as validar_convite_service,
@@ -307,7 +307,35 @@ class QuestionViewSet(TenantMixin, viewsets.ModelViewSet):
     def get_permissions(self):
         base = [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
         return base + [NotAgentAccount()]
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        if self.request.method not in permissions.SAFE_METHODS:
+            ctx["company"] = self.company()
+        return ctx
     def perform_create(self, serializer): serializer.save(company=self.company())
+    def destroy(self, request, *args, **kwargs):
+        question = self.get_object()
+        if question.question_id in MANDATORY_QUESTION_IDS:
+            return Response({"detail": f"'{question.question_id}' é uma pergunta obrigatória do roteiro e não pode ser excluída."}, status=400)
+        return super().destroy(request, *args, **kwargs)
+
+class VariavelViewSet(TenantMixin, viewsets.ModelViewSet):
+    """Variáveis do Agente (peso 1-10, usadas na classificação de urgência --
+    ver services.calcular_urgencia_sugerida). Toda Question fica atrelada a
+    uma dessas (on_delete=PROTECT), então apagar uma em uso falha com 400."""
+    queryset = Variavel.objects.all()
+    serializer_class = VariavelSerializer
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+    def get_permissions(self):
+        base = [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
+        return base + [NotAgentAccount()]
+    def perform_create(self, serializer): serializer.save(company=self.company())
+    def destroy(self, request, *args, **kwargs):
+        from django.db.models import ProtectedError
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response({"detail": "Essa variável está em uso por uma ou mais perguntas do roteiro -- troque a variável delas antes de excluir."}, status=400)
 
 class CompanyInfoViewSet(TenantMixin, viewsets.ModelViewSet):
     """Dados da empresa: o agente de IA precisa LER isto (para responder perguntas
@@ -321,6 +349,11 @@ class CompanyInfoViewSet(TenantMixin, viewsets.ModelViewSet):
             return [permissions.IsAuthenticated()]
         return [permissions.IsAdminUser(), NotAgentAccount()]
     def perform_create(self, serializer): serializer.save(company=self.company())
+    def destroy(self, request, *args, **kwargs):
+        info = self.get_object()
+        if info.obrigatorio:
+            return Response({"detail": f"\"{info.title}\" é obrigatório e não pode ser excluído -- o agente depende disso pra responder clientes."}, status=400)
+        return super().destroy(request, *args, **kwargs)
 
 class AdminCompanyViewSet(viewsets.ModelViewSet):
     """Painel Admin interno da Axioma: cadastro de empresas e token do agente.

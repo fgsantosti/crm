@@ -6,7 +6,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework.authtoken.models import TokenProxy
 from rest_framework.authtoken.admin import TokenAdmin
-from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, PasswordChangeRequired, Profile, EmailChangeRequest, AgentTokenExpiry, default_token_expiry
+from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, PasswordChangeRequired, Profile, EmailChangeRequest, AgentTokenExpiry, default_token_expiry, Variavel
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
@@ -22,10 +22,16 @@ class CompanyAdmin(admin.ModelAdmin):
     def member_count(self, obj):
         return obj.members.count()
 
+@admin.register(Variavel)
+class VariavelAdmin(admin.ModelAdmin):
+    list_display = ["name", "company", "peso"]
+    list_filter = ["company"]
+    search_fields = ["name"]
+
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):
-    list_display = ["question_id", "company", "has_audio"]
-    list_filter = ["company"]
+    list_display = ["question_id", "company", "obrigatoria", "variavel", "has_audio"]
+    list_filter = ["company", "obrigatoria"]
     search_fields = ["question_id", "text"]
     @admin.display(description="Audio", boolean=True)
     def has_audio(self, obj):
@@ -33,8 +39,8 @@ class QuestionAdmin(admin.ModelAdmin):
 
 @admin.register(CompanyInfo)
 class CompanyInfoAdmin(admin.ModelAdmin):
-    list_display = ["title", "company", "updated_at"]
-    list_filter = ["company"]
+    list_display = ["title", "company", "obrigatorio", "updated_at"]
+    list_filter = ["company", "obrigatorio"]
     search_fields = ["title", "content"]
 
 @admin.register(Lead)

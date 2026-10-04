@@ -1,6 +1,7 @@
 import uuid
 from datetime import timedelta
 from django.conf import settings
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -12,17 +13,41 @@ class Company(models.Model):
     default_owner = models.CharField(max_length=120, blank=True)
     def __str__(self): return self.name
 
+MANDATORY_QUESTION_IDS = ["nome", "situacao", "demanda"]
+
+class Variavel(models.Model):
+    """Variável que a empresa define pra orientar a classificação de urgência
+    do agente (tela "Variáveis do Agente"). Cada pergunta do roteiro fica
+    sempre atrelada a uma dessas, com o peso valendo pra classificação --
+    ver services.calcular_urgencia_sugerida (10 níveis de peso / 5
+    classificações de urgência = faixas de 2 pontos cada)."""
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="variaveis")
+    name = models.CharField(max_length=120)
+    peso = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(10)])
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["company", "name"], name="unique_company_variavel")]
+        ordering = ["name"]
+    def __str__(self): return self.name
+
 class Question(models.Model):
     """Conteúdo fixo aprovado para um question_id do agente Axioma.
 
     O agente decide sozinho qual é a próxima pergunta (via os marcadores
     Q/ATUALIZAR/VALIDAR/CLASSIFICADO); este modelo só resolve um question_id
     para o texto ou áudio aprovado que de fato é enviado ao contato.
+
+    3 question_id são obrigatórias em toda empresa (MANDATORY_QUESTION_IDS) e
+    não podem ser excluídas (ver views.QuestionViewSet.destroy): nome,
+    situacao e demanda. Toda pergunta -- obrigatória ou não -- fica sempre
+    atrelada a uma Variavel com peso, nunca null (on_delete=PROTECT: não dá
+    pra apagar uma variável ainda em uso por uma pergunta).
     """
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
-    question_id = models.CharField(max_length=80, help_text="Ex.: apresentacao, empresa, nome, situacao, ainda_na_empresa, tipo_de_situacao, afetou_renda, equipe_avaliar_situacao, validar, encerramento, repetir.")
+    question_id = models.CharField(max_length=80, help_text="Ex.: apresentacao, empresa, nome, situacao, ainda_na_empresa, tipo_de_situacao, afetou_renda, equipe_avaliar_situacao, demanda, validar, encerramento, repetir.")
     text = models.TextField(blank=True)
     audio_asset = models.CharField(max_length=250, blank=True, help_text="Identificador do OGG/Opus pré-gravado, usado quando a entrada do contato for áudio.")
+    variavel = models.ForeignKey(Variavel, on_delete=models.PROTECT, related_name="perguntas", null=True)
+    obrigatoria = models.BooleanField(default=False)
     class Meta:
         constraints = [models.UniqueConstraint(fields=["company", "question_id"], name="unique_company_question")]
 
@@ -30,11 +55,17 @@ class CompanyInfo(models.Model):
     """Entrada de 'Dados da empresa': título + texto que o agente pode consultar
     para responder perguntas livres sobre a empresa (horário, endereço, serviços,
     formas de pagamento etc.), fora do roteiro fixo de qualificação.
-    """
+
+    3 entradas são obrigatórias em toda empresa (não podem ser excluídas --
+    ver views.CompanyInfoViewSet.destroy): nome da empresa, áreas de
+    atendimento e disponibilidade de horários. O agente precisa delas prontas
+    pra responder perguntas comuns de cliente sem inventar."""
+    MANDATORY_TITLES = ["Nome da empresa", "Áreas de atendimento", "Disponibilidade de horários"]
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="info_entries")
     title = models.CharField(max_length=160)
     content = models.TextField()
     updated_at = models.DateTimeField(auto_now=True)
+    obrigatorio = models.BooleanField(default=False)
     class Meta:
         ordering = ["title"]
 

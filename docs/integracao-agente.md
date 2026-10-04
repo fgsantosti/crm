@@ -127,7 +127,7 @@ Resposta (sempre 200, mesmo em `NO_REPLY`):
 | --- | --- | --- |
 | `[[AXIOMA:Q:<id>]]` | nada (`question_id` vai fora de `fields`) | marca o lead nesse `question_id` e devolve o conteúdo aprovado dele |
 | `[[AXIOMA:REPETIR]]` | nada | reenvia o conteúdo da pergunta atual do lead (sem avançar) |
-| `[[AXIOMA:ATUALIZAR:{...}]]` | os campos conhecidos + **`proxima`** (obrigatório, um dos 8 `question_id` dos Códigos permitidos) | grava os campos, avança o lead para `proxima`, devolve o conteúdo dela |
+| `[[AXIOMA:ATUALIZAR:{...}]]` | os campos conhecidos + **`proxima`** (obrigatório, um `question_id` cadastrado pela empresa na tela Roteiro) | grava os campos, avança o lead para `proxima`, devolve o conteúdo dela |
 | `[[AXIOMA:VALIDAR:{...}]]` | os campos conhecidos (sem `proxima`) | grava os campos, devolve a pergunta de confirmação fixa (`question_id="validar"`) |
 | `[[AXIOMA:CLASSIFICADO:{...}]]` | ao menos `temperatura` e `prioridade` (sem `proxima`) | grava os campos finais, **encerra o bot** (`bot_closed=true`), devolve a mensagem de encerramento (`question_id="encerramento"`) |
 
@@ -142,7 +142,7 @@ Campos aceitos dentro de `fields` (nomes exatamente como o Axioma emite):
 | `interesse` | Interesse em seguir | `sim` \| `nao` \| `depois` |
 | `temperatura` | Classificação comercial | `Qualificado` \| `Quente` \| `Desconfiado` \| `Remarketing` \| `Desqualificado` |
 | `prioridade` | Prioridade de atendimento | `Alta` \| `Média` \| `Baixa` |
-| `proxima` | **não é campo do lead** — só em `ATUALIZAR`, diz qual é o próximo `question_id` | um dos 8 códigos de pergunta (nunca `validar` nem `encerramento`) |
+| `proxima` | **não é campo do lead** — só em `ATUALIZAR`, diz qual é o próximo `question_id` | **desde a tela Roteiro customizável**: qualquer `question_id` cadastrado pela empresa (3 sempre existem: `nome`, `situacao`, `demanda`; o resto é livre). Nunca `validar` nem `encerramento` — reservados. Um `question_id` que a empresa não cadastrou transfere o lead pra atendimento humano em vez de travar. |
 
 ### Placeholders no texto aprovado
 
