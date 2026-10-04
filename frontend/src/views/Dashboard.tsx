@@ -44,6 +44,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   }, [leads, search, area, periodo]);
 
   const total = filtered.length;
+  const desqualificados = filtered.filter((l) => l.temperature === 'Desqualificado' || l.temperature === 'Desconfiado').length;
   const concluidos = filtered.filter((l) => l.bot_closed).length;
   const automatico = filtered.filter((l) => !l.bot_closed && l.mode === 'AUTOMÁTICO').length;
   const humano = filtered.filter((l) => l.mode === 'HUMANO').length;
@@ -165,7 +166,16 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
               <small>Com a equipe</small>
               <strong style={{ color: 'var(--danger)' }}>{humano}</strong>
             </article>
+            <article className="tile">
+              <small>Desqualificados</small>
+              <strong style={{ color: 'var(--muted)' }}>{desqualificados}</strong>
+            </article>
           </div>
+        )}
+        {!busy && desqualificados > 0 && (
+          <p style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>
+            Leads desqualificados/desconfiados são classificados diretamente pelo agente e nunca entram no Kanban de atendimento humano.
+          </p>
         )}
       </section>
 

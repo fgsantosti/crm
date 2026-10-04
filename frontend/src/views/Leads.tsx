@@ -5,6 +5,10 @@ import { SkeletonCards, Spinner } from '../components/Skeleton';
 
 const PRIORITY_RANK: Record<string, number> = { Alta: 0, Média: 1, Baixa: 2 };
 
+// Mesma ordem de services.URGENCIA_POR_FAIXA no backend (menos urgente -> mais urgente).
+const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Remarketing: 2, Qualificado: 3, Quente: 4 };
+const FORA_DO_KANBAN = new Set(['Desqualificado', 'Desconfiado']);
+
 const DESFECHO_OPTIONS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string; help: string }[] = [
   { value: 'encerrado', label: 'Encerrado', color: 'var(--success)', help: 'Sucesso de comunicação — o cliente conseguiu realizar o que desejava.' },
   { value: 'comprometido', label: 'Comprometido', color: 'var(--warn)', help: 'Algo não saiu conforme o planejado; o cliente pode voltar ou não dar continuidade.' },
@@ -105,8 +109,11 @@ export function Leads({ api, company, role }: { api: Api; company: Company; role
     }
   }
 
+  const desqualificados = leads.filter((l) => FORA_DO_KANBAN.has(l.temperature));
+
   const visible = leads
     .filter((l) => !l.desfecho)
+    .filter((l) => !FORA_DO_KANBAN.has(l.temperature))
     .filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()));
 
   const columnOf = (l: Lead): 'novo' | 'triagem' | 'espera' | 'humano' => {
@@ -125,7 +132,9 @@ export function Leads({ api, company, role }: { api: Api; company: Company; role
   function orderedItems(key: ReturnType<typeof columnOf>) {
     const items = visible.filter((l) => columnOf(l) === key);
     if (key === 'espera') {
-      return [...items].sort((a, b) => (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9));
+      // Mais urgente (Quente) primeiro, menos urgente (Remarketing) por último -- Desqualificado/Desconfiado
+      // já não entram no Kanban (ver FORA_DO_KANBAN).
+      return [...items].sort((a, b) => (URGENCIA_RANK[b.temperature] ?? -1) - (URGENCIA_RANK[a.temperature] ?? -1));
     }
     return items;
   }
@@ -194,6 +203,9 @@ export function Leads({ api, company, role }: { api: Api; company: Company; role
                               {l.demand}
                             </small>
                           )}
+                          {col.key === 'espera' && l.temperature && (
+                            <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>{l.temperature}</small>
+                          )}
                           {col.key === 'humano' && l.owner && (
                             <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>em execução · {l.owner}</small>
                           )}
@@ -212,7 +224,12 @@ export function Leads({ api, company, role }: { api: Api; company: Company; role
             {'Nenhum lead nesta visão. Os contatos aparecerão ao receber mensagens pela integração.'}
           </div>
         )}
-        <p className="table-note">Exibindo até 100 leads por consulta.</p>
+        <p className="table-note">
+          Exibindo até 100 leads por consulta.
+          {desqualificados.length > 0 && (
+            <> · {desqualificados.length} lead{desqualificados.length === 1 ? '' : 's'} desqualificado{desqualificados.length === 1 ? '' : 's'}/desconfiado{desqualificados.length === 1 ? '' : 's'} (fora do fluxo, ver Dashboard)</>
+          )}
+        </p>
       </section>
 
       {selected && (
