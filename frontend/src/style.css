@@ -38,6 +38,16 @@ button {
 button:disabled { opacity: .6; cursor: not-allowed; }
 button.secondary { background: var(--panel-muted); color: #5C4E3F; }
 button.danger-outline { background: #fff; color: var(--danger); border: 1px solid #F0CFC9; }
+button.desfecho-option {
+  display: block;
+  width: 100%;
+  background: #fff;
+  color: var(--cor, var(--ink));
+  border: 1.5px solid var(--cor, var(--line));
+  text-align: left;
+  transition: background-color .15s ease;
+}
+button.desfecho-option:hover:not(:disabled) { background: color-mix(in srgb, var(--cor, var(--ink)) 10%, #fff); }
 input, select, textarea {
   width: 100%;
   padding: 11px 14px;

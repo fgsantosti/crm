@@ -506,9 +506,10 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
               <button
                 key={opt.value}
                 type="button"
+                className="desfecho-option"
                 onClick={() => confirmarDespacho(despachoClassificarModal, opt.value)}
                 disabled={actionBusy}
-                style={{ textAlign: 'left', borderColor: opt.color, color: opt.color, background: '#fff' }}
+                style={{ '--cor': opt.color } as React.CSSProperties}
               >
                 <strong style={{ display: 'block' }}>{opt.label}</strong>
                 <small style={{ color: 'var(--muted)', fontWeight: 400 }}>{opt.help}</small>
