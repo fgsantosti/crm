@@ -26,6 +26,15 @@ const MANDATORY_LABELS: Record<string, string> = {
 // vendo o que o agente responde sobre a empresa), e "validar"/"encerramento" fecham
 // a triagem. Nenhum dos 4 é classificável, então não tem Variável (ver backend).
 const OFFFLOW_IDS = ['apresentacao', 'empresa', 'validar', 'encerramento'] as const;
+// Obrigatórias que ficam sempre nas perguntas fixas: a área só é conhecida depois delas.
+const SEMPRE_FIXAS = ['nome', 'situacao'];
+const ETAPAS_SPIN: { value: Question['etapa_spin']; label: string }[] = [
+  { value: '', label: 'Sem etapa' },
+  { value: 'situacao', label: 'Situação' },
+  { value: 'problema', label: 'Problema' },
+  { value: 'implicacao', label: 'Implicação' },
+  { value: 'necessidade', label: 'Necessidade' },
+];
 const OFFFLOW_LABELS: Record<string, { title: string; help: string }> = {
   apresentacao: { title: 'Texto de apresentação', help: 'Primeira mensagem enviada quando o cliente entra em contato.' },
   empresa: { title: 'Resposta sobre a empresa', help: 'Usado enquanto o cliente ainda não entrou no fluxo de perguntas — só o que o agente responde sobre a empresa.' },
@@ -188,11 +197,17 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
   const [newVR, setNewVR] = useState('');
   const [dragId, setDragId] = useState<number | null>(null);
   const [vrCheckboxOverride, setVrCheckboxOverride] = useState<Record<number, boolean>>({});
+  // Lista de perguntas exibida: 'fixas' ou o id de uma Área (lista "{Área}-SPIN").
+  const [lista, setLista] = useState<'fixas' | number>('fixas');
 
   const isOffflow = (q: Question) => (OFFFLOW_IDS as readonly string[]).includes(q.question_id);
   // Ordena por `ordem` (não pela posição no array): o reorder só atualiza o campo, então sem isso
   // a nova ordem era salva no backend mas a tela continuava igual até recarregar.
-  const flowQuestions = questions.filter((q) => !isOffflow(q)).sort((a, b) => a.ordem - b.ordem || a.id - b.id);
+  const areaDaLista = lista === 'fixas' ? null : lista;
+  const areaSelecionada = areas.find((a) => a.id === areaDaLista);
+  const flowQuestions = questions
+    .filter((q) => !isOffflow(q) && (q.area ?? null) === areaDaLista)
+    .sort((a, b) => a.ordem - b.ordem || a.id - b.id);
   const offflowQuestions = questions.filter(isOffflow);
 
   function load() {
@@ -260,7 +275,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
     }
   }
 
-  async function saveQuestion(q: Question, patch: Partial<Pick<Question, 'text' | 'variavel' | 'question_id' | 'ordem' | 'variavel_roteiro'>>) {
+  async function saveQuestion(q: Question, patch: Partial<Pick<Question, 'text' | 'variavel' | 'question_id' | 'ordem' | 'variavel_roteiro' | 'area' | 'etapa_spin'>>) {
     setSavingQ(q.id);
     setError('');
     try {
@@ -302,7 +317,13 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
     try {
       const created = await api(`/questions/?company=${company.id}`, {
         method: 'POST',
-        body: JSON.stringify({ question_id: newQ.question_id.trim(), text: newQ.text, variavel: Number(newQ.variavel) }),
+        body: JSON.stringify({
+          question_id: newQ.question_id.trim(),
+          text: newQ.text,
+          variavel: Number(newQ.variavel),
+          area: areaDaLista,
+          ordem: flowQuestions.length ? Math.max(...flowQuestions.map((q) => q.ordem)) + 1 : 0,
+        }),
       });
       setQuestions((v) => [...v, created]);
       setNewQ({ question_id: '', text: '', variavel: '' });
@@ -325,6 +346,14 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
     } finally {
       setSavingQ(null);
     }
+  }
+
+  // Move a pergunta para outra lista (fixas ou {Área}-SPIN), entrando no fim dela.
+  async function moverParaLista(q: Question, destino: string) {
+    const area = destino === 'fixas' ? null : Number(destino);
+    const naLista = questions.filter((x) => !isOffflow(x) && (x.area ?? null) === area && x.id !== q.id);
+    const ordem = naLista.length ? Math.max(...naLista.map((x) => x.ordem)) + 1 : 0;
+    await saveQuestion(q, area === null ? { area: null, etapa_spin: '', ordem } : { area, ordem });
   }
 
   async function createVariavel(e: React.FormEvent<HTMLFormElement>) {
@@ -476,6 +505,21 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
 
       {tab === 'perguntas' && (
         <section className="section">
+          <div className="spin-seletor" role="tablist" aria-label="Lista de perguntas">
+            <button type="button" role="tab" aria-selected={lista === 'fixas'} className={lista === 'fixas' ? '' : 'secondary'} onClick={() => setLista('fixas')}>
+              Perguntas fixas
+            </button>
+            {areas.map((a) => (
+              <button type="button" role="tab" key={a.id} aria-selected={lista === a.id} className={lista === a.id ? '' : 'secondary'} onClick={() => setLista(a.id)}>
+                {a.name}-SPIN
+              </button>
+            ))}
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 10px' }}>
+            {areaSelecionada
+              ? `Perguntas feitas depois que o agente classifica a área como ${areaSelecionada.name}. Para guardar a demanda desta área, marque "Armazenar resposta" e use "Demanda" na pergunta de Problema.`
+              : 'Perguntas feitas antes de o agente definir a área.'}
+          </p>
           {canEdit && flowQuestions.length > 1 && (
             <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>Arraste os cartões pelo ⠿ para reordenar o fluxo.</p>
           )}
@@ -522,6 +566,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                   </span>
                 )}
                 <span className="step-tag">{MANDATORY_LABELS[q.question_id] || q.question_id}</span>
+                {q.etapa_spin && <span className="chip chip-neutral">{ETAPAS_SPIN.find((et) => et.value === q.etapa_spin)?.label}</span>}
                 {q.obrigatoria && <span className="chip chip-neutral">obrigatória</span>}
                 {q.audio_gravado && <span className="chip chip-neutral">áudio gravado</span>}
               </div>
@@ -537,6 +582,31 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                       onSave={(text) => saveQuestion(q, { text })}
                     />
                   </label>
+                  {areaDaLista !== null && (
+                    <label style={{ margin: 0 }}>
+                      Etapa SPIN
+                      <select value={q.etapa_spin} onChange={(e) => saveQuestion(q, { etapa_spin: e.target.value as Question['etapa_spin'] })} disabled={savingQ === q.id}>
+                        {ETAPAS_SPIN.map((et) => (
+                          <option key={et.value} value={et.value}>
+                            {et.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {!SEMPRE_FIXAS.includes(q.question_id) && areas.length > 0 && (
+                    <label style={{ margin: 0 }}>
+                      Lista
+                      <select value={q.area === null || q.area === undefined ? 'fixas' : String(q.area)} onChange={(e) => moverParaLista(q, e.target.value)} disabled={savingQ === q.id}>
+                        <option value="fixas">Perguntas fixas</option>
+                        {areas.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}-SPIN
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   <label style={{ margin: 0 }}>
                     Variável
                     <select
@@ -604,11 +674,11 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
             </article>
           ))}
           </div>
-          {!busy && !flowQuestions.length && <div className="empty">Nenhuma pergunta cadastrada para esta empresa ainda.</div>}
+          {!busy && !flowQuestions.length && <div className="empty">{areaSelecionada ? `Nenhuma pergunta na lista ${areaSelecionada.name}-SPIN ainda.` : 'Nenhuma pergunta cadastrada para esta empresa ainda.'}</div>}
 
           {canEdit && (
             <form onSubmit={createQuestion} className="step-card" style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
-              <strong style={{ fontSize: 14 }}>Nova pergunta</strong>
+              <strong style={{ fontSize: 14 }}>Nova pergunta {areaSelecionada ? `em ${areaSelecionada.name}-SPIN` : 'fixa'}</strong>
               <small style={{ color: 'var(--muted)' }}>
                 Perguntas além das 3 obrigatórias (nome, situação, demanda) entram no campo de observação do lead.
               </small>

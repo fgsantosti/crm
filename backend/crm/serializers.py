@@ -3,6 +3,9 @@ from django.utils import timezone
 from rest_framework import serializers
 from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, VariavelRoteiro, MANDATORY_OFFFLOW_QUESTION_IDS, MANDATORY_QUESTION_IDS
 
+# Obrigatórias que nunca entram numa lista SPIN (a área só é conhecida depois delas).
+FIXED_QUESTION_IDS = {"nome", "situacao"}
+
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = Company
@@ -108,6 +111,7 @@ class QuestionSerializer(serializers.ModelSerializer):
     # null=True no modelo (ver validate() abaixo pra regra condicional real).
     variavel = serializers.PrimaryKeyRelatedField(queryset=Variavel.objects.all(), required=False, allow_null=True)
     variavel_roteiro = serializers.PrimaryKeyRelatedField(queryset=VariavelRoteiro.objects.all(), required=False, allow_null=True)
+    area = serializers.PrimaryKeyRelatedField(queryset=Area.objects.all(), required=False, allow_null=True)
     class Meta:
         model = Question
         fields = "__all__"
@@ -125,8 +129,48 @@ class QuestionSerializer(serializers.ModelSerializer):
         if variavel_roteiro and company and variavel_roteiro.company_id != company.id:
             raise serializers.ValidationError("Variável de roteiro não pertence a esta empresa.")
         return variavel_roteiro
+    def validate_question_id(self, question_id):
+        # company é read-only aqui, então o DRF não checa a UniqueConstraint(company, question_id)
+        # sozinho: sem isso um question_id repetido virava IntegrityError (500).
+        company = self.context.get("company")
+        if company:
+            iguais = Question.objects.filter(company=company, question_id=question_id)
+            if self.instance:
+                iguais = iguais.exclude(pk=self.instance.pk)
+            if iguais.exists():
+                raise serializers.ValidationError(f"Já existe uma pergunta '{question_id}' nesta empresa.")
+        return question_id
+    def validate_area(self, area):
+        company = self.context.get("company")
+        if area and company and area.company_id != company.id:
+            raise serializers.ValidationError("Área não pertence a esta empresa.")
+        return area
+    def _validar_spin(self, attrs, question_id, is_offflow):
+        """Lista da pergunta (fixas = sem área, ou {Área}-SPIN) e regras que dependem dela."""
+        inst = self.instance
+        area = attrs["area"] if "area" in attrs else (inst.area if inst else None)
+        etapa = attrs["etapa_spin"] if "etapa_spin" in attrs else (inst.etapa_spin if inst else "")
+        if area and (is_offflow or question_id in FIXED_QUESTION_IDS):
+            raise serializers.ValidationError({"area": f"'{question_id}' é sempre uma pergunta fixa (sem área)."})
+        if etapa and not area:
+            raise serializers.ValidationError({"etapa_spin": "Etapa SPIN só vale para perguntas de uma área."})
+        vr = attrs["variavel_roteiro"] if "variavel_roteiro" in attrs else (inst.variavel_roteiro if inst else None)
+        if vr and vr.builtin and question_id not in MANDATORY_QUESTION_IDS:
+            # Builtins ficam nas obrigatórias; a única exceção é "Demanda" (tema) em UMA pergunta
+            # por lista de área — a de "Problema" que guarda a demanda daquela área.
+            if vr.slug != "tema" or not area:
+                raise serializers.ValidationError({"variavel_roteiro": "Essa Variável de roteiro é fixa das perguntas obrigatórias. "
+                                                   "Só 'Demanda' pode ser usada, numa pergunta SPIN de uma área."})
+            outras = Question.objects.filter(company_id=area.company_id, area=area, variavel_roteiro=vr).exclude(question_id="demanda")
+            if inst:
+                outras = outras.exclude(pk=inst.pk)
+            if outras.exists():
+                raise serializers.ValidationError({"variavel_roteiro": f"A lista {area.name}-SPIN já tem uma pergunta que guarda a Demanda."})
+        if not area:
+            attrs["etapa_spin"] = ""
     def validate(self, attrs):
         question_id = attrs.get("question_id") or (self.instance.question_id if self.instance else "")
+        self._validar_spin(attrs, question_id, question_id in MANDATORY_OFFFLOW_QUESTION_IDS)
         is_offflow = question_id in MANDATORY_OFFFLOW_QUESTION_IDS
         variavel = attrs.get("variavel", self.instance.variavel if self.instance else None)
         if not is_offflow and not variavel:

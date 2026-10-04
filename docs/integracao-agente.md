@@ -301,6 +301,43 @@ devolvido por `/incoming/`. Mensagem cujo `contact` é o próprio
 `numero_agente` volta `{"action": "NO_REPLY", "proprio_numero": true}` sem
 `lead_id`/`event_id` (não há entrega a confirmar).
 
+### 2.1.1 Perguntas fixas e SPIN por área
+
+O roteiro tem duas camadas:
+
+- **Perguntas fixas** (`perguntas`): feitas para todo contato, na ordem, antes
+  de o agente definir a área. `nome` e `situacao` são sempre fixas.
+- **SPIN por área** (`spin`): depois que o agente grava `especialidade` (uma
+  das `areas`), ele segue a lista daquela área. `spin` tem **uma chave para
+  cada área cadastrada** (lista vazia se a área não tiver SPIN); cada item tem
+  o mesmo formato de `perguntas` mais `etapa_spin`
+  (`"situacao" | "problema" | "implicacao" | "necessidade" | ""`), ordenado
+  por `ordem`.
+
+```jsonc
+"spin": {
+  "Trabalhista": [
+    {"question_id": "trab_situacao", "ordem": 0, "texto": "Você ainda trabalha na empresa…?", "obrigatoria": false,
+     "variavel": {"nome": "Geral", "peso": 5}, "variavel_roteiro": null, "etapa_spin": "situacao"},
+    {"question_id": "demanda", "ordem": 1, "texto": "A situação envolve horas extras…?", "obrigatoria": true,
+     "variavel": {"nome": "Geral", "peso": 5}, "variavel_roteiro": "tema", "etapa_spin": "problema"}
+  ],
+  "Consumidor": [],
+  "Previdenciário": []
+}
+```
+
+A pergunta obrigatória `demanda` pode estar dentro de uma lista SPIN. Fora
+dela, no máximo **uma** pergunta por lista de área guarda a Variável de roteiro
+builtin `tema` (a de "Problema", que registra a demanda daquela área).
+
+Em `/incoming/`, `Q` ou `ATUALIZAR` com `"proxima"` de uma pergunta SPIN só é
+aceito se o lead já estiver classificado **naquela** área (vale a
+`especialidade` enviada no mesmo `ATUALIZAR`). SPIN de outra área, ou SPIN
+antes de existir `especialidade`, leva o lead para atendimento humano com o
+motivo "Pergunta SPIN de área diferente da classificada". Perguntas fixas
+continuam livres.
+
 ## 2.2 Status do contato (o agente pode atender este número agora?)
 
 ```
@@ -321,7 +358,8 @@ chame `/incoming/`). É exatamente a regra que `/incoming/` usa para decidir
   "aceita_agente": true,
   "motivo": "em_triagem",       // ver tabela
   "ultima_pergunta": "nome",    // só em "em_triagem"; null nos demais
-  "repeticoes": 2               // REPETIR consecutivos na etapa atual; 0 sem lead/fora da triagem
+  "repeticoes": 2,              // REPETIR consecutivos na etapa atual; 0 sem lead/fora da triagem
+  "especialidade": "Trabalhista" // área já gravada no lead ativo ("" se ainda não classificada) — define a lista SPIN
 }
 ```
 

@@ -1746,7 +1746,7 @@ class ContatoFecharDonoPendenciasTests(TestCase):
 
     def test_contato_cobre_todos_os_motivos_com_a_mesma_regra_do_incoming(self):
         r = self.contato("+5585911114444").json()
-        self.assertEqual(r, {"contact": "+5585911114444", "lead_id": None, "aceita_agente": True, "motivo": "sem_lead", "ultima_pergunta": None, "repeticoes": 0})
+        self.assertEqual(r, {"contact": "+5585911114444", "lead_id": None, "aceita_agente": True, "motivo": "sem_lead", "ultima_pergunta": None, "repeticoes": 0, "especialidade": ""})
         self.send("a1")
         self.send("a2", marker="ATUALIZAR", fields={"proxima": "nome"})
         r = self.contato("+5585911114444").json()
@@ -2051,3 +2051,133 @@ class MensagensAudioTests(TestCase):
         from . import audio
         relativo = audio.gerar_tts("Olá! Este é um teste de voz.", "pt-BR-FranciscaNeural")
         self.assertIn("codec_name=opus", _codec(os.path.join(self.media, relativo)))
+
+
+class SpinPorAreaTests(TestCase):
+    """Perguntas fixas + listas {Área}-SPIN: modelo, validações, contrato do agente e reorder."""
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from rest_framework.authtoken.models import Token
+        from .services import seed_roteiro_padrao
+        self.company = Company.objects.create(name="Rufus SPIN")
+        self.other = Company.objects.create(name="Outra SPIN")
+        seed_roteiro_padrao(self.company)
+        Question.objects.filter(company=self.company).exclude(text__gt="").update(text="texto")
+        self.trab = Area.objects.create(company=self.company, name="Trabalhista")
+        self.cons = Area.objects.create(company=self.company, name="Consumidor")
+        self.prev = Area.objects.create(company=self.company, name="Previdenciário")
+        self.area_outra = Area.objects.create(company=self.other, name="Trabalhista")
+        self.v = Variavel.objects.get(company=self.company, name="Geral")
+        self.tema = VariavelRoteiro.objects.get(company=self.company, slug="tema")
+        empresa = get_user_model().objects.create_user(username="empresa.spin", is_staff=True)
+        self.company.members.add(empresa)
+        self.client = APIClient()
+        self.client.force_authenticate(empresa)
+        agente = get_user_model().objects.create_user(username="agente.spin")
+        agente.groups.add(Group.objects.get_or_create(name="agente")[0])
+        self.company.members.add(agente)
+        self.agent = APIClient()
+        self.agent.credentials(HTTP_AUTHORIZATION=f"Token {Token.objects.create(user=agente).key}")
+
+    def criar(self, question_id, area=None, etapa="", ordem=0, **extra):
+        return Question.objects.create(company=self.company, question_id=question_id, text=f"{question_id}?", variavel=self.v,
+                                       area=area, etapa_spin=etapa, ordem=ordem, **extra)
+
+    def post(self, **data):
+        return self.client.post(f"/api/questions/?company={self.company.id}", {"variavel": self.v.id, "text": "x", **data}, format="json")
+
+    def patch(self, q, **data):
+        return self.client.patch(f"/api/questions/{q.id}/?company={self.company.id}", data, format="json")
+
+    def test_criar_pergunta_spin_e_validacoes(self):
+        r = self.post(question_id="trab_situacao", area=self.trab.id, etapa_spin="situacao")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual((r.json()["area"], r.json()["etapa_spin"]), (self.trab.id, "situacao"))
+        self.assertEqual(self.post(question_id="x1", area=self.area_outra.id).status_code, 400)
+        duplicada = self.post(question_id="trab_situacao", area=self.trab.id)
+        self.assertEqual(duplicada.status_code, 400)
+        self.assertIn("question_id", duplicada.json())
+        self.assertEqual(self.post(question_id="x2", etapa_spin="problema").status_code, 400)
+        nome = Question.objects.get(company=self.company, question_id="nome")
+        situacao = Question.objects.get(company=self.company, question_id="situacao")
+        apresentacao = Question.objects.get(company=self.company, question_id="apresentacao")
+        for q in (nome, situacao, apresentacao):
+            self.assertEqual(self.patch(q, area=self.trab.id).status_code, 400, q.question_id)
+        demanda = Question.objects.get(company=self.company, question_id="demanda")
+        self.assertEqual(self.patch(demanda, area=self.trab.id, etapa_spin="problema").status_code, 200)
+
+    def test_tema_builtin_em_no_maximo_uma_pergunta_por_area(self):
+        p1 = self.criar("trab_problema", self.trab, "problema")
+        self.assertEqual(self.patch(p1, variavel_roteiro=self.tema.id).status_code, 200)
+        p2 = self.criar("trab_problema2", self.trab, "problema", ordem=1)
+        self.assertEqual(self.patch(p2, variavel_roteiro=self.tema.id).status_code, 400)
+        p3 = self.criar("cons_problema", self.cons, "problema")
+        self.assertEqual(self.patch(p3, variavel_roteiro=self.tema.id).status_code, 200)
+        fixa = self.criar("fixa_extra")
+        self.assertEqual(self.patch(fixa, variavel_roteiro=self.tema.id).status_code, 400)
+        nome_vr = VariavelRoteiro.objects.get(company=self.company, slug="nome")
+        self.assertEqual(self.patch(p3, variavel_roteiro=nome_vr.id).status_code, 400)
+
+    def test_area_com_spin_nao_pode_ser_excluida(self):
+        self.criar("trab_situacao", self.trab, "situacao")
+        r = self.client.delete(f"/api/areas/{self.trab.id}/?company={self.company.id}")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("Trabalhista-SPIN", r.json()["detail"])
+        self.assertEqual(self.client.delete(f"/api/areas/{self.prev.id}/?company={self.company.id}").status_code, 204)
+
+    def test_contexto_separa_fixas_e_spin_por_area(self):
+        self.criar("trab_problema", self.trab, "problema", ordem=1)
+        self.criar("trab_situacao", self.trab, "situacao", ordem=0)
+        Question.objects.create(company=self.company, question_id="trab_vazia", text="", variavel=self.v, area=self.trab, ordem=2)
+        r = self.agent.get(f"/api/companies/{self.company.id}/agente/contexto/")
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertEqual(set(data["spin"]), {"Trabalhista", "Consumidor", "Previdenciário"})
+        self.assertEqual([q["question_id"] for q in data["spin"]["Trabalhista"]], ["trab_situacao", "trab_problema"])
+        self.assertEqual(data["spin"]["Trabalhista"][0]["etapa_spin"], "situacao")
+        self.assertEqual(data["spin"]["Consumidor"], [])
+        fixas = [q["question_id"] for q in data["perguntas"]]
+        self.assertIn("nome", fixas)
+        self.assertNotIn("trab_situacao", fixas)
+
+    def send(self, mid, **kw):
+        data = {"contact": "+5585977776666", "message_id": mid, "kind": "text", "marker": "Q", "question_id": "apresentacao",
+                "fields": {}, "human_required": False, "reason": "pedido humano", **kw}
+        r = receive(self.company, data)
+        if r.get("event_id"):
+            Event.objects.filter(pk=r["event_id"]).update(delivery="SENT")
+        return r
+
+    def test_contato_expoe_especialidade_e_incoming_valida_area_do_spin(self):
+        self.criar("trab_situacao", self.trab, "situacao")
+        self.criar("cons_situacao", self.cons, "situacao")
+        self.send("1")
+        st = self.agent.get(f"/api/companies/{self.company.id}/agente/contato/?contact=%2B5585977776666").json()
+        self.assertEqual(st["especialidade"], "")
+        # SPIN antes de classificar a área → humano
+        r = self.send("2", marker="ATUALIZAR", fields={"proxima": "trab_situacao"})
+        self.assertEqual(r["action"], "NO_REPLY")
+        lead = Lead.objects.get(contact="+5585977776666")
+        self.assertEqual((lead.mode, lead.next_action), ("HUMANO", "Pergunta SPIN de área diferente da classificada"))
+
+    def test_spin_da_area_certa_avanca_e_de_outra_area_escala(self):
+        self.criar("trab_situacao", self.trab, "situacao")
+        self.criar("cons_situacao", self.cons, "situacao")
+        self.send("1")
+        r = self.send("2", marker="ATUALIZAR", fields={"especialidade": "Trabalhista", "proxima": "trab_situacao"})
+        self.assertEqual((r["action"], r["question_id"]), ("TEXTO", "trab_situacao"))
+        st = self.agent.get(f"/api/companies/{self.company.id}/agente/contato/?contact=%2B5585977776666").json()
+        self.assertEqual(st["especialidade"], "Trabalhista")
+        r = self.send("3", marker="ATUALIZAR", fields={"proxima": "cons_situacao"})
+        self.assertEqual(r["action"], "NO_REPLY")
+        self.assertEqual(Lead.objects.get(contact="+5585977776666").next_action, "Pergunta SPIN de área diferente da classificada")
+
+    def test_reorder_persiste_ordem_dentro_da_lista(self):
+        a = self.criar("trab_a", self.trab, "situacao", ordem=0)
+        b = self.criar("trab_b", self.trab, "problema", ordem=1)
+        self.assertEqual(self.patch(a, ordem=1).status_code, 200)
+        self.assertEqual(self.patch(b, ordem=0).status_code, 200)
+        r = self.agent.get(f"/api/companies/{self.company.id}/agente/contexto/").json()
+        self.assertEqual([q["question_id"] for q in r["spin"]["Trabalhista"]], ["trab_b", "trab_a"])
+        fixa_nome = Question.objects.get(company=self.company, question_id="nome")
+        self.assertIsNone(fixa_nome.area)

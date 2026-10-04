@@ -114,6 +114,12 @@ class Question(models.Model):
         VariavelRoteiro, on_delete=models.PROTECT, related_name="perguntas", null=True, blank=True,
         help_text="Opcional: guarda a resposta desta pergunta pra reusar como placeholder em outro texto do roteiro. Fixo nas 3 obrigatórias, opcional (via checkbox) nas demais.",
     )
+    # SPIN por área: null = pergunta fixa (feita para todos antes de o agente definir a área);
+    # com área = pergunta da lista "{Área}-SPIN", feita só depois que o lead é classificado nela.
+    # `ordem` vale dentro da lista (fixas, ou cada área).
+    ETAPAS_SPIN = [("", "—"), ("situacao", "Situação"), ("problema", "Problema"), ("implicacao", "Implicação"), ("necessidade", "Necessidade")]
+    area = models.ForeignKey("Area", on_delete=models.PROTECT, related_name="perguntas_spin", null=True, blank=True)
+    etapa_spin = models.CharField(max_length=12, choices=ETAPAS_SPIN, blank=True, default="")
     class Meta:
         constraints = [models.UniqueConstraint(fields=["company", "question_id"], name="unique_company_question")]
         ordering = ["ordem", "id"]

@@ -177,6 +177,13 @@ def avaliar_contato(company, contact):
         return lead, False, "classificado"
     return lead, True, "em_triagem"
 
+def _spin_fora_da_area(company, lead, question_id):
+    """Pergunta de uma lista {Área}-SPIN só vale para lead já classificado naquela área."""
+    q = Question.objects.filter(company=company, question_id=question_id).select_related("area").first()
+    if not q or not q.area_id:
+        return False
+    return (lead.especialidade or "") != q.area.name
+
 MAX_REPETICOES = 3
 JANELA_ENTREGA_PENDENTE = timedelta(seconds=90)
 
@@ -212,6 +219,8 @@ def status_contato(company, contact):
         "motivo": motivo,
         "ultima_pergunta": ultima_pergunta(lead) if lead and motivo == "em_triagem" else None,
         "repeticoes": contar_repeticoes(lead) if lead and motivo == "em_triagem" else 0,
+        # Área já classificada no lead ativo: define qual lista SPIN o agente segue.
+        "especialidade": (lead.especialidade or "") if lead and not lead.desfecho else "",
     }
 
 @transaction.atomic
@@ -263,6 +272,9 @@ def receive(company, data):
             if not question_id:
                 escalate(lead, "Marcador Q sem question_id: revisar integração do agente")
                 question_id = None
+            elif _spin_fora_da_area(company, lead, question_id):
+                escalate(lead, "Pergunta SPIN de área diferente da classificada")
+                question_id = None
             else:
                 lead.state = question_id
         elif marker == "REPETIR":
@@ -286,6 +298,10 @@ def receive(company, data):
                     question_id = None
                 elif question_id in RESERVED_QUESTION_IDS:
                     escalate(lead, f"'{question_id}' é reservado (validar/encerramento não são 'proxima' válidos): revisar fluxo do agente")
+                    question_id = None
+                elif _spin_fora_da_area(company, lead, question_id):
+                    # apply_fields já rodou: uma especialidade enviada neste mesmo ATUALIZAR vale.
+                    escalate(lead, "Pergunta SPIN de área diferente da classificada")
                     question_id = None
                 elif question_id == lead.state:
                     # Avançar para a mesma pergunta é uma repetição disfarçada: conta no mesmo limite.
@@ -862,27 +878,36 @@ def contexto_agente(company):
     """Tudo que o agente precisa pra conduzir o roteiro da empresa, sem efeitos colaterais."""
     perguntas = []
     fora_do_fluxo = []
+    areas = list(company.areas.order_by("name"))
+    # Uma chave por área cadastrada, mesmo sem perguntas: o agente sabe que a área existe mas não tem SPIN.
+    spin = {a.name: [] for a in areas}
+    nomes_area = {a.id: a.name for a in areas}
     for q in Question.objects.filter(company=company).select_related("variavel", "variavel_roteiro").order_by("ordem", "id"):
         if not (q.text or "").strip():
             continue
         if q.question_id in MANDATORY_OFFFLOW_QUESTION_IDS:
             fora_do_fluxo.append({"question_id": q.question_id, "texto": q.text})
             continue
-        perguntas.append({
+        item = {
             "question_id": q.question_id,
             "ordem": q.ordem,
             "texto": q.text,
             "obrigatoria": q.obrigatoria,
             "variavel": {"nome": q.variavel.name, "peso": q.variavel.peso} if q.variavel else None,
             "variavel_roteiro": q.variavel_roteiro.slug if q.variavel_roteiro else None,
-        })
+        }
+        if q.area_id:
+            spin[nomes_area[q.area_id]].append({**item, "etapa_spin": q.etapa_spin})
+        else:
+            perguntas.append(item)
     return {
         "empresa": company.name,
         "agente_conversacional": company.agente_conversacional,
         "mensagens_audio": company.audio_ativo,
         "numero_agente": company.numero_agente,
-        "areas": list(company.areas.order_by("name").values_list("name", flat=True)),
+        "areas": [a.name for a in areas],
         "perguntas": perguntas,
+        "spin": spin,
         "fora_do_fluxo": fora_do_fluxo,
         "faixas_urgencia": [
             {"min": minimo, "max_exclusivo": maximo, "temperatura": temperatura}

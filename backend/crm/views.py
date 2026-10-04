@@ -651,6 +651,14 @@ class AreaViewSet(TenantMixin, viewsets.ModelViewSet):
         base = [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
         return base + [NotAgentAccount()]
     def perform_create(self, serializer): serializer.save(company=self.company())
+    def destroy(self, request, *args, **kwargs):
+        from django.db.models import ProtectedError
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            area = self.get_object()
+            return Response({"detail": f"A área '{area.name}' tem perguntas na lista {area.name}-SPIN do Roteiro -- "
+                             "exclua ou mova essas perguntas antes de excluir a área."}, status=400)
 
 class AtendenteInviteViewSet(TenantMixin, viewsets.ModelViewSet):
     """Convites de novo atendente (tela "Equipe"): só a empresa cria/cancela;
