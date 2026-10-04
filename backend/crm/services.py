@@ -340,3 +340,39 @@ def revogar_token_agente(company):
     user = User.objects.filter(username=_agent_username(company)).first()
     if user:
         Token.objects.filter(user=user).delete()
+
+# --- Ciclo de vida pós-triagem: assumir e despachar (kanban "Atendimentos em
+# Espera" -> "Atendimento humano" -> encerrado/comprometido/falha) ---
+
+@transaction.atomic
+def assumir_lead(lead_id, user):
+    """Um atendente 'pega' um lead classificado e ainda sem responsável.
+    select_for_update garante que, se dois atendentes clicarem ao mesmo tempo,
+    só um consegue -- corrige o gap de atomicidade identificado antes (owner
+    deixou de ser um PATCH livre, só muda por aqui ou por despachar_lead)."""
+    lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
+    if not lead:
+        return "Lead não encontrado."
+    if lead.owner:
+        return "Este atendimento já foi assumido por outro atendente."
+    profile = getattr(user, "profile", None)
+    nome = (profile.display_name if profile else "") or user.get_full_name() or user.username
+    lead.owner = nome
+    lead.mode = "HUMANO"
+    lead.save(update_fields=["owner", "mode"])
+    return None
+
+def despachar_lead(lead_id, desfecho, user):
+    if desfecho not in dict(Lead.DESFECHO_CHOICES):
+        return "Classificação de despacho inválida."
+    lead = Lead.objects.filter(pk=lead_id).first()
+    if not lead:
+        return "Lead não encontrado."
+    profile = getattr(user, "profile", None)
+    nome = (profile.display_name if profile else "") or user.get_full_name() or user.username
+    if lead.owner and lead.owner != nome:
+        return "Só quem assumiu este atendimento pode despachá-lo."
+    lead.desfecho = desfecho
+    lead.next_action = ""
+    lead.save(update_fields=["desfecho", "next_action"])
+    return None

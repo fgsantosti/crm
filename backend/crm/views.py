@@ -19,6 +19,7 @@ from .services import (
     solicitar_troca_email, confirmar_troca_email as confirmar_troca_email_service,
     redefinir_senha_atendente as redefinir_senha_atendente_service,
     agent_status, gerar_token_agente, revogar_token_agente,
+    assumir_lead as assumir_lead_service, despachar_lead as despachar_lead_service,
 )
 
 def _avatar_url(request, profile):
@@ -272,7 +273,7 @@ class TenantMixin:
 class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
     queryset = Lead.objects.all()
     serializer_class = LeadSerializer
-    http_method_names = ["get", "patch", "head", "options"]
+    http_method_names = ["get", "patch", "post", "head", "options"]
     permission_classes = [permissions.IsAuthenticated, NotAgentAccount]
     def get_queryset(self):
         qs = super().get_queryset()
@@ -282,6 +283,23 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
     @action(detail=True)
     def events(self, request, pk=None):
         return Response(EventSerializer(self.get_object().events.all(), many=True).data)
+    @action(detail=True, methods=["post"])
+    def assumir(self, request, pk=None):
+        """Empresa/admin (is_staff) nunca assume atendimento -- só atendente."""
+        if request.user.is_staff:
+            return Response({"detail": "Esse perfil não assume atendimentos."}, status=403)
+        erro = assumir_lead_service(self.get_object().pk, request.user)
+        if erro:
+            return Response({"detail": erro}, status=400)
+        return Response(LeadSerializer(self.get_object()).data)
+    @action(detail=True, methods=["post"])
+    def despachar(self, request, pk=None):
+        if request.user.is_staff:
+            return Response({"detail": "Esse perfil não despacha atendimentos."}, status=403)
+        erro = despachar_lead_service(self.get_object().pk, request.data.get("desfecho"), request.user)
+        if erro:
+            return Response({"detail": erro}, status=400)
+        return Response(LeadSerializer(self.get_object()).data)
 
 class QuestionViewSet(TenantMixin, viewsets.ModelViewSet):
     queryset = Question.objects.all().order_by("id")

@@ -115,6 +115,11 @@ class Lead(models.Model):
     ESPECIALIDADE_CHOICES = [("Previdenciário", "Previdenciário"), ("Consumidor", "Consumidor"), ("Trabalhista", "Trabalhista"), ("Fora de escopo", "Fora de escopo")]
     TEMPERATURA_CHOICES = [("Qualificado", "Qualificado"), ("Quente", "Quente"), ("Desconfiado", "Desconfiado"), ("Remarketing", "Remarketing"), ("Desqualificado", "Desqualificado")]
     INTERESSE_CHOICES = [("sim", "Sim"), ("nao", "Não"), ("depois", "Depois")]
+    DESFECHO_CHOICES = [
+        ("encerrado", "Encerrado"),
+        ("comprometido", "Comprometido"),
+        ("falha", "Falha durante o atendimento"),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
@@ -137,6 +142,7 @@ class Lead(models.Model):
     last_audio_id = models.CharField(max_length=250, blank=True)
     bot_closed = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
+    desfecho = models.CharField(max_length=20, choices=DESFECHO_CHOICES, blank=True, help_text="Só setado ao despachar um atendimento humano (ver services.despachar_lead).")
     class Meta:
         constraints = [models.UniqueConstraint(fields=["company", "contact"], name="unique_company_contact")]
         ordering = ["-created_at"]

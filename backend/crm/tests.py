@@ -255,6 +255,71 @@ class QualificationTests(TestCase):
         self.assertEqual(muito_longo.status_code, 400)
         muito_curto = c.post(f"/api/admin-companies/{self.company.pk}/agente/", {"validade_dias": 0}, format="json")
         self.assertEqual(muito_curto.status_code, 400)
+    def test_assumir_lead_claims_it_atomically_and_blocks_staff(self):
+        self.delivered(self.send())
+        self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": "nome"}))
+        self.delivered(self.send("3", marker="VALIDAR"))
+        self.send("4", marker="CLASSIFICADO", fields={"temperatura": "Quente", "prioridade": "Alta"})
+        lead = Lead.objects.get()
+        self.assertEqual(lead.owner, "")
+
+        staff = get_user_model().objects.create_user(username="empresa-assumir", is_staff=True)
+        self.company.members.add(staff)
+        staff_client = APIClient()
+        staff_client.force_authenticate(staff)
+        denied = staff_client.post(f"/api/leads/{lead.pk}/assumir/?company={self.company.pk}")
+        self.assertEqual(denied.status_code, 403)
+
+        atendente_a = get_user_model().objects.create_user(username="atendente-a")
+        atendente_b = get_user_model().objects.create_user(username="atendente-b")
+        self.company.members.add(atendente_a, atendente_b)
+        client_a = APIClient()
+        client_a.force_authenticate(atendente_a)
+        client_b = APIClient()
+        client_b.force_authenticate(atendente_b)
+
+        ok = client_a.post(f"/api/leads/{lead.pk}/assumir/?company={self.company.pk}")
+        self.assertEqual(ok.status_code, 200)
+        lead.refresh_from_db()
+        self.assertEqual(lead.owner, "atendente-a")
+        self.assertEqual(lead.mode, "HUMANO")
+
+        ja_assumido = client_b.post(f"/api/leads/{lead.pk}/assumir/?company={self.company.pk}")
+        self.assertEqual(ja_assumido.status_code, 400)
+        lead.refresh_from_db()
+        self.assertEqual(lead.owner, "atendente-a")
+
+        # owner/mode não podem mais ser trocados por PATCH livre
+        bypass = client_a.patch(f"/api/leads/{lead.pk}/?company={self.company.pk}", {"owner": "hackeado"}, format="json")
+        self.assertEqual(bypass.status_code, 200)
+        lead.refresh_from_db()
+        self.assertEqual(lead.owner, "atendente-a")
+    def test_despachar_lead_requires_owner_and_valid_desfecho(self):
+        self.delivered(self.send())
+        self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": "nome"}))
+        self.delivered(self.send("3", marker="VALIDAR"))
+        self.send("4", marker="CLASSIFICADO", fields={"temperatura": "Quente", "prioridade": "Alta"})
+        lead = Lead.objects.get()
+        atendente_a = get_user_model().objects.create_user(username="atendente-c")
+        atendente_b = get_user_model().objects.create_user(username="atendente-d")
+        self.company.members.add(atendente_a, atendente_b)
+        client_a = APIClient()
+        client_a.force_authenticate(atendente_a)
+        client_b = APIClient()
+        client_b.force_authenticate(atendente_b)
+
+        client_a.post(f"/api/leads/{lead.pk}/assumir/?company={self.company.pk}")
+
+        invalido = client_a.post(f"/api/leads/{lead.pk}/despachar/?company={self.company.pk}", {"desfecho": "sei-la"}, format="json")
+        self.assertEqual(invalido.status_code, 400)
+
+        outro = client_b.post(f"/api/leads/{lead.pk}/despachar/?company={self.company.pk}", {"desfecho": "encerrado"}, format="json")
+        self.assertEqual(outro.status_code, 400)
+
+        ok = client_a.post(f"/api/leads/{lead.pk}/despachar/?company={self.company.pk}", {"desfecho": "encerrado"}, format="json")
+        self.assertEqual(ok.status_code, 200)
+        lead.refresh_from_db()
+        self.assertEqual(lead.desfecho, "encerrado")
     def test_redefinir_senha_atendente_requires_empresa_and_emails_new_password(self):
         atendente = get_user_model().objects.create_user(username="atendente-x", password="senha-velha-123", email="atendente-x@example.com")
         self.company.members.add(atendente)
