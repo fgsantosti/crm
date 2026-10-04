@@ -10,8 +10,8 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
-from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
-from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer
+from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, VariavelRoteiro, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
+from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer, VariavelRoteiroSerializer
 from .services import (
     receive, escalate, create_invite,
     validar_convite as validar_convite_service,
@@ -339,6 +339,32 @@ class VariavelViewSet(TenantMixin, viewsets.ModelViewSet):
             return super().destroy(request, *args, **kwargs)
         except ProtectedError:
             return Response({"detail": "Essa variável está em uso por uma ou mais perguntas do roteiro -- troque a variável delas antes de excluir."}, status=400)
+
+class VariavelRoteiroViewSet(TenantMixin, viewsets.ModelViewSet):
+    """Variáveis de ROTEIRO: sem peso, só guardam a resposta de uma pergunta pra
+    reusar como placeholder em outro texto (ver seed_roteiro_padrao e
+    services.slugify_variavel_roteiro). As 3 builtin (Nome/Área da Lead/Demanda)
+    são fixas -- não podem ser excluídas nem recriadas por aqui."""
+    queryset = VariavelRoteiro.objects.all()
+    serializer_class = VariavelRoteiroSerializer
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+    def get_permissions(self):
+        base = [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
+        return base + [NotAgentAccount()]
+    def perform_create(self, serializer):
+        from .services import slugify_variavel_roteiro, proxima_cor_roteiro
+        company = self.company()
+        name = serializer.validated_data["name"]
+        serializer.save(company=company, slug=slugify_variavel_roteiro(company, name), cor=proxima_cor_roteiro(company))
+    def destroy(self, request, *args, **kwargs):
+        from django.db.models import ProtectedError
+        variavel = self.get_object()
+        if variavel.builtin:
+            return Response({"detail": f"'{variavel.name}' é uma Variável de roteiro obrigatória e não pode ser excluída."}, status=400)
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response({"detail": "Essa Variável de roteiro está em uso por uma pergunta -- desmarque a opção na pergunta antes de excluir."}, status=400)
 
 class CompanyInfoViewSet(TenantMixin, viewsets.ModelViewSet):
     """Dados da empresa: o agente de IA precisa LER isto (para responder perguntas

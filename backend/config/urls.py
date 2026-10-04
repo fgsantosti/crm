@@ -5,7 +5,7 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from crm.views import (
-    CompanyViewSet, LeadViewSet, QuestionViewSet, CompanyInfoViewSet, AreaViewSet, AtendenteInviteViewSet, AdminCompanyViewSet, VariavelViewSet,
+    CompanyViewSet, LeadViewSet, QuestionViewSet, CompanyInfoViewSet, AreaViewSet, AtendenteInviteViewSet, AdminCompanyViewSet, VariavelViewSet, VariavelRoteiroViewSet,
     me, avatar, validar_convite, trocar_senha, trocar_email_solicitar, trocar_email_confirmar, excluir_conta,
     redefinir_senha_atendente_view, desligar_atendente,
     LoginView, RefreshView, logout_view,
@@ -19,6 +19,7 @@ router.register("areas", AreaViewSet, basename="area")
 router.register("convites", AtendenteInviteViewSet, basename="convite")
 router.register("admin-companies", AdminCompanyViewSet, basename="admin-company")
 router.register("variaveis", VariavelViewSet, basename="variavel")
+router.register("variaveis-roteiro", VariavelRoteiroViewSet, basename="variavelroteiro")
 urlpatterns = [
     path("health/ready/", ready),
     path("admin/", admin.site.urls),

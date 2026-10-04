@@ -1,6 +1,6 @@
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, MANDATORY_OFFFLOW_QUESTION_IDS
+from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, VariavelRoteiro, MANDATORY_OFFFLOW_QUESTION_IDS, MANDATORY_QUESTION_IDS
 
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
@@ -31,7 +31,7 @@ class LeadSerializer(serializers.ModelSerializer):
         # owner/mode só mudam via as actions assumir/despachar (services.py) --
         # nunca mais um PATCH livre de texto, pra garantir atomicidade real
         # na disputa por um lead entre atendentes.
-        read_only_fields = ["id", "company", "contact", "created_at", "state", "last_audio_id", "bot_closed", "last_contact", "owner", "mode", "desfecho"]
+        read_only_fields = ["id", "company", "contact", "created_at", "state", "last_audio_id", "bot_closed", "last_contact", "owner", "mode", "desfecho", "variaveis_roteiro"]
 
     def validate(self, attrs):
         if attrs.get("mode") == "AUTOMÁTICO" and self.instance and self.instance.mode == "HUMANO":
@@ -44,6 +44,12 @@ class VariavelSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "peso"]
         read_only_fields = ["id"]
 
+class VariavelRoteiroSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VariavelRoteiro
+        fields = ["id", "name", "slug", "cor", "builtin"]
+        read_only_fields = ["id", "slug", "cor", "builtin"]
+
 class QuestionSerializer(serializers.ModelSerializer):
     # Declarado explícito: variavel é null=True só pra migração não quebrar
     # perguntas antigas (ver crm/migrations/0009) e pros 4 textos fora do fluxo
@@ -52,6 +58,7 @@ class QuestionSerializer(serializers.ModelSerializer):
     # ModelSerializer relaxa "required" sozinho pra qualquer campo com
     # null=True no modelo (ver validate() abaixo pra regra condicional real).
     variavel = serializers.PrimaryKeyRelatedField(queryset=Variavel.objects.all(), required=False, allow_null=True)
+    variavel_roteiro = serializers.PrimaryKeyRelatedField(queryset=VariavelRoteiro.objects.all(), required=False, allow_null=True)
     class Meta:
         model = Question
         fields = "__all__"
@@ -63,6 +70,11 @@ class QuestionSerializer(serializers.ModelSerializer):
         if variavel and company and variavel.company_id != company.id:
             raise serializers.ValidationError("Variável não pertence a esta empresa.")
         return variavel
+    def validate_variavel_roteiro(self, variavel_roteiro):
+        company = self.context.get("company")
+        if variavel_roteiro and company and variavel_roteiro.company_id != company.id:
+            raise serializers.ValidationError("Variável de roteiro não pertence a esta empresa.")
+        return variavel_roteiro
     def validate(self, attrs):
         question_id = attrs.get("question_id") or (self.instance.question_id if self.instance else "")
         is_offflow = question_id in MANDATORY_OFFFLOW_QUESTION_IDS
@@ -71,6 +83,13 @@ class QuestionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"variavel": "Toda pergunta do fluxo precisa de uma variável vinculada."})
         if is_offflow and variavel:
             raise serializers.ValidationError({"variavel": "Textos fora do fluxo não têm variável (não são classificáveis)."})
+        if is_offflow and attrs.get("variavel_roteiro"):
+            raise serializers.ValidationError({"variavel_roteiro": "Textos fora do fluxo não armazenam resposta em Variável de roteiro."})
+        if question_id in MANDATORY_QUESTION_IDS and "variavel_roteiro" in attrs:
+            esperada = self.instance.variavel_roteiro_id if self.instance else None
+            nova = attrs["variavel_roteiro"].pk if attrs["variavel_roteiro"] else None
+            if nova != esperada:
+                raise serializers.ValidationError({"variavel_roteiro": "Perguntas obrigatórias já têm a Variável de roteiro fixa (Nome/Área da Lead/Demanda)."})
         return attrs
 
 class CompanyInfoSerializer(serializers.ModelSerializer):

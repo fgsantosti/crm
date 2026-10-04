@@ -6,7 +6,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework.authtoken.models import TokenProxy
 from rest_framework.authtoken.admin import TokenAdmin
-from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, PasswordChangeRequired, Profile, EmailChangeRequest, AgentTokenExpiry, default_token_expiry, Variavel
+from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, PasswordChangeRequired, Profile, EmailChangeRequest, AgentTokenExpiry, default_token_expiry, Variavel, VariavelRoteiro
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
@@ -28,9 +28,15 @@ class VariavelAdmin(admin.ModelAdmin):
     list_filter = ["company"]
     search_fields = ["name"]
 
+@admin.register(VariavelRoteiro)
+class VariavelRoteiroAdmin(admin.ModelAdmin):
+    list_display = ["name", "slug", "company", "builtin", "cor"]
+    list_filter = ["company", "builtin"]
+    search_fields = ["name", "slug"]
+
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):
-    list_display = ["question_id", "company", "obrigatoria", "variavel", "has_audio"]
+    list_display = ["question_id", "company", "obrigatoria", "variavel", "variavel_roteiro", "has_audio"]
     list_filter = ["company", "obrigatoria"]
     search_fields = ["question_id", "text"]
     @admin.display(description="Audio", boolean=True)

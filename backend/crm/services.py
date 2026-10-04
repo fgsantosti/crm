@@ -9,24 +9,58 @@ from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.authtoken.models import Token
 from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
-from .models import Lead, Question, Event, Company, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
+from .models import Lead, Question, Event, Company, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
 
 NO_REPLY = {"action": "NO_REPLY"}
 RESERVED_QUESTION_IDS = {"validar", "encerramento"}
 
+# question_id -> (nome de exibição, slug/placeholder fixo) das 3 Variáveis de roteiro
+# builtin: reaproveitam os placeholders já existentes (FIELD_MAP), sem precisar de
+# armazenamento extra em Lead.variaveis_roteiro.
+BUILTIN_VARIAVEL_ROTEIRO = {
+    "nome": ("Nome", "nome"),
+    "situacao": ("Área da Lead", "especialidade"),
+    "demanda": ("Demanda", "tema"),
+}
+
 def seed_roteiro_padrao(company):
     """Garante o mínimo pra uma empresa nova conseguir operar o funil: a Variavel
-    padrão, as 3 perguntas obrigatórias de triagem (nome/situacao/demanda), os 4
-    textos fora do fluxo (apresentacao/empresa/validar/encerramento) e os 3 campos
-    obrigatórios de Dados da empresa. Chamado na criação de empresa (AdminCompanyViewSet)
-    e pela migração 0012 pras empresas que já existiam antes dessa feature."""
+    padrão, as 3 perguntas obrigatórias de triagem (nome/situacao/demanda) já
+    atreladas às suas Variáveis de roteiro builtin, os 4 textos fora do fluxo
+    (apresentacao/empresa/validar/encerramento) e os 3 campos obrigatórios de Dados
+    da empresa. Chamado na criação de empresa (AdminCompanyViewSet) e pela migração
+    0012/0014 pras empresas que já existiam antes dessas features."""
     variavel, _ = Variavel.objects.get_or_create(company=company, name="Geral", defaults={"peso": 5})
     for ordem, question_id in enumerate(MANDATORY_QUESTION_IDS):
-        Question.objects.get_or_create(company=company, question_id=question_id, defaults={"obrigatoria": True, "variavel": variavel, "ordem": ordem})
+        label, slug = BUILTIN_VARIAVEL_ROTEIRO[question_id]
+        vr, _ = VariavelRoteiro.objects.get_or_create(company=company, slug=slug, defaults={"name": label, "builtin": True})
+        Question.objects.get_or_create(company=company, question_id=question_id, defaults={"obrigatoria": True, "variavel": variavel, "ordem": ordem, "variavel_roteiro": vr})
     for question_id in MANDATORY_OFFFLOW_QUESTION_IDS:
         Question.objects.get_or_create(company=company, question_id=question_id, defaults={"obrigatoria": True, "variavel": None})
     for title in CompanyInfo.MANDATORY_TITLES:
         CompanyInfo.objects.get_or_create(company=company, title=title, defaults={"obrigatorio": True})
+
+def slugify_variavel_roteiro(company, name):
+    """Deriva um slug/placeholder ({slug}) a partir do nome digitado: só letras
+    minúsculas e '_', sem acento, único por empresa e nunca colidindo com um
+    placeholder fixo já existente (empresa/nome/especialidade/tema/... -- ver
+    FIELD_MAP) nem com outra Variável de roteiro já cadastrada."""
+    import unicodedata
+    base = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    base = re.sub(r"[^a-zA-Z]+", "_", base).strip("_").lower() or "variavel"
+    reservados = {"empresa", *FIELD_MAP.keys()}
+    existentes = set(VariavelRoteiro.objects.filter(company=company).values_list("slug", flat=True))
+    slug = base
+    i = 2
+    while slug in reservados or slug in existentes:
+        slug = f"{base}_{i}"
+        i += 1
+    return slug
+
+def proxima_cor_roteiro(company):
+    paleta = VariavelRoteiro.PALETA_CORES
+    usadas = VariavelRoteiro.objects.filter(company=company).count()
+    return paleta[usadas % len(paleta)]
 
 # Mapa dos campos que o agente Axioma envia em ATUALIZAR/VALIDAR/CLASSIFICADO
 # para os campos reais do Lead. 'proxima' nunca é um campo do Lead: é o
@@ -54,6 +88,11 @@ def apply_fields(lead, company, fields):
     `especialidade` deixou de ser um choices fixo e global: agora é validada
     contra as áreas que a própria empresa cadastrou na tela "Equipe"
     (Area.objects.filter(company=...)). O agente nunca pode inventar uma área.
+
+    `variaveis_roteiro` (opcional): dict slug->texto, só aceito pra slugs de
+    Variáveis de roteiro CUSTOMIZADAS (não-builtin) já cadastradas pela empresa --
+    nunca cria uma variável nova nem aceita um slug desconhecido/builtin (os
+    builtin já são os campos fixos acima, nome/especialidade/tema).
     """
     especialidade = fields.get("especialidade")
     if especialidade and not company.areas.filter(name=especialidade).exists():
@@ -61,9 +100,13 @@ def apply_fields(lead, company, fields):
     for key, model_field in FIELD_MAP.items():
         if key in fields and fields[key]:
             setattr(lead, model_field, fields[key])
+    extra = fields.get("variaveis_roteiro")
+    if extra:
+        slugs_validos = set(company.variaveis_roteiro.filter(builtin=False).values_list("slug", flat=True))
+        for slug, valor in extra.items():
+            if slug in slugs_validos and isinstance(valor, str) and valor:
+                lead.variaveis_roteiro[slug] = valor[:300]
     return None
-
-PLACEHOLDER_RE = re.compile(r"\{(" + "|".join(re.escape(p) for p in ["empresa", *FIELD_MAP.keys()]) + r")\}")
 
 def render_text(text, lead, company):
     """Substitui placeholders no texto aprovado pelos dados já coletados do lead e pela empresa.
@@ -72,8 +115,12 @@ def render_text(text, lead, company):
     na mão, e continua correto automaticamente se a empresa for renomeada ou se o
     mesmo texto for reaproveitado como modelo para uma empresa nova.
     {nome}, {especialidade}, {tema}... vêm dos dados já coletados do lead (usado
-    sobretudo no texto aprovado de 'validar', que mostra um resumo para confirmação).
-    Placeholder sem valor ainda vira string vazia, nunca quebra ou expõe '{campo}' literal.
+    sobretudo no texto aprovado de 'validar', que mostra um resumo para confirmação)
+    -- são também as 3 Variáveis de roteiro builtin (Nome/Área da Lead/Demanda).
+    Variáveis de roteiro customizadas usam o slug gerado na criação (ver
+    slugify_variavel_roteiro) como placeholder, resolvido a partir de
+    lead.variaveis_roteiro. Placeholder sem valor ainda vira string vazia, nunca
+    quebra ou expõe '{campo}' literal.
 
     Todos os valores de substituição são resolvidos ANTES de rodar o regex, e a
     troca é feita em uma única passada sobre o texto original: um valor de campo
@@ -81,15 +128,21 @@ def render_text(text, lead, company):
     fosse ele próprio um novo placeholder. Isso evita que um lead encadeie campos
     (ex.: nome="{tema}", tema="{impacto}", impacto="<texto arbitrário>") para fazer
     o backend reexpandir e enviar conteúdo que não é do roteiro aprovado da empresa.
+
+    O regex de placeholders é montado por chamada (depende das Variáveis de roteiro
+    customizadas desta empresa), não é um padrão fixo global.
     """
     values = {"empresa": company.name}
     for placeholder, model_field in FIELD_MAP.items():
         values[placeholder] = getattr(lead, model_field) or ""
+    for slug in company.variaveis_roteiro.filter(builtin=False).values_list("slug", flat=True):
+        values[slug] = (lead.variaveis_roteiro or {}).get(slug, "")
 
     def substitute(match):
         return values[match.group(1)]
 
-    return PLACEHOLDER_RE.sub(substitute, text)
+    placeholder_re = re.compile(r"\{(" + "|".join(re.escape(k) for k in values.keys()) + r")\}")
+    return placeholder_re.sub(substitute, text)
 
 @transaction.atomic
 def receive(company, data):

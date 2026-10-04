@@ -4,7 +4,7 @@ from django.core import mail
 from django.test import Client, TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
-from .models import Company, Question, Lead, Event, Area, AtendenteInvite, PasswordChangeRequired, AgentTokenExpiry, CompanyInfo
+from .models import Company, Question, Lead, Event, Area, AtendenteInvite, PasswordChangeRequired, AgentTokenExpiry, CompanyInfo, Variavel, VariavelRoteiro
 from .services import receive
 
 class QualificationTests(TestCase):
@@ -229,6 +229,65 @@ class QualificationTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         nome.refresh_from_db()
         self.assertEqual(nome.ordem, 3)
+    def test_variavel_roteiro_checkbox_flow_and_slug_collision(self):
+        staff = get_user_model().objects.create_user(username="empresa-roteiro-4", is_staff=True)
+        self.company.members.add(staff)
+        c = APIClient()
+        c.force_authenticate(staff)
+        variavel = Variavel.objects.create(company=self.company, name="Geral 4", peso=5)
+
+        criada = c.post(f"/api/variaveis-roteiro/?company={self.company.pk}", {"name": "Idade"}, format="json")
+        self.assertEqual(criada.status_code, 201)
+        self.assertEqual(criada.json()["slug"], "idade")
+        self.assertFalse(criada.json()["builtin"])
+        self.assertTrue(criada.json()["cor"].startswith("#"))
+        vr_id = criada.json()["id"]
+
+        # colisão de slug: outro nome que normaliza pro mesmo token ganha sufixo
+        colisao = c.post(f"/api/variaveis-roteiro/?company={self.company.pk}", {"name": "Idade!"}, format="json")
+        self.assertEqual(colisao.status_code, 201)
+        self.assertEqual(colisao.json()["slug"], "idade_2")
+
+        # marcar o checkbox numa pergunta adicional -> liga a Variável de roteiro
+        extra = c.post(
+            f"/api/questions/?company={self.company.pk}",
+            {"question_id": "idade_pergunta", "text": "Qual sua idade?", "variavel": variavel.pk, "variavel_roteiro": vr_id},
+            format="json",
+        )
+        self.assertEqual(extra.status_code, 201)
+        self.assertEqual(extra.json()["variavel_roteiro"], vr_id)
+
+        # builtin não pode ser excluída; a customizada em uso também não (PROTECT)
+        nome_vr = VariavelRoteiro.objects.create(company=self.company, name="Nome", slug="nome", builtin=True)
+        bloqueada_builtin = c.delete(f"/api/variaveis-roteiro/{nome_vr.pk}/?company={self.company.pk}")
+        self.assertEqual(bloqueada_builtin.status_code, 400)
+        bloqueada_em_uso = c.delete(f"/api/variaveis-roteiro/{vr_id}/?company={self.company.pk}")
+        self.assertEqual(bloqueada_em_uso.status_code, 400)
+
+        # pergunta obrigatória não aceita trocar a variável de roteiro fixa
+        nome_q = Question.objects.get(company=self.company, question_id="nome")
+        tentativa = c.patch(f"/api/questions/{nome_q.pk}/?company={self.company.pk}", {"variavel_roteiro": vr_id}, format="json")
+        self.assertEqual(tentativa.status_code, 400)
+
+        # texto fora do fluxo não aceita variável de roteiro
+        apresentacao = Question.objects.get(company=self.company, question_id="apresentacao")
+        offflow_tentativa = c.patch(f"/api/questions/{apresentacao.pk}/?company={self.company.pk}", {"variavel_roteiro": vr_id}, format="json")
+        self.assertEqual(offflow_tentativa.status_code, 400)
+    def test_render_text_resolves_custom_variavel_roteiro_placeholder(self):
+        from .services import render_text
+        VariavelRoteiro.objects.create(company=self.company, name="Idade", slug="idade", builtin=False)
+        lead = Lead.objects.create(company=self.company, contact="+5585911112222", state="apresentacao")
+        lead.variaveis_roteiro = {"idade": "34 anos"}
+        self.assertEqual(render_text("Você tem {idade}, confirma?", lead, self.company), "Você tem 34 anos, confirma?")
+        # sem valor coletado ainda -- vira string vazia, nunca quebra nem expõe o placeholder
+        lead2 = Lead.objects.create(company=self.company, contact="+5585933334444", state="apresentacao")
+        self.assertEqual(render_text("Idade: {idade}", lead2, self.company), "Idade: ")
+    def test_apply_fields_only_accepts_known_custom_variavel_roteiro_slugs(self):
+        from .services import apply_fields
+        VariavelRoteiro.objects.create(company=self.company, name="Idade", slug="idade", builtin=False)
+        lead = Lead.objects.create(company=self.company, contact="+5585955556666", state="apresentacao")
+        apply_fields(lead, self.company, {"variaveis_roteiro": {"idade": "40 anos", "slug_inexistente": "x", "nome": "tentativa de sobrescrever campo fixo"}})
+        self.assertEqual(lead.variaveis_roteiro, {"idade": "40 anos"})
     def test_companyinfo_create_accepts_blank_content(self):
         # Bug real: "+ Nova entrada" no frontend manda content="" (preenche
         # depois); content não tinha blank=True, então todo POST de uma
@@ -332,6 +391,11 @@ class QualificationTests(TestCase):
         self.assertTrue(Question.objects.filter(company=nova, question_id="nome", obrigatoria=True, variavel__isnull=False).exists())
         self.assertTrue(Question.objects.filter(company=nova, question_id="apresentacao", obrigatoria=True, variavel__isnull=True).exists())
         self.assertEqual(CompanyInfo.objects.filter(company=nova, obrigatorio=True).count(), 3)
+        self.assertEqual(
+            set(VariavelRoteiro.objects.filter(company=nova, builtin=True).values_list("slug", flat=True)),
+            {"nome", "especialidade", "tema"},
+        )
+        self.assertTrue(Question.objects.filter(company=nova, question_id="nome", variavel_roteiro__slug="nome").exists())
     def test_admin_agente_gerar_status_revogar_token(self):
         superuser = get_user_model().objects.create_user(username="super-teste-3", is_staff=True, is_superuser=True)
         c = APIClient()

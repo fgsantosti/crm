@@ -53,6 +53,9 @@ export type Question = {
   variavel: number;
   /** nome/situacao/demanda — fixas em todo roteiro, não podem ser excluídas. */
   obrigatoria: boolean;
+  ordem: number;
+  /** Opcional: guarda a resposta desta pergunta pra reusar como placeholder ({slug}) em outro texto. */
+  variavel_roteiro: number | null;
 };
 
 export type Variavel = {
@@ -60,6 +63,17 @@ export type Variavel = {
   name: string;
   /** 1-10, usado na média ponderada que sugere a urgência (ver services.calcular_urgencia_sugerida). */
   peso: number;
+};
+
+export type VariavelRoteiro = {
+  id: number;
+  name: string;
+  /** Token usado como {slug} no texto; gerado a partir do nome. */
+  slug: string;
+  /** Cor do marcador na tela Roteiro, pra confirmação visual de uso. */
+  cor: string;
+  /** Nome/Área da Lead/Demanda — fixas em toda empresa, não podem ser excluídas. */
+  builtin: boolean;
 };
 
 export type CompanyInfoEntry = {

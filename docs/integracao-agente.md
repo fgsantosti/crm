@@ -143,6 +143,7 @@ Campos aceitos dentro de `fields` (nomes exatamente como o Axioma emite):
 | `temperatura` | Classificação comercial | `Qualificado` \| `Quente` \| `Desconfiado` \| `Remarketing` \| `Desqualificado` |
 | `prioridade` | Prioridade de atendimento | `Alta` \| `Média` \| `Baixa` |
 | `proxima` | **não é campo do lead** — só em `ATUALIZAR`, diz qual é o próximo `question_id` | **desde a tela Roteiro customizável**: qualquer `question_id` cadastrado pela empresa (3 sempre existem: `nome`, `situacao`, `demanda`; o resto é livre). Nunca `validar` nem `encerramento` — reservados. Um `question_id` que a empresa não cadastrou transfere o lead pra atendimento humano em vez de travar. |
+| `variaveis_roteiro` | **opcional**, dict `{"<slug>": "<texto>"}` — não é um campo fixo do lead, grava em `Lead.variaveis_roteiro` | só aceita slugs de Variáveis de roteiro **customizadas** já cadastradas pela empresa (tela Roteiro → aba Variáveis; `GET /api/variaveis-roteiro/?company={id}` lista as válidas, com `builtin=false`). Slug desconhecido, builtin ou valor não-texto é simplesmente ignorado (nunca trava o fluxo). Serve pra responder uma pergunta adicional do roteiro (fora das 3 obrigatórias) e reusar esse texto depois via `{slug}` em outra pergunta. |
 
 ### Placeholders no texto aprovado
 
@@ -153,7 +154,8 @@ substitui antes de devolver `content`. Nunca precisa pedir isso ao Axioma —
 | Placeholder | Resolvido a partir de |
 | --- | --- |
 | `{empresa}` | `Company.name` — sempre o nome real da empresa daquele `question_id`. Use isso em vez de escrever o nome da empresa direto no texto: se a empresa for renomeada, ou se o mesmo texto for reaproveitado como modelo para uma empresa nova, continua certo sem precisar editar nada. |
-| `{nome}`, `{especialidade}`, `{tema}`, `{impacto}`, `{interesse}`, `{temperatura}`, `{prioridade}` | O mesmo campo já coletado do lead (ver tabela acima). Usado sobretudo no texto de `validar`, para mostrar o resumo que o lead confirma. |
+| `{nome}`, `{especialidade}`, `{tema}`, `{impacto}`, `{interesse}`, `{temperatura}`, `{prioridade}` | O mesmo campo já coletado do lead (ver tabela acima). Usado sobretudo no texto de `validar`, para mostrar o resumo que o lead confirma. `{nome}`/`{especialidade}`/`{tema}` são também as 3 Variáveis de roteiro builtin (Nome/Área da Lead/Demanda). |
+| `{<slug>}` de uma Variável de roteiro customizada | `Lead.variaveis_roteiro["<slug>"]` — o que foi gravado via `fields.variaveis_roteiro` numa pergunta anterior (ver tabela acima) | Sem valor coletado ainda, vira string vazia como qualquer outro placeholder. |
 
 Um placeholder sem valor ainda (ex.: `{tema}` antes de o lead informar o tema)
 vira string vazia — nunca aparece `{tema}` literal na mensagem.

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Api } from '../api';
-import type { Area, Company, Question, Paginated, Variavel } from '../types';
+import type { Area, Company, Question, Paginated, Variavel, VariavelRoteiro } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 
 const PLACEHOLDER_LABELS: Record<string, string> = {
@@ -37,7 +37,7 @@ const TOKEN_RE = /(<br\s*\/?>)|(\{[a-zA-Z_]+\})/g;
 // Quem edita o roteiro (na tela ou direto no Django Admin) não precisa saber HTML
 // nem a sintaxe de placeholder de cor: {empresa}/{nome}/etc. e <br> ficam marcados
 // com cor e borda, igual a legenda logo abaixo, pra reconhecer de relance.
-function destacarTexto(text: string): React.ReactNode[] {
+function destacarTexto(text: string, variaveisRoteiro: VariavelRoteiro[] = []): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
   let key = 0;
@@ -54,15 +54,29 @@ function destacarTexto(text: string): React.ReactNode[] {
     } else {
       const name = token.slice(1, -1);
       const isEmpresa = name === 'empresa';
-      parts.push(
-        <span
-          key={key++}
-          className={`token-tag ${isEmpresa ? 'token-tag-empresa' : 'token-tag-dado'}`}
-          title={PLACEHOLDER_LABELS[name] || 'Placeholder preenchido automaticamente'}
-        >
-          {token}
-        </span>,
-      );
+      const custom = variaveisRoteiro.find((v) => v.slug === name && !v.builtin);
+      if (custom) {
+        parts.push(
+          <span
+            key={key++}
+            className="token-tag"
+            style={{ background: `${custom.cor}22`, borderColor: custom.cor, color: custom.cor }}
+            title={`Variável de roteiro: ${custom.name}`}
+          >
+            {token}
+          </span>,
+        );
+      } else {
+        parts.push(
+          <span
+            key={key++}
+            className={`token-tag ${isEmpresa ? 'token-tag-empresa' : 'token-tag-dado'}`}
+            title={PLACEHOLDER_LABELS[name] || 'Placeholder preenchido automaticamente'}
+          >
+            {token}
+          </span>,
+        );
+      }
     }
     lastIndex = index + token.length;
   }
@@ -70,7 +84,7 @@ function destacarTexto(text: string): React.ReactNode[] {
   return parts;
 }
 
-function Legenda({ areas, variaveis }: { areas: Area[]; variaveis: Variavel[] }) {
+function Legenda({ areas, variaveis, variaveisRoteiro }: { areas: Area[]; variaveis: Variavel[]; variaveisRoteiro: VariavelRoteiro[] }) {
   return (
     <section className="panel" style={{ padding: '16px 24px', marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px 28px', alignItems: 'center' }}>
@@ -104,7 +118,45 @@ function Legenda({ areas, variaveis }: { areas: Area[]; variaveis: Variavel[] })
         ))}
         {!variaveis.length && <small style={{ color: 'var(--muted)' }}>Nenhuma variável cadastrada ainda.</small>}
       </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+        <small style={{ fontWeight: 600 }}>Variáveis de roteiro:</small>
+        {variaveisRoteiro.map((v) => (
+          <span key={v.id} className="tag-pill" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span aria-hidden style={{ width: 10, height: 10, borderRadius: '50%', background: v.cor, display: 'inline-block' }} />
+            {'{'}
+            {v.slug}
+            {'}'} · {v.name}
+            {v.builtin && <small style={{ color: 'var(--muted)' }}> (fixa)</small>}
+          </span>
+        ))}
+        {!variaveisRoteiro.length && <small style={{ color: 'var(--muted)' }}>Nenhuma variável de roteiro cadastrada ainda.</small>}
+      </div>
     </section>
+  );
+}
+
+// Textarea com preview colorido ao vivo embaixo -- é aqui que o pedido de "marcador
+// e cor da variável para confirmação visual" se aplica de fato: o admin vê o token
+// {slug} destacado na cor da variável enquanto ainda está digitando, antes de salvar.
+function TextoComPreview({ value, rows, onSave, variaveisRoteiro, disabled }: { value: string; rows: number; onSave: (v: string) => void; variaveisRoteiro: VariavelRoteiro[]; disabled?: boolean }) {
+  const [draft, setDraft] = useState(value);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <textarea
+        value={draft}
+        rows={rows}
+        disabled={disabled}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          if (draft !== value) onSave(draft);
+        }}
+      />
+      {draft && (
+        <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>
+          Pré-visualização: “{destacarTexto(draft, variaveisRoteiro)}”
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -112,14 +164,18 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
   const [tab, setTab] = useState<'perguntas' | 'fora-do-fluxo' | 'variaveis'>('perguntas');
   const [questions, setQuestions] = useState<Question[]>([]);
   const [variaveis, setVariaveis] = useState<Variavel[]>([]);
+  const [variaveisRoteiro, setVariaveisRoteiro] = useState<VariavelRoteiro[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [savingQ, setSavingQ] = useState<number | 'new' | null>(null);
   const [savingV, setSavingV] = useState<number | 'new' | null>(null);
+  const [savingVR, setSavingVR] = useState<number | 'new' | null>(null);
   const [newQ, setNewQ] = useState({ question_id: '', text: '', variavel: '' });
   const [newV, setNewV] = useState({ name: '', peso: '5' });
+  const [newVR, setNewVR] = useState('');
   const [dragId, setDragId] = useState<number | null>(null);
+  const [vrCheckboxOverride, setVrCheckboxOverride] = useState<Record<number, boolean>>({});
 
   const isOffflow = (q: Question) => (OFFFLOW_IDS as readonly string[]).includes(q.question_id);
   const flowQuestions = questions.filter((q) => !isOffflow(q));
@@ -131,13 +187,22 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
     Promise.all([
       api(`/questions/?company=${company.id}`),
       api(`/variaveis/?company=${company.id}`),
+      api(`/variaveis-roteiro/?company=${company.id}`),
       api(`/areas/?company=${company.id}`),
     ])
-      .then(([q, v, a]: [Paginated<Question> | Question[], Paginated<Variavel> | Variavel[], Paginated<Area> | Area[]]) => {
-        setQuestions(Array.isArray(q) ? q : q.results);
-        setVariaveis(Array.isArray(v) ? v : v.results);
-        setAreas(Array.isArray(a) ? a : a.results);
-      })
+      .then(
+        ([q, v, vr, a]: [
+          Paginated<Question> | Question[],
+          Paginated<Variavel> | Variavel[],
+          Paginated<VariavelRoteiro> | VariavelRoteiro[],
+          Paginated<Area> | Area[],
+        ]) => {
+          setQuestions(Array.isArray(q) ? q : q.results);
+          setVariaveis(Array.isArray(v) ? v : v.results);
+          setVariaveisRoteiro(Array.isArray(vr) ? vr : vr.results);
+          setAreas(Array.isArray(a) ? a : a.results);
+        },
+      )
       .catch((e) => setError(e.message))
       .finally(() => setBusy(false));
   }
@@ -147,7 +212,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company.id]);
 
-  async function saveQuestion(q: Question, patch: Partial<Pick<Question, 'text' | 'variavel' | 'question_id'>>) {
+  async function saveQuestion(q: Question, patch: Partial<Pick<Question, 'text' | 'variavel' | 'question_id' | 'ordem' | 'variavel_roteiro'>>) {
     setSavingQ(q.id);
     setError('');
     try {
@@ -260,6 +325,68 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
     }
   }
 
+  async function createVariavelRoteiro(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!newVR.trim()) return;
+    setSavingVR('new');
+    setError('');
+    try {
+      const created = await api(`/variaveis-roteiro/?company=${company.id}`, { method: 'POST', body: JSON.stringify({ name: newVR.trim() }) });
+      setVariaveisRoteiro((v) => [...v, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setNewVR('');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingVR(null);
+    }
+  }
+
+  async function removeVariavelRoteiro(variavel: VariavelRoteiro) {
+    if (!window.confirm(`Remover a variável de roteiro "${variavel.name}"?`)) return;
+    setSavingVR(variavel.id);
+    setError('');
+    try {
+      await api(`/variaveis-roteiro/${variavel.id}/?company=${company.id}`, { method: 'DELETE' });
+      setVariaveisRoteiro((v) => v.filter((x) => x.id !== variavel.id));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingVR(null);
+    }
+  }
+
+  // Checkbox "armazenar resposta numa variável de roteiro" numa pergunta adicional:
+  // acha uma variável de roteiro já existente com esse nome ou cria uma nova, depois
+  // liga/desliga a pergunta a ela (name=null desmarca o checkbox).
+  async function setVariavelRoteiroDaPergunta(q: Question, name: string | null) {
+    setSavingQ(q.id);
+    setError('');
+    try {
+      let variavelRoteiroId: number | null = null;
+      if (name) {
+        const existente = variaveisRoteiro.find((v) => v.name.toLowerCase() === name.toLowerCase());
+        if (existente) {
+          variavelRoteiroId = existente.id;
+        } else {
+          const criada = await api(`/variaveis-roteiro/?company=${company.id}`, { method: 'POST', body: JSON.stringify({ name }) });
+          setVariaveisRoteiro((v) => [...v, criada].sort((a, b) => a.name.localeCompare(b.name)));
+          variavelRoteiroId = criada.id;
+        }
+      }
+      const updated = await api(`/questions/${q.id}/?company=${company.id}`, { method: 'PATCH', body: JSON.stringify({ variavel_roteiro: variavelRoteiroId }) });
+      setQuestions((v) => v.map((x) => (x.id === updated.id ? updated : x)));
+      setVrCheckboxOverride((v) => {
+        const next = { ...v };
+        delete next[q.id];
+        return next;
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingQ(null);
+    }
+  }
+
   return (
     <>
       <header className="page-header">
@@ -267,8 +394,9 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
           <small className="eyebrow">Configuração</small>
           <h1>Roteiro aprovado</h1>
           <p>
-            O agente Axioma decide a próxima pergunta e a classificação sozinho; aqui você define o texto de cada pergunta
-            e a variável (com peso) que ela alimenta na classificação de urgência. {canEdit ? 'Você edita este conteúdo.' : 'Somente a empresa edita.'}
+            O agente Axioma decide a próxima pergunta e a classificação sozinho; aqui você define o texto de cada pergunta,
+            a variável do agente (com peso) que ela alimenta na classificação de urgência e, opcionalmente, uma variável de
+            roteiro pra reusar a resposta em outro texto. {canEdit ? 'Você edita este conteúdo.' : 'Somente a empresa edita.'}
           </p>
         </div>
       </header>
@@ -279,7 +407,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
         </p>
       )}
 
-      <Legenda areas={areas} variaveis={variaveis} />
+      <Legenda areas={areas} variaveis={variaveis} variaveisRoteiro={variaveisRoteiro} />
 
       <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
         <button type="button" className={tab === 'perguntas' ? '' : 'secondary'} onClick={() => setTab('perguntas')}>
@@ -289,7 +417,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
           Textos fora do fluxo
         </button>
         <button type="button" className={tab === 'variaveis' ? '' : 'secondary'} onClick={() => setTab('variaveis')}>
-          Variáveis do agente
+          Variáveis
         </button>
       </div>
 
@@ -324,12 +452,12 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <label style={{ margin: 0 }}>
                     Texto
-                    <textarea
-                      defaultValue={q.text}
+                    <TextoComPreview
+                      value={q.text}
                       rows={2}
-                      onBlur={(e) => {
-                        if (e.target.value !== q.text) saveQuestion(q, { text: e.target.value });
-                      }}
+                      disabled={savingQ === q.id}
+                      variaveisRoteiro={variaveisRoteiro}
+                      onSave={(text) => saveQuestion(q, { text })}
                     />
                   </label>
                   <label style={{ margin: 0 }}>
@@ -346,6 +474,43 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                       ))}
                     </select>
                   </label>
+                  {q.obrigatoria ? (
+                    <small style={{ color: 'var(--muted)' }}>
+                      Variável de roteiro fixa: <strong>{variaveisRoteiro.find((v) => v.id === q.variavel_roteiro)?.name || '—'}</strong>
+                    </small>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400 }}>
+                        <input
+                          type="checkbox"
+                          style={{ width: 'auto' }}
+                          checked={vrCheckboxOverride[q.id] ?? !!q.variavel_roteiro}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setVrCheckboxOverride((v) => ({ ...v, [q.id]: true }));
+                            } else {
+                              setVrCheckboxOverride((v) => ({ ...v, [q.id]: false }));
+                              setVariavelRoteiroDaPergunta(q, null);
+                            }
+                          }}
+                          disabled={savingQ === q.id}
+                        />
+                        Armazenar resposta em uma variável de roteiro
+                      </label>
+                      {(vrCheckboxOverride[q.id] ?? !!q.variavel_roteiro) && (
+                        <input
+                          placeholder="Nome da variável (ex.: Idade)"
+                          defaultValue={variaveisRoteiro.find((v) => v.id === q.variavel_roteiro)?.name || ''}
+                          disabled={savingQ === q.id}
+                          onBlur={(e) => {
+                            const name = e.target.value.trim();
+                            if (name) setVariavelRoteiroDaPergunta(q, name);
+                            else setVrCheckboxOverride((v) => ({ ...v, [q.id]: false }));
+                          }}
+                        />
+                      )}
+                    </div>
+                  )}
                   {!q.obrigatoria && (
                     <button type="button" className="danger-outline" onClick={() => removeQuestion(q)} disabled={savingQ === q.id} style={{ alignSelf: 'flex-start' }}>
                       {savingQ === q.id && <Spinner />}
@@ -354,7 +519,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                   )}
                 </div>
               ) : (
-                <p style={{ color: 'var(--ink)', fontSize: 15 }}>“{q.text ? destacarTexto(q.text) : 'Sem texto cadastrado'}”</p>
+                <p style={{ color: 'var(--ink)', fontSize: 15 }}>“{q.text ? destacarTexto(q.text, variaveisRoteiro) : 'Sem texto cadastrado'}”</p>
               )}
             </article>
           ))}
@@ -422,15 +587,9 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                 {!q ? (
                   <p style={{ fontSize: 13, color: 'var(--warn)' }}>Carregando…</p>
                 ) : canEdit ? (
-                  <textarea
-                    defaultValue={q.text}
-                    rows={2}
-                    onBlur={(e) => {
-                      if (e.target.value !== q.text) saveQuestion(q, { text: e.target.value });
-                    }}
-                  />
+                  <TextoComPreview value={q.text} rows={2} disabled={savingQ === q.id} variaveisRoteiro={variaveisRoteiro} onSave={(text) => saveQuestion(q, { text })} />
                 ) : (
-                  <p style={{ color: 'var(--ink)', fontSize: 15 }}>“{q.text ? destacarTexto(q.text) : 'Sem texto cadastrado'}”</p>
+                  <p style={{ color: 'var(--ink)', fontSize: 15 }}>“{q.text ? destacarTexto(q.text, variaveisRoteiro) : 'Sem texto cadastrado'}”</p>
                 )}
               </article>
             );
@@ -439,71 +598,114 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
       )}
 
       {tab === 'variaveis' && (
-        <section className="section">
-          <p style={{ marginBottom: 16 }}>
-            Cada pergunta do roteiro fica atrelada a uma destas variáveis, com peso de 1 a 10. O agente calcula a média
-            ponderada dos pesos respondidos e sugere a urgência do lead a partir dela.
-          </p>
-          {variaveis.map((v) => (
-            <article key={v.id} className="step-card" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              {canEdit ? (
-                <>
-                  <input
-                    defaultValue={v.name}
-                    style={{ flex: 1 }}
-                    onBlur={(e) => {
-                      if (e.target.value.trim() && e.target.value !== v.name) saveVariavel(v, { name: e.target.value.trim() });
-                    }}
-                  />
-                  <select
-                    defaultValue={v.peso}
-                    onChange={(e) => saveVariavel(v, { peso: Number(e.target.value) })}
-                    disabled={savingV === v.id}
-                    style={{ width: 160 }}
-                  >
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 20 }}>
+          <section className="section">
+            <h3 style={{ marginTop: 0 }}>Variáveis do agente</h3>
+            <p style={{ marginBottom: 16, fontSize: 13.5 }}>
+              Cada pergunta do roteiro fica atrelada a uma destas, com peso de 1 a 10. O agente calcula a média ponderada
+              dos pesos respondidos e sugere a urgência do lead a partir dela.
+            </p>
+            {variaveis.map((v) => (
+              <article key={v.id} className="step-card" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                {canEdit ? (
+                  <>
+                    <input
+                      defaultValue={v.name}
+                      style={{ flex: 1 }}
+                      onBlur={(e) => {
+                        if (e.target.value.trim() && e.target.value !== v.name) saveVariavel(v, { name: e.target.value.trim() });
+                      }}
+                    />
+                    <select
+                      defaultValue={v.peso}
+                      onChange={(e) => saveVariavel(v, { peso: Number(e.target.value) })}
+                      disabled={savingV === v.id}
+                      style={{ width: 140 }}
+                    >
+                      {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                        <option key={n} value={n}>
+                          Peso {n}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="button" className="danger-outline" onClick={() => removeVariavel(v)} disabled={savingV === v.id}>
+                      {savingV === v.id && <Spinner />}
+                      Remover
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <strong style={{ flex: 1 }}>{v.name}</strong>
+                    <span>peso {v.peso}</span>
+                  </>
+                )}
+              </article>
+            ))}
+            {!busy && !variaveis.length && <div className="empty">Nenhuma variável cadastrada ainda.</div>}
+
+            {canEdit && (
+              <form onSubmit={createVariavel} style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <label style={{ margin: 0, flex: '1 1 160px' }}>
+                  Nova variável
+                  <input placeholder="ex.: Urgência relatada" value={newV.name} onChange={(e) => setNewV((v) => ({ ...v, name: e.target.value }))} required />
+                </label>
+                <label style={{ margin: 0, width: 120 }}>
+                  Peso
+                  <select value={newV.peso} onChange={(e) => setNewV((v) => ({ ...v, peso: e.target.value }))}>
                     {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
                       <option key={n} value={n}>
-                        Peso {n}
+                        {n}
                       </option>
                     ))}
                   </select>
-                  <button type="button" className="danger-outline" onClick={() => removeVariavel(v)} disabled={savingV === v.id}>
-                    {savingV === v.id && <Spinner />}
-                    Remover
-                  </button>
-                </>
-              ) : (
-                <>
-                  <strong style={{ flex: 1 }}>{v.name}</strong>
-                  <span>peso {v.peso}</span>
-                </>
-              )}
-            </article>
-          ))}
-          {!busy && !variaveis.length && <div className="empty">Nenhuma variável cadastrada ainda.</div>}
+                </label>
+                <button disabled={savingV === 'new'}>
+                  {savingV === 'new' && <Spinner />}+ Adicionar
+                </button>
+              </form>
+            )}
+          </section>
 
-          {canEdit && (
-            <form onSubmit={createVariavel} style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'flex-end' }}>
-              <label style={{ margin: 0, flex: 1 }}>
-                Nova variável
-                <input placeholder="ex.: Urgência relatada" value={newV.name} onChange={(e) => setNewV((v) => ({ ...v, name: e.target.value }))} required />
-              </label>
-              <label style={{ margin: 0, width: 140 }}>
-                Peso
-                <select value={newV.peso} onChange={(e) => setNewV((v) => ({ ...v, peso: e.target.value }))}>
-                  {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button disabled={savingV === 'new'}>
-                {savingV === 'new' && <Spinner />}+ Adicionar
-              </button>
-            </form>
-          )}
-        </section>
+          <section className="section">
+            <h3 style={{ marginTop: 0 }}>Variáveis de roteiro</h3>
+            <p style={{ marginBottom: 16, fontSize: 13.5 }}>
+              Sem peso — só guardam o texto coletado numa pergunta pra reusar como placeholder ({'{slug}'}) em outro texto
+              do roteiro, se quem escreve o fluxo quiser. Nome/Área da Lead/Demanda são fixas em toda empresa.
+            </p>
+            {variaveisRoteiro.map((v) => (
+              <article key={v.id} className="step-card" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <span aria-hidden style={{ width: 14, height: 14, borderRadius: '50%', background: v.cor, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <strong>{v.name}</strong>
+                  <small style={{ display: 'block', color: 'var(--muted)', fontFamily: "'DM Mono',monospace" }}>{'{' + v.slug + '}'}</small>
+                </div>
+                {v.builtin ? (
+                  <span className="chip chip-neutral">fixa</span>
+                ) : (
+                  canEdit && (
+                    <button type="button" className="danger-outline" onClick={() => removeVariavelRoteiro(v)} disabled={savingVR === v.id}>
+                      {savingVR === v.id && <Spinner />}
+                      Remover
+                    </button>
+                  )
+                )}
+              </article>
+            ))}
+            {!busy && !variaveisRoteiro.length && <div className="empty">Nenhuma variável de roteiro cadastrada ainda.</div>}
+
+            {canEdit && (
+              <form onSubmit={createVariavelRoteiro} style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'flex-end' }}>
+                <label style={{ margin: 0, flex: 1 }}>
+                  Nova variável de roteiro
+                  <input placeholder="ex.: Idade" value={newVR} onChange={(e) => setNewVR(e.target.value)} required />
+                </label>
+                <button disabled={savingVR === 'new'}>
+                  {savingVR === 'new' && <Spinner />}+ Adicionar
+                </button>
+              </form>
+            )}
+          </section>
+        </div>
       )}
     </>
   );

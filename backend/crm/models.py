@@ -35,6 +35,28 @@ class Variavel(models.Model):
         ordering = ["name"]
     def __str__(self): return self.name
 
+class VariavelRoteiro(models.Model):
+    """Variável de ROTEIRO: nome que a empresa dá pra guardar o texto coletado numa
+    pergunta e reusar como placeholder ({slug}) no texto de outras perguntas -- sem
+    peso, não entra na classificação de urgência (isso é papel de Variavel, a
+    "Variável do agente"). As 3 builtin (Nome/Área da Lead/Demanda) existem em toda
+    empresa e reaproveitam os placeholders fixos já existentes (nome/especialidade/
+    tema), sem precisar de armazenamento extra; variáveis de perguntas adicionais
+    gravam em Lead.variaveis_roteiro (ver services.apply_fields/render_text)."""
+    PALETA_CORES = ["#D97757", "#5B8DEF", "#3FA66C", "#B8609B", "#D4A72C", "#6366F1", "#E2574C", "#14919B"]
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="variaveis_roteiro")
+    name = models.CharField(max_length=120)
+    slug = models.CharField(max_length=80, help_text="Token usado como {slug} no texto; gerado a partir do nome, só letras minúsculas e _.")
+    cor = models.CharField(max_length=7, default="#D97757", help_text="Cor do marcador na tela Roteiro, pra confirmação visual.")
+    builtin = models.BooleanField(default=False)
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["company", "name"], name="unique_company_variavelroteiro_name"),
+            models.UniqueConstraint(fields=["company", "slug"], name="unique_company_variavelroteiro_slug"),
+        ]
+        ordering = ["name"]
+    def __str__(self): return self.name
+
 class Question(models.Model):
     """Conteúdo fixo aprovado para um question_id do agente Axioma.
 
@@ -57,6 +79,10 @@ class Question(models.Model):
     variavel = models.ForeignKey(Variavel, on_delete=models.PROTECT, related_name="perguntas", null=True, blank=True)
     obrigatoria = models.BooleanField(default=False)
     ordem = models.PositiveIntegerField(default=0, help_text="Posição no fluxo de perguntas, definida por arrastar-e-soltar na tela Roteiro; sem efeito nos textos fora do fluxo.")
+    variavel_roteiro = models.ForeignKey(
+        VariavelRoteiro, on_delete=models.PROTECT, related_name="perguntas", null=True, blank=True,
+        help_text="Opcional: guarda a resposta desta pergunta pra reusar como placeholder em outro texto do roteiro. Fixo nas 3 obrigatórias, opcional (via checkbox) nas demais.",
+    )
     class Meta:
         constraints = [models.UniqueConstraint(fields=["company", "question_id"], name="unique_company_question")]
         ordering = ["ordem", "id"]
@@ -183,6 +209,7 @@ class Lead(models.Model):
     last_audio_id = models.CharField(max_length=250, blank=True)
     bot_closed = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
+    variaveis_roteiro = models.JSONField(default=dict, blank=True, help_text="slug->texto coletado nas perguntas com Variável de roteiro customizada (ver services.apply_fields/render_text). Os 3 builtin (nome/especialidade/tema) não usam isto -- já são campos próprios do Lead.")
     desfecho = models.CharField(max_length=20, choices=DESFECHO_CHOICES, blank=True, help_text="Só setado ao despachar um atendimento humano (ver services.despachar_lead).")
     class Meta:
         constraints = [models.UniqueConstraint(fields=["company", "contact"], name="unique_company_contact")]
