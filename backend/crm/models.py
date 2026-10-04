@@ -15,6 +15,17 @@ class Company(models.Model):
         help_text="Número de WhatsApp (E.164) conectado ao agente. Normalmente é o mesmo número em que a equipe "
         "faz os atendimentos; mensagens vindas dele mesmo nunca abrem lead.",
     )
+    VOZES_TTS = [
+        ("pt-BR-FranciscaNeural", "Francisca (feminina)"),
+        ("pt-BR-AntonioNeural", "Antonio (masculina)"),
+        ("pt-BR-ThalitaMultilingualNeural", "Thalita (feminina, multilíngue)"),
+    ]
+    mensagens_audio = models.BooleanField(
+        default=False,
+        help_text="O agente envia todas as mensagens como áudio (TTS automático; perguntas com gravação própria "
+        "usam a gravação). Só vale com allow_transcription ligado pelo Admin -- ver Company.audio_ativo.",
+    )
+    voz_tts = models.CharField(max_length=60, choices=VOZES_TTS, default="pt-BR-FranciscaNeural")
     agente_conversacional = models.BooleanField(
         default=True,
         help_text="Marcado: o agente envia o texto de apresentação e pode conversar livremente sobre a empresa "
@@ -23,6 +34,10 @@ class Company(models.Model):
         "livre sobre a empresa nesse meio-tempo. Configurado na tela Roteiro, aba 'Opções do Agente'.",
     )
     def __str__(self): return self.name
+    @property
+    def audio_ativo(self):
+        # O portão é do Admin: se ele desligar depois, a opção da empresa deixa de valer.
+        return self.allow_transcription and self.mensagens_audio
 
 MANDATORY_QUESTION_IDS = ["nome", "situacao", "demanda"]
 
@@ -86,7 +101,12 @@ class Question(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     question_id = models.CharField(max_length=80, help_text="Ex.: apresentacao, empresa, nome, situacao, ainda_na_empresa, tipo_de_situacao, afetou_renda, equipe_avaliar_situacao, demanda, validar, encerramento, repetir.")
     text = models.TextField(blank=True)
-    audio_asset = models.CharField(max_length=250, blank=True, help_text="Identificador do OGG/Opus pré-gravado, usado quando a entrada do contato for áudio.")
+    audio_asset = models.CharField(max_length=250, blank=True, help_text="Obsoleto (não usado): substituído por audio_gravado.")
+    audio_gravado = models.FileField(
+        upload_to="roteiro_audio/", blank=True,
+        help_text="Gravação própria desta pergunta (OGG/Opus mono 48k, convertida no upload). Com 'Mensagens via áudio' "
+        "ligado, substitui o TTS automático.",
+    )
     variavel = models.ForeignKey(Variavel, on_delete=models.PROTECT, related_name="perguntas", null=True, blank=True)
     obrigatoria = models.BooleanField(default=False)
     ordem = models.PositiveIntegerField(default=0, help_text="Posição no fluxo de perguntas, definida por arrastar-e-soltar na tela Roteiro; sem efeito nos textos fora do fluxo.")

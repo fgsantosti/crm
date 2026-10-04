@@ -2,7 +2,16 @@ from .health import ready
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
+from django.views.static import serve
+
+
+import mimetypes
+mimetypes.add_type("audio/ogg", ".ogg")  # a imagem slim não traz o mapeamento; a ponte precisa do MIME certo
+
+
+def servir_media(request, path):
+    return serve(request, path, document_root=settings.MEDIA_ROOT)
 from rest_framework.routers import DefaultRouter
 from crm.views import (
     CompanyViewSet, LeadViewSet, QuestionViewSet, CompanyInfoViewSet, AreaViewSet, AtendenteInviteViewSet, AdminCompanyViewSet, VariavelViewSet, VariavelRoteiroViewSet,
@@ -39,6 +48,11 @@ urlpatterns = [
     path("api/companies/<int:company_id>/equipe/<int:user_id>/redefinir-senha/", redefinir_senha_atendente_view),
     path("api/companies/<int:company_id>/equipe/<int:user_id>/", desligar_atendente),
     path("api/", include(router.urls)),
+]
+# Áudios do roteiro/TTS também servidos pelo Django: o agente os baixa pela rede interna
+# (http://web:8000/media/...), que não passa pelo Caddy. Pelo domínio público o Caddy serve o mesmo volume.
+urlpatterns += [
+    re_path(r"^media/(?P<path>(?:tts|roteiro_audio)/[\w.-]+\.ogg)$", servir_media),
 ]
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

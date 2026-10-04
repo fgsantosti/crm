@@ -1,6 +1,8 @@
+import logging
 import re
 import secrets
 from datetime import timedelta
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password, check_password
 from django.contrib.auth.models import Group
@@ -11,6 +13,8 @@ from django.utils.text import slugify
 from rest_framework.authtoken.models import Token
 from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
 from .models import Lead, Question, Event, Company, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
+
+logger = logging.getLogger(__name__)
 
 NO_REPLY = {"action": "NO_REPLY"}
 RESERVED_QUESTION_IDS = {"validar", "encerramento"}
@@ -195,7 +199,7 @@ def ultima_pergunta(lead):
     if lead.state and Question.objects.filter(company_id=lead.company_id, question_id=lead.state).exists():
         return lead.state
     for result in Event.objects.filter(lead=lead).order_by("-created_at", "-pk").values_list("result", flat=True):
-        if isinstance(result, dict) and result.get("action") in ("TEXTO", "AUDIO_GRAVADO") and result.get("question_id"):
+        if isinstance(result, dict) and result.get("action") in ("TEXTO", "AUDIO") and result.get("question_id"):
             return result["question_id"]
     return None
 
@@ -338,14 +342,12 @@ def receive(company, data):
             if not question:
                 escalate(lead, f"Configurar roteiro aprovado para question_id={question_id}")
             else:
-                use_audio = data["kind"] == "audio" and question.audio_asset
-                asset = question.audio_asset if use_audio else render_text(question.text, lead, company)
+                # Áudio (gravação/TTS) é aplicado depois, fora da transação: ver aplicar_audio().
+                asset = render_text(question.text, lead, company)
                 if not asset:
                     escalate(lead, "Ativo aprovado ausente")
                 else:
-                    if use_audio:
-                        lead.last_audio_id = question.audio_asset
-                    result = {"action": "AUDIO_GRAVADO" if use_audio else "TEXTO", "content": asset, "question_id": question_id}
+                    result = {"action": "TEXTO", "content": asset, "question_id": question_id}
                     event.delivery = "PENDING"
         lead.save()
 
@@ -353,6 +355,32 @@ def receive(company, data):
     event.result = result
     event.save()
     return result
+
+def aplicar_audio(company, result, url_absoluta):
+    """'Mensagens via áudio': troca uma resposta TEXTO por AUDIO (gravação da pergunta ou TTS).
+
+    Roda depois do receive(), fora da transação (o TTS pode levar segundos e não deve segurar
+    o lock da empresa). Qualquer falha mantém o TEXTO -- nunca vira NO_REPLY por causa do
+    áudio. url_absoluta(caminho_media) monta a URL na mesma origem da requisição.
+    """
+    from . import audio
+    company.refresh_from_db(fields=["allow_transcription", "mensagens_audio", "voz_tts"])
+    if result.get("action") != "TEXTO" or not company.audio_ativo:
+        return result
+    question = Question.objects.filter(company=company, question_id=result.get("question_id")).first()
+    try:
+        if question and question.audio_gravado:
+            caminho, origem = question.audio_gravado.name, "gravado"
+        else:
+            caminho, origem = audio.gerar_tts(result["content"], company.voz_tts), "tts"
+    except Exception as exc:  # TTS/ffmpeg/rede: segue em texto
+        logger.warning("audio: falha ao gerar áudio (event_id=%s): %s", result.get("event_id"), exc)
+        novo = {**result, "audio_erro": str(exc)[:200] or exc.__class__.__name__}
+    else:
+        novo = {**result, "action": "AUDIO", "audio_url": url_absoluta(settings.MEDIA_URL + caminho), "audio_origem": origem}
+    if result.get("event_id"):
+        Event.objects.filter(pk=result["event_id"]).update(result=novo)
+    return novo
 
 INVITE_TTL = timedelta(minutes=15)
 MAX_INVITE_ATTEMPTS = 5
@@ -851,6 +879,7 @@ def contexto_agente(company):
     return {
         "empresa": company.name,
         "agente_conversacional": company.agente_conversacional,
+        "mensagens_audio": company.audio_ativo,
         "numero_agente": company.numero_agente,
         "areas": list(company.areas.order_by("name").values_list("name", flat=True)),
         "perguntas": perguntas,

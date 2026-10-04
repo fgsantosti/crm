@@ -196,7 +196,7 @@ export function Admin({ api }: { api: Api }) {
                 <small style={{ display: 'block', fontWeight: 400, color: 'var(--muted)', marginTop: 4 }}>Número conectado ao agente. Normalmente é o mesmo número em que a equipe faz os atendimentos.</small>
               </label>
               <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
-                <input type="checkbox" name="allow_transcription" style={{ width: 'auto' }} /> Permite transcrição de áudio
+                <input type="checkbox" name="allow_transcription" style={{ width: 'auto' }} /> Habilitar áudio (transcrição/voz)
               </label>
               <button disabled={savingCompany}>
                 {savingCompany && <Spinner />}
@@ -275,7 +275,7 @@ export function Admin({ api }: { api: Api }) {
                   <small style={{ display: 'block', fontWeight: 400, color: 'var(--muted)', marginTop: 4 }}>Número conectado ao agente. Normalmente é o mesmo número em que a equipe faz os atendimentos.</small>
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 20 }}>
-                  <input type="checkbox" name="allow_transcription" defaultChecked={selected.allow_transcription} style={{ width: 'auto' }} /> Permite transcrição
+                  <input type="checkbox" name="allow_transcription" defaultChecked={selected.allow_transcription} style={{ width: 'auto' }} /> Habilitar áudio (transcrição/voz)
                 </label>
               </div>
               <button disabled={savingCompany} style={{ marginTop: 12 }}>

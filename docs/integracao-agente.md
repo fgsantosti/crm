@@ -129,8 +129,8 @@ Resposta (sempre 200, mesmo em `NO_REPLY`):
 
 ```jsonc
 {
-  "action": "TEXTO",            // "NO_REPLY" | "TEXTO" | "AUDIO_GRAVADO"
-  "content": "texto ou id do áudio aprovado",  // ausente quando action="NO_REPLY"
+  "action": "TEXTO",            // "NO_REPLY" | "TEXTO" | "AUDIO" (ver seção 5)
+  "content": "texto aprovado já renderizado",  // ausente quando action="NO_REPLY"
   "question_id": "apresentacao",               // ausente quando action="NO_REPLY"
   "lead_id": "uuid-do-lead",
   "event_id": 123,                              // use este id para confirmar a entrega
@@ -152,14 +152,14 @@ roteiro. `human_required: true` continua valendo (transfere para humano).
   atendimento humano sozinho).
 - `action="TEXTO"` → envie `content` literalmente (texto já com os
   placeholders resolvidos — ver seção de placeholders abaixo).
-- `action="AUDIO_GRAVADO"` → `content` é um **identificador opaco de texto
-  livre** (`Question.audio_asset`, cadastrado pela própria empresa na tela
-  Roteiro — não é uma URL nem um asset gerenciado pelo CRM). **O catálogo
-  de verdade (identificador → arquivo/URL/MIME real) é responsabilidade do
-  Gateway**, combinado com a empresa na implantação — o CRM só guarda a
-  string que a empresa decidiu usar como referência. Se o Gateway receber
-  um identificador que não existe no seu catálogo, trate como erro
-  (fail-closed — ver `BUILD_PROMPT.md`), nunca envie algo sem ter certeza.
+- `action="AUDIO"` → só com **Mensagens via áudio** ligado (ver seção 5).
+  Envie o arquivo de `audio_url` como **nota de voz** (OGG/Opus), sem legenda.
+  `content` traz o mesmo texto que iria no `TEXTO` (para log/transcrição),
+  nunca para enviar junto. Confirme a entrega em `/delivery/` igual ao TEXTO.
+- O antigo `action="AUDIO_GRAVADO"` (identificador opaco em
+  `Question.audio_asset`, só com `kind="audio"`) **foi removido**: não era usado
+  por nenhuma empresa nem pela ponte. O campo `audio_asset` ficou no banco só
+  por compatibilidade e não tem mais efeito.
 
 ### Idempotência e retentativas
 
@@ -277,6 +277,7 @@ Use para conduzir o roteiro **na ordem configurada pela empresa** na tela
 {
   "empresa": "Rufus Advocacia",
   "agente_conversacional": false,
+  "mensagens_audio": false,                   // true: as respostas podem vir como action="AUDIO" (seção 5)
   "numero_agente": "+558694238125",          // mensagens vindas dele mesmo nunca abrem lead
   "areas": ["Consumidor", "Previdenciário", "Trabalhista"],
   "perguntas": [                              // só o fluxo, por ordem; sem textos vazios
@@ -400,16 +401,55 @@ curl -s -X POST -H "Authorization: Token $TOKEN" -H "Content-Type: application/j
   $BASE/incoming/
 ```
 
-## 5. Futuro: envio de áudio por TTS (ainda não implementado)
+## 5. Mensagens via áudio (TTS e gravações)
 
-Vai existir uma opção futura na tela Roteiro → "Opções do Agente" (mesmo
-lugar de `Agente conversacional`), algo como **"Agente envia áudio"**, que
-quando marcada faria o plugin enviar a resposta como áudio sintetizado (TTS)
-ao WhatsApp mesmo em `action="TEXTO"`. Isso ainda **não existe** — nem o
-campo em `Company`, nem um novo valor de `action`, nem a lógica de síntese.
-Citado aqui só como aviso: quem for integrar agora não deve supor que
-`action="TEXTO"` sempre significa "manda texto puro" de um jeito difícil de
-estender depois. Trabalho futuro, fora do escopo deste contrato por ora.
+**Habilitação em 2 níveis:**
+
+1. **Admin** (superuser) → empresa → "Habilitar áudio (transcrição/voz)"
+   (`Company.allow_transcription`). É o portão da feature.
+2. **Empresa** → Roteiro → "Opções do Agente" → "Mensagens via áudio"
+   (`Company.mensagens_audio`) e "Voz" (`Company.voz_tts`:
+   `pt-BR-FranciscaNeural` (padrão), `pt-BR-AntonioNeural`,
+   `pt-BR-ThalitaMultilingualNeural`). O CRM recusa ligar sem o portão
+   (`400 "Habilite o áudio no painel Admin."`) e, se o Admin desligar depois, a
+   opção da empresa deixa de valer sozinha.
+
+**Resposta de `/incoming/` com a feature ligada** (no lugar de um `TEXTO`):
+
+```jsonc
+{
+  "action": "AUDIO",
+  "content": "Olá! Você está falando com a Rufus Advocacia...",  // mesmo texto do TEXTO
+  "audio_url": "http://web:8000/media/tts/<sha256>.ogg",           // mesma origem da requisição
+  "audio_origem": "tts",                                           // ou "gravado"
+  "question_id": "apresentacao", "lead_id": "...", "event_id": 123, "lead_novo": true
+}
+```
+
+- **Gravação própria** da pergunta (tela Roteiro → "Gravar" ou "Enviar arquivo")
+  → `audio_origem: "gravado"`. Sempre OGG/Opus mono 48 kHz (convertida no
+  upload; máx. 2 min / 5 MB). A gravação é fixa: não inclui dados variáveis
+  como `{nome}`.
+- **Sem gravação** → TTS automático (Microsoft Edge neural, via `edge-tts`) do
+  texto já renderizado, na voz da empresa, convertido para OGG/Opus. Fica em
+  cache por voz + texto (`media/tts/<sha256>.ogg`), então perguntas sem
+  placeholder só são sintetizadas uma vez. Limite de 12 s.
+- **Falha de áudio** (TTS fora do ar, timeout, ffmpeg) → o CRM devolve o
+  `TEXTO` normal (com `audio_erro` informativo) — nunca `NO_REPLY` por causa do
+  áudio. A entrega pendente funciona igual nos dois casos.
+- `audio_url` usa o host da própria requisição. Pela rede interna
+  (`http://web:8000`) o Django serve `/media/tts/` e `/media/roteiro_audio/`;
+  pelo domínio público o Caddy serve o mesmo volume.
+- `GET /agente/contexto/` inclui `"mensagens_audio": true|false` (já
+  considerando o portão do Admin).
+
+Gravar/remover a gravação de uma pergunta (Empresa/admin da empresa; atendente
+e conta do agente recebem `403`):
+
+```
+POST   /api/questions/{id}/audio/?company={company_id}   (multipart, campo "arquivo")
+DELETE /api/questions/{id}/audio/?company={company_id}
+```
 
 ## 6. O que falta cadastrar antes de ligar ao agente real
 

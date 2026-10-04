@@ -9,3 +9,4 @@ django-celery-beat>=2.8,<3
 channels>=4.3,<5
 channels-redis>=4.2,<5
 uvicorn[standard]>=0.34,<1
+edge-tts>=7,<8

@@ -7,6 +7,10 @@ export type Company = {
   numero_agente: string;
   /** Marcado: agente conversa livremente sobre a empresa antes do funil. Desmarcado: vai direto pro funil com texto próprio. */
   agente_conversacional: boolean;
+  /** Agente envia as mensagens como áudio (só vale com allow_transcription ligado pelo Admin). */
+  mensagens_audio: boolean;
+  /** Voz do TTS automático (Edge, pt-BR). */
+  voz_tts: string;
 };
 
 export type Lead = {
@@ -64,7 +68,8 @@ export type Question = {
   company: number;
   question_id: string;
   text: string;
-  audio_asset: string;
+  /** URL da gravação própria (OGG), que substitui o TTS; null sem gravação. */
+  audio_gravado: string | null;
   /** Variável (peso 1-10) que esta pergunta alimenta na classificação de urgência. */
   variavel: number;
   /** nome/situacao/demanda — fixas em todo roteiro, não podem ser excluídas. */

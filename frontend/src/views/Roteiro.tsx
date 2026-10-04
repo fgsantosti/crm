@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Api } from '../api';
 import type { Area, Company, Question, Paginated, Variavel, VariavelRoteiro } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
+import { AudioDaPergunta } from '../components/AudioDaPergunta';
 
 const PLACEHOLDER_LABELS: Record<string, string> = {
   empresa: 'Nome da empresa',
@@ -160,9 +161,18 @@ function TextoComPreview({ value, rows, onSave, variaveisRoteiro, disabled }: { 
   );
 }
 
+const VOZES_TTS = [
+  { id: 'pt-BR-FranciscaNeural', label: 'Francisca (feminina)' },
+  { id: 'pt-BR-AntonioNeural', label: 'Antonio (masculina)' },
+  { id: 'pt-BR-ThalitaMultilingualNeural', label: 'Thalita (feminina, multilíngue)' },
+];
+
 export function Roteiro({ api, company, canEdit }: { api: Api; company: Company; canEdit: boolean }) {
   const [tab, setTab] = useState<'perguntas' | 'fora-do-fluxo' | 'variaveis' | 'opcoes-agente'>('perguntas');
   const [conversacional, setConversacional] = useState(company.agente_conversacional);
+  const [mensagensAudio, setMensagensAudio] = useState(company.mensagens_audio);
+  const [voz, setVoz] = useState(company.voz_tts);
+  const [erroOpcoes, setErroOpcoes] = useState('');
   const [savingOpcoes, setSavingOpcoes] = useState(false);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [variaveis, setVariaveis] = useState<Variavel[]>([]);
@@ -214,8 +224,28 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
   useEffect(() => {
     load();
     setConversacional(company.agente_conversacional);
+    setMensagensAudio(company.mensagens_audio);
+    setVoz(company.voz_tts);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company.id]);
+
+  function atualizarPergunta(nq: Question) {
+    setQuestions((v) => v.map((x) => (x.id === nq.id ? nq : x)));
+  }
+
+  async function salvarOpcaoAudio(patch: { mensagens_audio?: boolean; voz_tts?: string }) {
+    setSavingOpcoes(true);
+    setErroOpcoes('');
+    try {
+      const c = await api(`/companies/${company.id}/`, { method: 'PATCH', body: JSON.stringify(patch) });
+      setMensagensAudio(c.mensagens_audio);
+      setVoz(c.voz_tts);
+    } catch (err) {
+      setErroOpcoes((err as Error).message);
+    } finally {
+      setSavingOpcoes(false);
+    }
+  }
 
   async function salvarConversacional(valor: boolean) {
     setSavingOpcoes(true);
@@ -493,7 +523,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                 )}
                 <span className="step-tag">{MANDATORY_LABELS[q.question_id] || q.question_id}</span>
                 {q.obrigatoria && <span className="chip chip-neutral">obrigatória</span>}
-                {q.audio_asset && <span className="chip chip-neutral">áudio: {q.audio_asset}</span>}
+                {q.audio_gravado && <span className="chip chip-neutral">áudio gravado</span>}
               </div>
               {canEdit ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -568,6 +598,9 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
               ) : (
                 <p style={{ color: 'var(--ink)', fontSize: 15 }}>“{q.text ? destacarTexto(q.text, variaveisRoteiro) : 'Sem texto cadastrado'}”</p>
               )}
+              {company.allow_transcription && (
+                <AudioDaPergunta api={api} companyId={company.id} question={q} canEdit={canEdit} onChange={atualizarPergunta} />
+              )}
             </article>
           ))}
           </div>
@@ -638,6 +671,9 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                   <TextoComPreview value={q.text} rows={2} disabled={savingQ === q.id} variaveisRoteiro={variaveisRoteiro} onSave={(text) => saveQuestion(q, { text })} />
                 ) : (
                   <p style={{ color: 'var(--ink)', fontSize: 15 }}>“{q.text ? destacarTexto(q.text, variaveisRoteiro) : 'Sem texto cadastrado'}”</p>
+                )}
+                {q && company.allow_transcription && (
+                  <AudioDaPergunta api={api} companyId={company.id} question={q} canEdit={canEdit} onChange={atualizarPergunta} />
                 )}
               </article>
             );
@@ -784,6 +820,39 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
               </p>
             )}
             {savingOpcoes && <Spinner />}
+          </article>
+          <article className="step-card" style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+            <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                style={{ width: 'auto' }}
+                checked={company.allow_transcription && mensagensAudio}
+                disabled={!canEdit || savingOpcoes || !company.allow_transcription}
+                onChange={(e) => salvarOpcaoAudio({ mensagens_audio: e.target.checked })}
+                data-testid="mensagens-audio"
+              />
+              Mensagens via áudio
+            </label>
+            <p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>
+              O agente envia todas as mensagens como áudio. O áudio é gerado automaticamente a partir do texto; perguntas
+              com gravação própria usam a gravação.
+            </p>
+            {!company.allow_transcription && (
+              <p style={{ fontSize: 13.5, color: 'var(--warn)', margin: 0 }}>Habilite o áudio no painel Admin.</p>
+            )}
+            <label style={{ margin: 0 }}>
+              Voz
+              <select
+                value={voz}
+                disabled={!canEdit || savingOpcoes || !company.allow_transcription}
+                onChange={(e) => salvarOpcaoAudio({ voz_tts: e.target.value })}
+              >
+                {VOZES_TTS.map((v) => (
+                  <option key={v.id} value={v.id}>{v.label}</option>
+                ))}
+              </select>
+            </label>
+            {erroOpcoes && <small style={{ color: 'var(--danger, #c0392b)' }}>{erroOpcoes}</small>}
           </article>
         </section>
       )}

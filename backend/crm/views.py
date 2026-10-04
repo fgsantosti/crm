@@ -16,6 +16,7 @@ from django.shortcuts import get_object_or_404
 from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, VariavelRoteiro, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
 from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer, VariavelRoteiroSerializer
 from .services import (
+    aplicar_audio,
     receive, escalate, create_invite, contexto_agente, status_contato,
     validar_convite as validar_convite_service,
     trocar_senha as trocar_senha_service,
@@ -280,7 +281,9 @@ class CompanyViewSet(viewsets.ModelViewSet):
         company = self.get_object()
         data = IncomingSerializer(data=request.data)
         data.is_valid(raise_exception=True)
-        return Response(receive(company, data.validated_data))
+        result = receive(company, data.validated_data)
+        # Fora da transação do receive(): o TTS pode levar alguns segundos.
+        return Response(aplicar_audio(company, result, request.build_absolute_uri))
     @action(detail=True, methods=["post"])
     def delivery(self, request, pk=None):
         from django.db import transaction
@@ -459,6 +462,33 @@ class QuestionViewSet(TenantMixin, viewsets.ModelViewSet):
             ctx["company"] = self.company()
         return ctx
     def perform_create(self, serializer): serializer.save(company=self.company())
+    @action(detail=True, methods=["post", "delete"], url_path="audio", parser_classes=[MultiPartParser])
+    def audio(self, request, pk=None):
+        """Gravação própria da pergunta (substitui o TTS). POST multipart 'arquivo'; DELETE remove.
+        Permissão: a mesma de editar o roteiro (Empresa/admin, nunca atendente nem agente)."""
+        from .audio import AudioInvalido, converter_gravacao
+        from django.core.files.base import ContentFile
+        question = self.get_object()
+        if request.method == "DELETE":
+            if question.audio_gravado:
+                question.audio_gravado.delete(save=False)
+            question.audio_gravado = ""
+            question.save(update_fields=["audio_gravado"])
+            return Response(self.get_serializer(question).data)
+        arquivo = request.FILES.get("arquivo")
+        if not arquivo:
+            return Response({"detail": "Envie o arquivo de áudio no campo 'arquivo'."}, status=400)
+        tipo = (arquivo.content_type or "").lower()
+        if not (tipo.startswith("audio/") or tipo == "video/webm" or tipo == "application/ogg"):
+            return Response({"detail": "Envie um arquivo de áudio."}, status=400)
+        try:
+            conteudo = converter_gravacao(arquivo)
+        except AudioInvalido as exc:
+            return Response({"detail": str(exc)}, status=400)
+        if question.audio_gravado:
+            question.audio_gravado.delete(save=False)
+        question.audio_gravado.save(f"{question.company_id}_{question.question_id}.ogg", ContentFile(conteudo), save=True)
+        return Response(self.get_serializer(question).data)
     def destroy(self, request, *args, **kwargs):
         question = self.get_object()
         if question.question_id in MANDATORY_QUESTION_IDS:

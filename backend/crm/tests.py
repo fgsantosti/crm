@@ -111,12 +111,6 @@ class QualificationTests(TestCase):
         result = self.send(kind="audio")
         self.assertEqual(result["action"], "TEXTO")
         self.assertEqual(Lead.objects.get().mode, "AUTOMÁTICO")
-    def test_audio_with_recorded_asset_sends_audio(self):
-        Question.objects.filter(company=self.company, question_id="apresentacao").update(audio_asset="apresentacao.ogg")
-        result = self.send(kind="audio")
-        self.assertEqual(result["action"], "AUDIO_GRAVADO")
-        self.assertEqual(result["content"], "apresentacao.ogg")
-        self.assertEqual(Lead.objects.get().last_audio_id, "apresentacao.ogg")
     def test_pending_delivery_recente_ignora_sem_escalar(self):
         # Contato manda várias mensagens seguidas enquanto a resposta anterior sai: ignora, não trava.
         self.send()
@@ -1863,3 +1857,197 @@ class PermissoesValidacaoTests(TestCase):
         self.assertEqual(self.client_for(self.ana).get(url).status_code, 403)
         self.assertEqual(self.client_for(self.agente).get(url).status_code, 403)
         self.assertEqual(self.client_for(self.empresa).get(url).status_code, 200)
+
+
+import os
+import shutil
+import subprocess
+import tempfile
+from unittest import mock, skipUnless
+from django.core.files.base import ContentFile
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
+
+
+def _wav(segundos=1.0):
+    out = subprocess.run(
+        ["ffmpeg", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", f"sine=frequency=440:duration={segundos}", "-f", "wav", "pipe:1"],
+        check=True, capture_output=True,
+    )
+    return out.stdout
+
+
+def _codec(caminho):
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name,channels,sample_rate",
+                          "-of", "default=nw=1", caminho], check=True, capture_output=True, text=True)
+    return out.stdout
+
+
+class MensagensAudioTests(TestCase):
+    def setUp(self):
+        self.media = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media)
+        self.override.enable()
+        self.company = Company.objects.create(name="Empresa Áudio", allow_transcription=True, mensagens_audio=True)
+        self.q = Question.objects.create(company=self.company, question_id="apresentacao", text="Olá, aqui é a {empresa}.<br>Vamos começar?")
+        Question.objects.create(company=self.company, question_id="nome", text="Qual é o seu nome?")
+        self.agente = get_user_model().objects.create_user(username="agente-audio")
+        self.company.members.add(self.agente)
+        self.empresa = get_user_model().objects.create_user(username="empresa-audio", is_staff=True)
+        self.company.members.add(self.empresa)
+        self.atendente = get_user_model().objects.create_user(username="atendente-audio")
+        self.company.members.add(self.atendente)
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media, ignore_errors=True)
+    def payload(self, mid="1"):
+        return {"contact": "+5585988887777", "message_id": mid, "kind": "text", "marker": "Q", "question_id": "apresentacao", "fields": {}}
+    def incoming(self, mid="1"):
+        c = APIClient()
+        c.force_authenticate(self.agente)
+        return c.post(f"/api/companies/{self.company.id}/incoming/", self.payload(mid), format="json")
+
+    def test_tts_quando_nao_ha_gravacao(self):
+        with mock.patch("crm.audio.gerar_tts", return_value="tts/abc.ogg") as gerar:
+            r = self.incoming()
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["action"], "AUDIO")
+        self.assertEqual(body["audio_origem"], "tts")
+        self.assertEqual(body["audio_url"], "http://testserver/media/tts/abc.ogg")
+        self.assertEqual(body["content"], "Olá, aqui é a Empresa Áudio.<br>Vamos começar?")
+        self.assertEqual(gerar.call_args[0], ("Olá, aqui é a Empresa Áudio.<br>Vamos começar?", "pt-BR-FranciscaNeural"))
+        evento = Event.objects.get(pk=body["event_id"])
+        self.assertEqual(evento.result["action"], "AUDIO")
+        self.assertEqual(evento.delivery, "PENDING")
+
+    def test_gravacao_da_pergunta_substitui_tts(self):
+        self.q.audio_gravado.save("x.ogg", ContentFile(b"OggS"), save=True)
+        with mock.patch("crm.audio.gerar_tts") as gerar:
+            body = self.incoming().json()
+        gerar.assert_not_called()
+        self.assertEqual(body["action"], "AUDIO")
+        self.assertEqual(body["audio_origem"], "gravado")
+        self.assertTrue(body["audio_url"].startswith("http://testserver/media/roteiro_audio/"))
+
+    def test_falha_de_tts_mantem_texto(self):
+        with mock.patch("crm.audio.gerar_tts", side_effect=TimeoutError("lento")):
+            body = self.incoming().json()
+        self.assertEqual(body["action"], "TEXTO")
+        self.assertNotIn("audio_url", body)
+        self.assertIn("audio_erro", body)
+        self.assertEqual(Event.objects.get(pk=body["event_id"]).delivery, "PENDING")
+
+    def test_sem_portao_do_admin_fica_em_texto(self):
+        Company.objects.filter(pk=self.company.pk).update(allow_transcription=False)
+        with mock.patch("crm.audio.gerar_tts") as gerar:
+            body = self.incoming().json()
+        gerar.assert_not_called()
+        self.assertEqual(body["action"], "TEXTO")
+
+    def test_opcao_desligada_fica_em_texto(self):
+        Company.objects.filter(pk=self.company.pk).update(mensagens_audio=False)
+        body = self.incoming().json()
+        self.assertEqual(body["action"], "TEXTO")
+        self.assertNotIn("audio_url", body)
+
+    def test_no_reply_nao_gera_audio(self):
+        with mock.patch("crm.audio.gerar_tts", return_value="tts/abc.ogg"):
+            self.incoming("1")
+            with mock.patch("crm.audio.gerar_tts") as gerar:
+                body = self.incoming("1").json()
+        gerar.assert_not_called()
+        self.assertEqual(body["action"], "NO_REPLY")
+
+    def test_contexto_informa_mensagens_audio(self):
+        from .services import contexto_agente
+        self.assertTrue(contexto_agente(self.company)["mensagens_audio"])
+        Company.objects.filter(pk=self.company.pk).update(allow_transcription=False)
+        self.company.refresh_from_db()
+        self.assertFalse(contexto_agente(self.company)["mensagens_audio"])
+
+    def test_opcoes_do_agente_exigem_portao_do_admin(self):
+        Company.objects.filter(pk=self.company.pk).update(allow_transcription=False, mensagens_audio=False)
+        c = APIClient()
+        c.force_authenticate(self.empresa)
+        r = c.patch(f"/api/companies/{self.company.id}/", {"mensagens_audio": True}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("Admin", str(r.json()))
+        Company.objects.filter(pk=self.company.pk).update(allow_transcription=True)
+        r = c.patch(f"/api/companies/{self.company.id}/", {"mensagens_audio": True, "voz_tts": "pt-BR-AntonioNeural"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["mensagens_audio"])
+        self.assertEqual(r.json()["voz_tts"], "pt-BR-AntonioNeural")
+        r = c.patch(f"/api/companies/{self.company.id}/", {"voz_tts": "en-US-Inventada"}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_upload_converte_para_ogg_opus_e_remove(self):
+        c = APIClient()
+        c.force_authenticate(self.empresa)
+        arquivo = SimpleUploadedFile("teste.wav", _wav(1.5), content_type="audio/wav")
+        r = c.post(f"/api/questions/{self.q.id}/audio/?company={self.company.id}", {"arquivo": arquivo}, format="multipart")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.q.refresh_from_db()
+        self.assertTrue(self.q.audio_gravado.name.endswith(".ogg"))
+        info = _codec(self.q.audio_gravado.path)
+        self.assertIn("codec_name=opus", info)
+        self.assertIn("channels=1", info)
+        self.assertIn("sample_rate=48000", info)
+        self.assertTrue(r.json()["audio_gravado"])
+        servido = Client().get("/media/" + self.q.audio_gravado.name)
+        self.assertEqual(servido.status_code, 200)
+        caminho = self.q.audio_gravado.path
+        r = c.delete(f"/api/questions/{self.q.id}/audio/?company={self.company.id}")
+        self.assertEqual(r.status_code, 200)
+        self.q.refresh_from_db()
+        self.assertFalse(self.q.audio_gravado)
+        self.assertFalse(os.path.exists(caminho))
+
+    def test_upload_recusa_longo_vazio_e_nao_audio(self):
+        c = APIClient()
+        c.force_authenticate(self.empresa)
+        url = f"/api/questions/{self.q.id}/audio/?company={self.company.id}"
+        longo = SimpleUploadedFile("longo.wav", _wav(125), content_type="audio/wav")
+        self.assertEqual(c.post(url, {"arquivo": longo}, format="multipart").status_code, 400)
+        texto = SimpleUploadedFile("x.txt", b"nao sou audio", content_type="text/plain")
+        self.assertEqual(c.post(url, {"arquivo": texto}, format="multipart").status_code, 400)
+        quebrado = SimpleUploadedFile("x.mp3", b"nao sou audio", content_type="audio/mpeg")
+        self.assertEqual(c.post(url, {"arquivo": quebrado}, format="multipart").status_code, 400)
+        self.assertEqual(c.post(url, {}, format="multipart").status_code, 400)
+
+    def test_atendente_e_agente_nao_gravam(self):
+        url = f"/api/questions/{self.q.id}/audio/?company={self.company.id}"
+        for user in (self.atendente, self.agente):
+            c = APIClient()
+            c.force_authenticate(user)
+            arquivo = SimpleUploadedFile("t.wav", _wav(1), content_type="audio/wav")
+            self.assertEqual(c.post(url, {"arquivo": arquivo}, format="multipart").status_code, 403)
+
+    def test_media_de_audio_servida_e_restrita(self):
+        from django.core.files.storage import default_storage
+        default_storage.save("tts/abc.ogg", ContentFile(b"OggS"))
+        servido = Client().get("/media/tts/abc.ogg")
+        self.assertEqual(servido.status_code, 200)
+        self.assertEqual(servido["Content-Type"], "audio/ogg")
+        self.assertEqual(Client().get("/media/tts/../settings.py").status_code, 404)
+
+    def test_texto_para_fala_remove_marcacao(self):
+        from .audio import texto_para_fala
+        self.assertEqual(texto_para_fala("Nome: Ana<br>Área: X<br/><b>ok</b>"), "Nome: Ana. Área: X. ok")
+
+    def test_gerar_tts_usa_cache(self):
+        from . import audio
+        def falso_sintetizar(texto, voz, destino, timeout):
+            subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=1", destino], check=True)
+        with mock.patch("crm.audio.sintetizar", side_effect=falso_sintetizar) as sint:
+            a = audio.gerar_tts("Olá<br>mundo", "pt-BR-FranciscaNeural")
+            b = audio.gerar_tts("Olá<br>mundo", "pt-BR-FranciscaNeural")
+        self.assertEqual(a, b)
+        self.assertEqual(sint.call_count, 1)
+        self.assertIn("codec_name=opus", _codec(os.path.join(self.media, a)))
+
+    @skipUnless(os.environ.get("RUN_NETWORK_TESTS") == "1", "TTS real (edge-tts) precisa de rede: RUN_NETWORK_TESTS=1")
+    def test_tts_real_edge(self):
+        from . import audio
+        relativo = audio.gerar_tts("Olá! Este é um teste de voz.", "pt-BR-FranciscaNeural")
+        self.assertIn("codec_name=opus", _codec(os.path.join(self.media, relativo)))

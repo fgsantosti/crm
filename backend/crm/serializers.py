@@ -6,10 +6,14 @@ from .models import Company, Lead, Question, CompanyInfo, Event, Area, Atendente
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = Company
-        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional"]
-        # Só "agente_conversacional" é editável por aqui (tela Roteiro, aba "Opções
-        # do Agente") -- os demais campos de Company continuam só pelo Django Admin.
+        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional", "mensagens_audio", "voz_tts"]
+        # Só as opções do agente (tela Roteiro, aba "Opções do Agente") são editáveis
+        # por aqui -- os demais campos de Company continuam no Painel Admin.
         read_only_fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente"]
+    def validate_mensagens_audio(self, value):
+        if value and self.instance is not None and not self.instance.allow_transcription:
+            raise serializers.ValidationError("Habilite o áudio no painel Admin.")
+        return value
 
 class AdminCompanySerializer(serializers.ModelSerializer):
     """Só para a tela interna da Axioma (IsSuperUser) -- cross-tenant de propósito."""
@@ -107,7 +111,8 @@ class QuestionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Question
         fields = "__all__"
-        read_only_fields = ["company", "obrigatoria"]
+        # Gravação só pelo endpoint dedicado (POST/DELETE /questions/{id}/audio/), que converte e valida.
+        read_only_fields = ["company", "obrigatoria", "audio_gravado"]
     def validate_variavel(self, variavel):
         # "uma pergunta SEMPRE estará atrelada a uma variável" -- nunca aceita
         # variável de outra empresa (o FK sozinho não garante isolamento de tenant).
