@@ -101,6 +101,7 @@ export function App() {
 
   useEffect(() => {
     if (role === 'atendente' && (view === 'roteiro' || view === 'dados-empresa' || view === 'equipe')) setView('dashboard');
+    if (role === 'empresa' && (view === 'leads' || view === 'pendencias' || view === 'humano')) setView('dashboard');
   }, [role, view]);
 
   function logout() {

@@ -44,12 +44,12 @@ export function Sidebar({
   isSuperuser: boolean;
   onOpenAdminPanel: () => void;
 }) {
-  const items: { key: View; label: string; count?: number }[] = [
-    { key: 'dashboard', label: 'Dashboard' },
-    { key: 'leads', label: 'Todos os leads', count: leadsCount },
-    { key: 'pendencias', label: 'Pendências', count: pendingCount },
-    { key: 'humano', label: 'Meus Atendimentos', count: humanCount },
-  ];
+  const items: { key: View; label: string; count?: number }[] = [{ key: 'dashboard', label: 'Dashboard' }];
+  if (role === 'atendente') {
+    items.push({ key: 'leads', label: 'Todos os leads', count: leadsCount });
+    items.push({ key: 'pendencias', label: 'Pendências', count: pendingCount });
+    items.push({ key: 'humano', label: 'Meus Atendimentos', count: humanCount });
+  }
   if (role === 'empresa') {
     items.push({ key: 'roteiro', label: 'Roteiro do agente' });
     items.push({ key: 'dados-empresa', label: 'Dados da empresa' });

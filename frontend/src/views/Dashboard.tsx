@@ -3,6 +3,7 @@ import type { Api } from '../api';
 import type { Company, Lead, Paginated } from '../types';
 import { DonutChart } from '../components/DonutChart';
 import { SkeletonTiles } from '../components/Skeleton';
+import { COLUMNS, URGENCIA_COR, columnOf, leadsVisiveisNoKanban, ordenarColuna } from './Leads';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -86,6 +87,8 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   }, [filtered]);
 
   const pct = (n: number) => (total ? ` · ${Math.round((n / total) * 100)}%` : '');
+
+  const kanbanLeads = useMemo(() => leadsVisiveisNoKanban(leads), [leads]);
 
   return (
     <>
@@ -186,6 +189,61 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
           </p>
         )}
       </section>
+
+      {role === 'empresa' && (
+        <>
+          <div className="section-divider" />
+          <section className="section">
+            <div className="section-head">
+              <h2>Kanban de atendimento</h2>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>Somente visualização — a empresa não assume nem contata leads.</span>
+            </div>
+            {busy && !leads.length ? (
+              <SkeletonTiles />
+            ) : (
+              <div className="kanban">
+                {COLUMNS.map((col) => {
+                  const items = ordenarColuna(col.key, kanbanLeads.filter((l) => columnOf(l) === col.key));
+                  return (
+                    <div key={col.key} className="kanban-col">
+                      <div className="kanban-col-head">
+                        <h3>{col.label}</h3>
+                        <small>
+                          {items.length} lead{items.length === 1 ? '' : 's'}
+                        </small>
+                      </div>
+                      <div className="kanban-col-body">
+                        {items.map((l) => (
+                          <article key={l.id} className="kanban-card" style={{ cursor: 'default' }}>
+                            <span
+                              className="priority-dot"
+                              style={URGENCIA_COR[l.temperature] ? { background: URGENCIA_COR[l.temperature] } : undefined}
+                            />
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontWeight: 600, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {l.name || 'Sem nome informado'}
+                              </div>
+                              <small style={{ display: 'block', fontFamily: "'DM Mono',monospace" }}>{l.contact}</small>
+                              {col.key === 'novos' && <small style={{ display: 'block', marginTop: 4, color: 'var(--accent)' }}>etapa: {l.state}</small>}
+                              {l.temperature && col.key !== 'novos' && (
+                                <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>{l.temperature}</small>
+                              )}
+                              {l.owner && col.key !== 'qualificados' && (
+                                <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>owner: {l.owner}</small>
+                              )}
+                            </div>
+                          </article>
+                        ))}
+                        {!items.length && <p style={{ fontSize: 12.5, color: 'var(--muted-soft)', padding: '4px 2px' }}>Nenhum lead aqui.</p>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </>
+      )}
 
       <div className="section-divider" />
 
