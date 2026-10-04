@@ -1,13 +1,22 @@
 import { useEffect, useState } from 'react';
 import { fetchTodasAsPaginas, type Api } from '../api';
-import type { Company, Lead } from '../types';
+import type { Company, Lead, Me } from '../types';
 import { SkeletonRows } from '../components/Skeleton';
 
-export function Pendencias({ api, company }: { api: Api; company: Company }) {
+// Pendências = Kanban "Qualificados" + "Atendimentos em espera" (backend: ?pending=1, já ordenado
+// com Em espera antes de Classificado). "Pegar Lead" assume o atendimento e leva o lead para
+// "Meus Atendimentos" (mesma ação do Kanban ao mover para Em negociação).
+function estagio(l: Lead): 'Em espera' | 'Classificado' {
+  return l.etapa_atendimento === 'espera' ? 'Em espera' : 'Classificado';
+}
+
+export function Pendencias({ api, company, me }: { api: Api; company: Company; me: Me }) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pegandoId, setPegandoId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [recarregar, setRecarregar] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -26,7 +35,22 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
     return () => {
       active = false;
     };
-  }, [company.id]);
+  }, [company.id, recarregar]);
+
+  async function pegarLead(lead: Lead) {
+    if (!window.confirm(`Pegar "${lead.name || lead.contact}"? Você passa a ser o responsável e o lead vai para "Meus Atendimentos".`)) return;
+    setPegandoId(lead.id);
+    setError('');
+    try {
+      await api(`/leads/${lead.id}/negociar/?company=${company.id}`, { method: 'POST' });
+      setLeads((v) => v.filter((l) => l.id !== lead.id));
+    } catch (e) {
+      setError((e as Error).message);
+      setRecarregar((n) => n + 1);
+    } finally {
+      setPegandoId(null);
+    }
+  }
 
   const visible = leads.filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()));
 
@@ -36,7 +60,7 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
         <div>
           <small className="eyebrow">Fila de ação</small>
           <h1>Pendências</h1>
-          <p>Ordenadas por prioridade e data de retorno.{leads.length ? ` ${leads.length} casos aguardando próxima ação.` : ''}</p>
+          <p>Em espera primeiro, depois classificados, por prioridade.{leads.length ? ` ${leads.length} casos aguardando atendimento.` : ''}</p>
         </div>
         <input placeholder="Buscar nome ou telefone" aria-label="Buscar pendências" style={{ width: 260 }} value={search} onChange={(e) => setSearch(e.target.value)} />
       </header>
@@ -54,39 +78,47 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
               <tr>
                 <th>Prioridade</th>
                 <th>Lead</th>
-                <th>Etapa</th>
+                <th>Estágio</th>
                 <th>Próxima ação</th>
-                <th>Retorno</th>
-                <th>Responsável</th>
+                <th>Pegar Lead</th>
               </tr>
             </thead>
             <tbody>
-              {busy && !visible.length && <SkeletonRows rows={4} cols={6} />}
-              {visible.map((l) => (
-                <tr key={l.id}>
-                  <td>
-                    <span className={`priority priority-${l.priority === 'Alta' ? 'alta' : l.priority === 'Média' ? 'media' : 'baixa'}`}>
-                      <span className="priority-dot" />
-                      {l.priority}
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{l.name || 'Sem nome informado'}</div>
-                    <small>{l.contact}</small>
-                  </td>
-                  <td>{l.funnel_stage}</td>
-                  <td>{l.next_action}</td>
-                  <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 13, color: 'var(--muted)' }}>
-                    {l.return_at ? new Date(l.return_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}
-                  </td>
-                  <td style={{ color: 'var(--muted)' }}>{l.owner_nome || '—'}</td>
-                </tr>
-              ))}
+              {busy && !visible.length && <SkeletonRows rows={4} cols={5} />}
+              {visible.map((l) => {
+                const reservadoPorOutro = l.owner !== null && l.owner !== me.id;
+                return (
+                  <tr key={l.id}>
+                    <td>
+                      <span className={`priority priority-${l.priority === 'Alta' ? 'alta' : l.priority === 'Média' ? 'media' : 'baixa'}`}>
+                        <span className="priority-dot" />
+                        {l.priority}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{l.name || 'Sem nome informado'}</div>
+                      <small>{l.contact}</small>
+                    </td>
+                    <td>{estagio(l)}</td>
+                    <td>{l.next_action}</td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() => pegarLead(l)}
+                        disabled={reservadoPorOutro || pegandoId !== null}
+                        title={reservadoPorOutro ? 'Reservado por outro atendente' : 'Assumir e levar para Meus Atendimentos'}
+                      >
+                        {pegandoId === l.id ? 'Pegando…' : reservadoPorOutro ? 'Reservado' : 'Pegar Lead'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
         {!busy && !visible.length && <div className="empty">Nenhuma pendência nesta empresa.</div>}
-        <p className="table-note">Casos em atendimento humano não aparecem aqui — veja em “Meus Atendimentos”.</p>
+        <p className="table-note">Casos em negociação ou despacho não aparecem aqui — veja em “Meus Atendimentos”.</p>
       </section>
     </>
   );

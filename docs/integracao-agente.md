@@ -133,9 +133,17 @@ Resposta (sempre 200, mesmo em `NO_REPLY`):
   "content": "texto ou id do áudio aprovado",  // ausente quando action="NO_REPLY"
   "question_id": "apresentacao",               // ausente quando action="NO_REPLY"
   "lead_id": "uuid-do-lead",
-  "event_id": 123                               // use este id para confirmar a entrega
+  "event_id": 123,                              // use este id para confirmar a entrega
+  "lead_novo": false                            // true quando o lead foi criado nesta chamada
 }
 ```
+
+**Lead novo sempre começa pela apresentação:** quando a chamada cria o lead
+(`lead_novo: true`) e o marcador não é `Q` do estado inicial da empresa
+(`apresentacao`), o CRM ignora o marcador recebido e devolve o texto da
+apresentação. Isso cobre o agente que "lembra" de uma triagem cujo lead foi
+fechado/apagado no painel: o contato recomeça do zero, nunca no meio do
+roteiro. `human_required: true` continua valendo (transfere para humano).
 
 - `action="NO_REPLY"` → **não envie nada ao contato**, nem literalmente a
   palavra NO_REPLY. Acontece em mensagem duplicada, lead já encerrado/em
@@ -184,7 +192,7 @@ rota abaixo:
 | `401` | Token ausente, inválido ou expirado (`AgentTokenExpiry`) | Fail-closed, alertar, nunca tentar de novo sem token novo |
 | `404` | `company_id` não existe ou não pertence ao token usado (nunca `403` — o CRM não distingue "existe mas não é seu" de "não existe") | Fail-closed, revisar configuração (token trocado de empresa?) |
 | `400` | Payload fora do schema (`IncomingSerializer`/`DeliverySerializer`) — inclui `CLASSIFICADO` sem `temperatura`/`prioridade`, `contact` fora do padrão E.164, `status` fora de `SENT`/`FAILED` em `/delivery/` | Fail-closed, é bug de integração do Gateway, não reenviar sem corrigir o payload |
-| `429` | Mais de 60 chamadas/minuto por conta de serviço (`throttle_scope="agent-incoming"`) | Esperar e reenviar depois — seguro, já que `/incoming/` é idempotente pelo mesmo `message_id` |
+| `429` | Mais de 300 chamadas/minuto por conta de serviço (`throttle_scope="agent-incoming"`, somando `incoming`, `delivery`, `agente/contato` e `agente/contexto`) | Esperar e reenviar depois — seguro, já que `/incoming/` é idempotente pelo mesmo `message_id` |
 | `5xx` | Erro interno do CRM | Fail-closed, alertar; retentar depois é seguro (mesma idempotência), não há retry automático do lado do CRM |
 
 ### Preflight seguro (validar credencial sem efeito de negócio)
@@ -291,6 +299,38 @@ etapa pergunta — o que o contato recebe continua sendo sempre o `content`
 devolvido por `/incoming/`. Mensagem cujo `contact` é o próprio
 `numero_agente` volta `{"action": "NO_REPLY", "proprio_numero": true}` sem
 `lead_id`/`event_id` (não há entrega a confirmar).
+
+## 2.2 Status do contato (o agente pode atender este número agora?)
+
+```
+GET /api/companies/{company_id}/agente/contato/?contact=+5586999999999
+Authorization: Token <token>
+```
+
+Leitura pura, mesma permissão de `agente/contexto` (404 para outra empresa;
+`contact` fora de E.164 → `400`). Use **antes de chamar o modelo**: se
+`aceita_agente` for `false`, não processe a mensagem (não gaste o modelo nem
+chame `/incoming/`). É exatamente a regra que `/incoming/` usa para decidir
+`NO_REPLY` — as duas nunca divergem.
+
+```jsonc
+{
+  "contact": "+5586999999999",
+  "lead_id": "uuid-do-lead" | null,
+  "aceita_agente": true,
+  "motivo": "em_triagem",       // ver tabela
+  "ultima_pergunta": "nome"     // só em "em_triagem"; null nos demais
+}
+```
+
+| `motivo` | `aceita_agente` | Quando |
+| --- | --- | --- |
+| `sem_lead` | `true` | Nenhum lead ativo para o número (primeiro contato, ou o anterior já foi despachado/fechado) — a próxima chamada a `/incoming/` cria lead novo e começa pela apresentação |
+| `em_triagem` | `true` | Lead ativo ainda na triagem automática; `ultima_pergunta` = etapa atual |
+| `classificado` | `false` | Triagem concluída (`CLASSIFICADO`); o número fica com a equipe até o despacho registrar o desfecho |
+| `humano` | `false` | Lead transferido para atendimento humano |
+| `cooldown_desqualificado` | `false` | Desqualificado/Desconfiado encerrado há menos de 24h |
+| `proprio_numero` | `false` | `contact` é o próprio `numero_agente` da empresa |
 
 ## 3. Confirmação de entrega
 

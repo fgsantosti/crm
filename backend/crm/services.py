@@ -144,36 +144,74 @@ def render_text(text, lead, company):
     placeholder_re = re.compile(r"\{(" + "|".join(re.escape(k) for k in values.keys()) + r")\}")
     return placeholder_re.sub(substitute, text)
 
+def avaliar_contato(company, contact):
+    """Única regra de "o agente pode atender este número agora?" -- usada por receive()
+    (decide NO_REPLY) e por GET /agente/contato/ (a ponte consulta antes do modelo), pra
+    as duas nunca divergirem. Sem efeitos colaterais.
+    Devolve (lead_ou_None, aceita_agente, motivo)."""
+    # O próprio número do agente (normalmente o mesmo em que a equipe atende) nunca é lead.
+    if company.numero_agente and contact == company.numero_agente:
+        return None, False, "proprio_numero"
+    # Só um lead ATIVO (desfecho em aberto) prende o número; depois do despacho ele fica livre
+    # e a próxima mensagem abre um lead novo do zero.
+    lead = Lead.objects.filter(company=company, contact=contact, desfecho="").first()
+    if not lead:
+        # Desqualificado recém-encerrado: um "ok, obrigado" logo depois da mensagem de
+        # encerramento não pode reabrir a triagem do zero -- fica mudo durante o cooldown.
+        recente = Lead.objects.filter(
+            company=company, contact=contact, desfecho="desqualificado",
+            concluido_em__gte=timezone.now() - COOLDOWN_DESQUALIFICADO,
+        ).order_by("-concluido_em").first()
+        if recente:
+            return recente, False, "cooldown_desqualificado"
+        return None, True, "sem_lead"
+    if lead.mode == "HUMANO":
+        return lead, False, "humano"
+    # Classificado: o número fica com a equipe até o despacho registrar o desfecho.
+    if lead.bot_closed or lead.state == "ENCERRADO_CLASSIFICADO":
+        return lead, False, "classificado"
+    return lead, True, "em_triagem"
+
+def ultima_pergunta(lead):
+    """question_id da etapa em que o lead está (ou da última pergunta enviada a ele)."""
+    if lead.state and Question.objects.filter(company_id=lead.company_id, question_id=lead.state).exists():
+        return lead.state
+    for result in Event.objects.filter(lead=lead).order_by("-created_at", "-pk").values_list("result", flat=True):
+        if isinstance(result, dict) and result.get("action") in ("TEXTO", "AUDIO_GRAVADO") and result.get("question_id"):
+            return result["question_id"]
+    return None
+
+def status_contato(company, contact):
+    lead, aceita, motivo = avaliar_contato(company, contact)
+    return {
+        "contact": contact,
+        "lead_id": str(lead.pk) if lead else None,
+        "aceita_agente": aceita,
+        "motivo": motivo,
+        "ultima_pergunta": ultima_pergunta(lead) if lead and motivo == "em_triagem" else None,
+    }
+
 @transaction.atomic
 def receive(company, data):
     # Serialize per company: protege a criação do primeiro contato e mensagens concorrentes.
     company = Company.objects.select_for_update().get(pk=company.pk)
-    # O próprio número do agente (normalmente o mesmo em que a equipe atende) nunca é
-    # lead: mensagem dele pra ele mesmo não cria lead nem evento.
-    if company.numero_agente and data["contact"] == company.numero_agente:
+    lead, aceita, motivo = avaliar_contato(company, data["contact"])
+    if motivo == "proprio_numero":
+        # Mensagem do número do agente pra ele mesmo não cria lead nem evento.
         return {**NO_REPLY, "proprio_numero": True}
-    # Só busca/reaproveita um lead ATIVO (desfecho em aberto) pra esse contato -- se o único
-    # lead existente já foi despachado, o número está livre: cria um lead novo do zero em vez
-    # de reabrir o histórico antigo. O lock da empresa acima garante que nunca nascem dois.
-    lead = Lead.objects.filter(company=company, contact=data["contact"], desfecho="").first()
-    if not lead:
-        # Desqualificado recém-encerrado: um "ok, obrigado" logo depois da mensagem de
-        # encerramento não pode reabrir a triagem do zero -- fica mudo durante o cooldown.
-        lead = Lead.objects.filter(
-            company=company, contact=data["contact"], desfecho="desqualificado",
-            concluido_em__gte=timezone.now() - COOLDOWN_DESQUALIFICADO,
-        ).order_by("-concluido_em").first()
-    if not lead:
+    lead_novo = lead is None
+    if lead_novo:
+        # O lock da empresa acima garante que nunca nascem dois leads ativos pro mesmo contato.
         lead = Lead.objects.create(company=company, contact=data["contact"], state=company.initial_state)
     previous = Event.objects.filter(lead=lead, message_id=data["message_id"]).first()
     if previous:
-        return {**NO_REPLY, "duplicate": True, "lead_id": str(lead.pk)}
+        return {**NO_REPLY, "duplicate": True, "lead_id": str(lead.pk), "lead_novo": False}
     lead.last_contact = timezone.now()
     lead.save()
     event = Event.objects.create(lead=lead, message_id=data["message_id"], summary=f"Marcador recebido: {data['marker']}")
     result = dict(NO_REPLY)
 
-    if lead.mode == "HUMANO" or lead.bot_closed or lead.state == "ENCERRADO_CLASSIFICADO":
+    if not aceita:
         pass
     elif data["human_required"]:
         escalate(lead, data["reason"])
@@ -182,6 +220,12 @@ def receive(company, data):
     else:
         marker = data["marker"]
         fields = data.get("fields") or {}
+        if lead_novo and not (marker == "Q" and data["question_id"] == company.initial_state):
+            # Lead novo sempre começa pela apresentação, mesmo que o agente (ex.: sessão antiga
+            # que "lembra" de uma triagem já apagada) mande outro marcador.
+            event.summary = f"Lead novo: começando pela apresentação (marcador {marker} ignorado)"
+            marker, fields = "Q", {}
+            data = {**data, "question_id": company.initial_state}
         if marker == "Q":
             question_id = data["question_id"]
             if not question_id:
@@ -259,7 +303,7 @@ def receive(company, data):
                     event.delivery = "PENDING"
         lead.save()
 
-    result.update({"lead_id": str(lead.pk), "event_id": event.pk})
+    result.update({"lead_id": str(lead.pk), "event_id": event.pk, "lead_novo": lead_novo})
     event.result = result
     event.save()
     return result

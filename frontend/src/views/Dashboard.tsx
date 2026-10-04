@@ -135,11 +135,15 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
 
   const kanbanLeads = useMemo(() => leadsVisiveisNoKanban(leads), [leads]);
 
-  // Fallback de admin: destrava um lead preso no Kanban (ex.: o agente nunca o classificou).
-  // O agente deve tratar leads assim como Desqualificado antes de nunca encerrar -- isso é
-  // só o botão de emergência caso aconteça mesmo assim.
+  // "Fechar lead": apaga o lead (e o histórico dele) no CRM. A próxima mensagem desse número
+  // abre um lead novo e o agente recomeça a triagem do zero.
   async function removerLead(lead: Lead) {
-    if (!window.confirm(`Excluir "${lead.name || lead.contact}" do Kanban? Essa ação não pode ser desfeita.`)) return;
+    if (
+      !window.confirm(
+        `Fechar o lead "${lead.name || lead.contact}"?\n\nO lead e o histórico dele serão apagados. Se esse número mandar mensagem de novo, o agente recomeça a triagem do zero. Essa ação não pode ser desfeita.`,
+      )
+    )
+      return;
     setExcluindoId(lead.id);
     setError('');
     try {
@@ -281,8 +285,8 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                           <article key={l.id} className="kanban-card" style={{ cursor: 'default', position: 'relative' }}>
                             <button
                               type="button"
-                              aria-label={`Excluir ${l.name || l.contact} (fallback para lead preso no Kanban)`}
-                              title="Excluir (fallback para lead preso no Kanban)"
+                              aria-label={`Fechar lead ${l.name || l.contact} (apaga e reinicia a triagem)`}
+                              title="Fechar lead (apaga e reinicia a triagem)"
                               onClick={() => removerLead(l)}
                               disabled={excluindoId === l.id}
                               style={{

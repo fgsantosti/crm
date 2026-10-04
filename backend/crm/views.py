@@ -1,3 +1,4 @@
+import re
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db.models import Case, When, Value, IntegerField, Q
@@ -14,7 +15,7 @@ from django.shortcuts import get_object_or_404
 from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, VariavelRoteiro, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
 from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer, VariavelRoteiroSerializer
 from .services import (
-    receive, escalate, create_invite, contexto_agente,
+    receive, escalate, create_invite, contexto_agente, status_contato,
     validar_convite as validar_convite_service,
     trocar_senha as trocar_senha_service,
     solicitar_troca_email, confirmar_troca_email as confirmar_troca_email_service,
@@ -260,6 +261,16 @@ class CompanyViewSet(viewsets.ModelViewSet):
         pura; liberado pra conta de serviço do agente e membros humanos da empresa
         (get_object já restringe às empresas do usuário -> 404 nas demais)."""
         return Response(contexto_agente(self.get_object()))
+    @action(detail=True, methods=["get"], url_path="agente/contato")
+    def agente_contato(self, request, pk=None):
+        """O agente pode atender este número agora? Mesma regra que /incoming/ usa pra
+        decidir NO_REPLY (services.avaliar_contato). Leitura pura; a ponte consulta antes
+        de chamar o modelo, pra nem processar mensagens de quem já foi classificado."""
+        company = self.get_object()
+        contact = (request.query_params.get("contact") or "").strip()
+        if not re.fullmatch(r"\+[1-9]\d{7,14}", contact):
+            return Response({"detail": "contact precisa estar em E.164 (ex.: +5586999999999)."}, status=400)
+        return Response(status_contato(company, contact))
     @action(detail=True, methods=["post"])
     def incoming(self, request, pk=None):
         company = self.get_object()
@@ -321,11 +332,15 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset().select_related("owner__profile")
         if self.request.query_params.get("pending") == "1":
-            # "Pendências" = coluna "Atendimentos em espera" do Kanban: já classificado,
-            # já tem owner, mas ainda não entrou em negociação nem foi despachado.
-            qs = qs.filter(etapa_atendimento="espera").annotate(
-                rank=Case(When(priority="Alta", then=Value(0)), When(priority="Média", then=Value(1)), default=Value(2), output_field=IntegerField())
-            ).order_by("rank", "return_at")
+            # "Pendências" = colunas "Qualificados" + "Atendimentos em espera" do Kanban (mesma
+            # regra de Leads.columnOf): triagem concluída (ou escalada pra humano), ainda não
+            # em negociação nem despachada. Em espera vem antes de Classificado.
+            qs = qs.filter(desfecho="", origem_manual=False, etapa_atendimento__in=["", "espera"]).exclude(
+                temperature__in=FORA_DO_KANBAN
+            ).filter(Q(bot_closed=True) | Q(mode="HUMANO")).annotate(
+                estagio_rank=Case(When(etapa_atendimento="espera", then=Value(0)), default=Value(1), output_field=IntegerField()),
+                rank=Case(When(priority="Alta", then=Value(0)), When(priority="Média", then=Value(1)), default=Value(2), output_field=IntegerField()),
+            ).order_by("estagio_rank", "rank", "return_at", "created_at")
         if self.request.query_params.get("ativos") == "1":
             # Só o que o Kanban mostra (mesma regra de Leads.leadsVisiveisNoKanban) --
             # evita que leads despachados ocupem a página e empurrem ativos pra fora.
@@ -338,6 +353,13 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
                 Q(etapa_atendimento__in=["negociacao", "despacho"]) | Q(origem_manual=True)
             )
         return qs
+    def perform_destroy(self, instance):
+        # "Fechar lead" (painel da Empresa): apaga o lead e os eventos dele de uma vez. Sem
+        # lead ativo, a próxima mensagem desse número abre um lead novo e a triagem recomeça.
+        from django.db import transaction
+        with transaction.atomic():
+            instance.events.all().delete()
+            instance.delete()
     @action(detail=False, methods=["get"])
     def resumo(self, request):
         """Agregados do Dashboard sobre todos os leads da empresa (não paginado)."""
