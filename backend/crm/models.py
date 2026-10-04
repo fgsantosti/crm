@@ -236,7 +236,14 @@ class Lead(models.Model):
         help_text="Lead cadastrado manualmente por um atendente na tela Atendimento Humano (ver services.criar_lead_manual) -- nunca passou pelo funil do agente, não aparece no Kanban de Leads, só entra nas contagens do Dashboard.",
     )
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["company", "contact"], name="unique_company_contact")]
+        constraints = [
+            # Único por contato SÓ entre leads ainda ativos (desfecho em aberto) -- depois que
+            # um lead é despachado (desfecho definitivo), o número fica livre pra abrir um lead
+            # novo caso o cliente volte a escrever. Enquanto ativo, o agente nunca recebe mensagem
+            # de novo pra esse número (ver services.receive -- bot_closed/desfecho em aberto =
+            # NO_REPLY sempre); histórico de leads concluídos nunca é apagado nem reaproveitado.
+            models.UniqueConstraint(fields=["company", "contact"], condition=models.Q(desfecho=""), name="unique_company_contact_ativo"),
+        ]
         ordering = ["-created_at"]
 
 class Event(models.Model):

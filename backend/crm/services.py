@@ -148,7 +148,14 @@ def render_text(text, lead, company):
 def receive(company, data):
     # Serialize per company: protege a criação do primeiro contato e mensagens concorrentes.
     company = Company.objects.select_for_update().get(pk=company.pk)
-    lead, created = Lead.objects.get_or_create(company=company, contact=data["contact"], defaults={"state": company.initial_state, "owner": company.default_owner})
+    # Só busca/reaproveita um lead ATIVO (desfecho em aberto) pra esse contato -- se o único
+    # lead existente já foi despachado, o número está livre: cria um lead novo do zero em vez
+    # de reabrir o histórico antigo. Enquanto o lead ativo não for despachado, isso sempre acha
+    # o mesmo registro (get_or_create no contato+desfecho="" ativo), nunca cria duplicata.
+    lead, created = Lead.objects.get_or_create(
+        company=company, contact=data["contact"], desfecho="",
+        defaults={"state": company.initial_state, "owner": company.default_owner},
+    )
     previous = Event.objects.filter(lead=lead, message_id=data["message_id"]).first()
     if previous:
         return {**NO_REPLY, "duplicate": True, "lead_id": str(lead.pk)}
@@ -523,8 +530,10 @@ def criar_lead_manual(company, user, dados):
     contact = (dados.get("contact") or "").strip()
     if not contact:
         return None, "Contato é obrigatório."
-    if Lead.objects.filter(company=company, contact=contact).exists():
-        return None, "Já existe um lead com esse contato nesta empresa."
+    # Só bloqueia se já existir um lead ATIVO pra esse contato -- um lead antigo já despachado
+    # não impede um novo cadastro (mesma regra de "ativo" usada em services.receive).
+    if Lead.objects.filter(company=company, contact=contact, desfecho="").exists():
+        return None, "Já existe um lead ativo com esse contato nesta empresa."
     lead = Lead.objects.create(
         company=company,
         name=nome,

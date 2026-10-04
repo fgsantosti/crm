@@ -671,6 +671,40 @@ class QualificationTests(TestCase):
         # livre de novo -- outro atendente consegue reivindicar
         reivindicado_por_b = client_b.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(reivindicado_por_b.status_code, 200)
+    def test_mesmo_contato_fica_mudo_enquanto_ativo_e_reabre_so_depois_de_despachado(self):
+        from .services import preparar_despacho, enviar_despachos
+        self.delivered(self.send())
+        self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": "nome"}))
+        self.delivered(self.send("3", marker="VALIDAR"))
+        self.send("4", marker="CLASSIFICADO", fields={"temperatura": "Quente", "prioridade": "Alta"})
+        lead = Lead.objects.get()
+        self.assertTrue(lead.bot_closed)
+        self.assertEqual(lead.desfecho, "")
+
+        # Enquanto ativo (sem desfecho), QUALQUER marcador novo desse contato é NO_REPLY e
+        # nunca cria lead novo nem mexe no existente -- é a mesma trava de sempre (bot_closed).
+        resp = self.send("5", marker="Q", question_id="apresentacao")
+        self.assertEqual(resp["action"], "NO_REPLY")
+        self.assertEqual(Lead.objects.count(), 1)
+
+        # Despacha (sai da lista de ativos).
+        atendente = get_user_model().objects.create_user(username="atendente-reabre")
+        self.company.members.add(atendente)
+        erro = preparar_despacho(lead.pk, "encerrado", atendente)
+        self.assertIsNone(erro)
+        enviados = enviar_despachos(atendente, self.company)
+        self.assertEqual(enviados, 1)
+        lead.refresh_from_db()
+        self.assertEqual(lead.desfecho, "encerrado")
+
+        # Mesmo contato escreve de novo: agora cria um lead NOVO (o antigo, despachado,
+        # continua intacto no histórico) -- o número não fica mudo pra sempre.
+        resp2 = self.send("6", marker="Q", question_id="apresentacao")
+        self.assertEqual(resp2["action"], "TEXTO")
+        self.assertEqual(Lead.objects.filter(contact="+5585999999999").count(), 2)
+        novo_lead = Lead.objects.exclude(pk=lead.pk).get(contact="+5585999999999")
+        self.assertEqual(novo_lead.desfecho, "")
+        self.assertFalse(novo_lead.bot_closed)
     def test_criar_lead_manual_nao_entra_no_kanban_e_bloqueia_contato_duplicado(self):
         atendente = get_user_model().objects.create_user(username="atendente-manual")
         self.company.members.add(atendente)
