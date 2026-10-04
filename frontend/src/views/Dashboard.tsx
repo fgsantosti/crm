@@ -6,6 +6,12 @@ import { SkeletonTiles } from '../components/Skeleton';
 
 const DAY = 24 * 60 * 60 * 1000;
 
+const DESFECHO_LABELS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string }[] = [
+  { value: 'encerrado', label: 'Encerrado', color: 'var(--success)' },
+  { value: 'comprometido', label: 'Comprometido', color: 'var(--warn)' },
+  { value: 'falha', label: 'Falha durante o atendimento', color: 'var(--danger)' },
+];
+
 export function Dashboard({ api, company, role }: { api: Api; company: Company; role: 'atendente' | 'empresa' }) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [search, setSearch] = useState('');
@@ -48,6 +54,8 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   const concluidos = filtered.filter((l) => l.bot_closed).length;
   const automatico = filtered.filter((l) => !l.bot_closed && l.mode === 'AUTOMÁTICO').length;
   const humano = filtered.filter((l) => l.mode === 'HUMANO').length;
+  const concluidosPorDesfecho = DESFECHO_LABELS.map((d) => ({ ...d, count: filtered.filter((l) => l.desfecho === d.value).length }));
+  const totalDespachados = concluidosPorDesfecho.reduce((sum, d) => sum + d.count, 0);
 
   const monthly = useMemo(() => {
     const buckets = new Map<string, number>();
@@ -155,7 +163,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
               <strong style={{ color: 'var(--ink)' }}>{total}</strong>
             </article>
             <article className="tile">
-              <small>Concluídos</small>
+              <small>Triagem concluída</small>
               <strong style={{ color: 'var(--success)' }}>{concluidos}</strong>
             </article>
             <article className="tile">
@@ -177,6 +185,30 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
             Leads desqualificados/desconfiados são classificados diretamente pelo agente e nunca entram no Kanban de atendimento humano.
           </p>
         )}
+      </section>
+
+      <div className="section-divider" />
+
+      <section className="section">
+        <div className="section-head">
+          <h2>Concluído</h2>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+            {totalDespachados} lead{totalDespachados === 1 ? '' : 's'} despachado{totalDespachados === 1 ? '' : 's'} pela equipe
+          </span>
+        </div>
+        {busy && !leads.length ? (
+          <SkeletonTiles />
+        ) : (
+          <div className="tiles">
+            {concluidosPorDesfecho.map((d) => (
+              <article key={d.value} className="tile">
+                <small>{d.label}</small>
+                <strong style={{ color: d.color }}>{d.count}</strong>
+              </article>
+            ))}
+          </div>
+        )}
+        {!busy && !totalDespachados && <p style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>Nenhum atendimento despachado no período selecionado.</p>}
       </section>
 
       <div className="section-divider" />

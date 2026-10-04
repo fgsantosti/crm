@@ -124,9 +124,9 @@ export function Leads({ api, company, role }: { api: Api; company: Company; role
   };
   const columns: { key: ReturnType<typeof columnOf>; label: string }[] = [
     { key: 'novo', label: 'Novo lead' },
-    { key: 'triagem', label: 'Em triagem' },
+    { key: 'triagem', label: 'Qualificados' },
     { key: 'espera', label: 'Atendimentos em espera' },
-    { key: 'humano', label: 'Atendimento humano' },
+    { key: 'humano', label: 'Em negociação' },
   ];
 
   function orderedItems(key: ReturnType<typeof columnOf>) {
