@@ -416,6 +416,33 @@ class QualificationTests(TestCase):
             {"nome", "especialidade", "tema"},
         )
         self.assertTrue(Question.objects.filter(company=nova, question_id="nome", variavel_roteiro__slug="nome").exists())
+    def test_admin_overview_and_contas_empresa(self):
+        superuser = get_user_model().objects.create_user(username="super-teste-overview", is_staff=True, is_superuser=True)
+        c = APIClient()
+        c.force_authenticate(superuser)
+
+        empresa = get_user_model().objects.create_user(username="empresa-overview", is_staff=True)
+        self.company.members.add(empresa)
+        atendente = get_user_model().objects.create_user(username="atendente-overview")
+        self.company.members.add(atendente)
+
+        overview = c.get("/api/admin-companies/overview/")
+        self.assertEqual(overview.status_code, 200)
+        body = overview.json()
+        self.assertEqual(body["empresas_total"], Company.objects.count())
+        self.assertEqual(body["empresas_com_agente_ativo"] + body["empresas_sem_agente_ativo"], body["empresas_total"])
+        self.assertIn("usuarios_ativos", body)
+
+        contas = c.get("/api/admin-companies/contas-empresa/")
+        self.assertEqual(contas.status_code, 200)
+        usernames = {row["username"] for row in contas.json()}
+        self.assertIn("empresa-overview", usernames)
+        self.assertNotIn("atendente-overview", usernames)
+        self.assertNotIn("super-teste-overview", usernames)
+
+        atendente_client = APIClient()
+        atendente_client.force_authenticate(atendente)
+        self.assertEqual(atendente_client.get("/api/admin-companies/overview/").status_code, 403)
     def test_admin_agente_gerar_status_revogar_token(self):
         superuser = get_user_model().objects.create_user(username="super-teste-3", is_staff=True, is_superuser=True)
         c = APIClient()

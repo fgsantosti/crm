@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFactory, logoutRequest, trySilentLogin } from './api';
 import type { Company, Lead, Me, Paginated, Role } from './types';
 import { Sidebar, type View } from './components/Sidebar';
+import { AdminSidebar, type AdminView } from './components/AdminSidebar';
 import { Login } from './views/Login';
 import { Dashboard } from './views/Dashboard';
 import { Leads } from './views/Leads';
@@ -11,11 +12,13 @@ import { Roteiro } from './views/Roteiro';
 import { DadosEmpresa } from './views/DadosEmpresa';
 import { Equipe } from './views/Equipe';
 import { Admin } from './views/Admin';
+import { AdminDashboard } from './views/AdminDashboard';
+import { AdminEquipe } from './views/AdminEquipe';
 import { TrocarSenhaObrigatoria } from './views/TrocarSenhaObrigatoria';
 import { TrocarEmailPagina } from './views/TrocarEmailPagina';
 import { TrocarSenhaPagina } from './views/TrocarSenhaPagina';
 
-type Screen = 'app' | 'trocar-email' | 'trocar-senha' | 'admin-panel';
+type Screen = 'app' | 'trocar-email' | 'trocar-senha';
 
 export function App() {
   // null = ainda checando a sessão (refresh silencioso via cookie httpOnly).
@@ -30,6 +33,7 @@ export function App() {
   const [humanCount, setHumanCount] = useState(0);
   const [companiesRetry, setCompaniesRetry] = useState(0);
   const [screen, setScreen] = useState<Screen>('app');
+  const [adminView, setAdminView] = useState<AdminView>('dashboard');
 
   const onSessionExpired = useCallback(() => {
     setAuthed(false);
@@ -65,7 +69,9 @@ export function App() {
   }, [authed]);
 
   useEffect(() => {
-    if (!authed) return;
+    // O admin geral nunca entra no workspace de empresa nenhuma -- não precisa
+    // buscar /companies/ (ver bloco role === 'admin' mais abaixo).
+    if (!authed || role === 'admin') return;
     let active = true;
     setError('');
     api('/companies/')
@@ -81,7 +87,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [authed, companiesRetry]);
+  }, [authed, companiesRetry, role]);
 
   useEffect(() => {
     if (!company) return;
@@ -132,7 +138,31 @@ export function App() {
       />
     );
   if (screen === 'trocar-senha') return <TrocarSenhaPagina api={api} me={me} onDone={() => setScreen('app')} onCancel={() => setScreen('app')} />;
-  if (screen === 'admin-panel') return <Admin api={api} onLogout={logout} onBackToCrm={() => setScreen('app')} />;
+
+  if (role === 'admin') {
+    return (
+      <div className="shell">
+        <AdminSidebar
+          view={adminView}
+          onNavigate={setAdminView}
+          onLogout={logout}
+          api={api}
+          me={me}
+          onMeChange={(patch) => setMe((prev) => (prev ? { ...prev, ...patch } : prev))}
+          onAccountDeleted={logout}
+          onOpenTrocarEmail={() => setScreen('trocar-email')}
+          onOpenTrocarSenha={() => setScreen('trocar-senha')}
+        />
+        <main className="main">
+          <div key={adminView} className="view-enter">
+            {adminView === 'dashboard' && <AdminDashboard api={api} />}
+            {adminView === 'equipe' && <AdminEquipe api={api} />}
+            {adminView === 'painel' && <Admin api={api} />}
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   if (!company) {
     return (
@@ -152,11 +182,6 @@ export function App() {
                 Tentar novamente
               </button>
             )}
-            {role === 'admin' && (
-              <button type="button" onClick={() => setScreen('admin-panel')}>
-                Painel Admin
-              </button>
-            )}
             <button type="button" className="secondary" onClick={logout}>
               Sair
             </button>
@@ -170,8 +195,6 @@ export function App() {
     <div className="shell">
       <Sidebar
         role={role === 'atendente' ? 'atendente' : 'empresa'}
-        isSuperuser={role === 'admin'}
-        onOpenAdminPanel={() => setScreen('admin-panel')}
         companies={companies}
         companyId={companyId}
         onCompanyChange={setCompanyId}

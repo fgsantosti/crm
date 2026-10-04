@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db.models import Case, When, Value, IntegerField
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action, api_view, permission_classes, parser_classes
@@ -492,6 +493,48 @@ class AdminCompanyViewSet(viewsets.ModelViewSet):
             return Response(gerar_token_agente(company, dias))
         revogar_token_agente(company)
         return Response({"detail": "Token revogado."})
+
+    @action(detail=False, methods=["get"])
+    def overview(self, request):
+        """Dashboard do admin geral: visão agregada, nunca por empresa específica
+        (o admin geral não opera dentro do workspace de nenhuma empresa)."""
+        companies = list(self.get_queryset())
+        data = AdminCompanySerializer(companies, many=True).data
+        com_agente_ativo = sum(1 for c in data if c["tem_agente_ativo"])
+        User = get_user_model()
+        usuarios_ativos = User.objects.filter(is_active=True).exclude(groups__name="agente").count()
+        return Response({
+            "empresas_total": len(data),
+            "empresas_com_agente_ativo": com_agente_ativo,
+            "empresas_sem_agente_ativo": len(data) - com_agente_ativo,
+            "usuarios_ativos": usuarios_ativos,
+        })
+
+    @action(detail=False, methods=["get"], url_path="contas-empresa")
+    def contas_empresa(self, request):
+        """Lista só as contas "Empresa" (is_staff, não agente, não superuser),
+        cross-tenant -- é o que vira a aba "Equipe" do admin geral (só empresas,
+        nunca atendentes, que ficam na Equipe de dentro de cada empresa)."""
+        User = get_user_model()
+        users = (
+            User.objects.filter(is_staff=True, is_superuser=False)
+            .exclude(groups__name="agente")
+            .prefetch_related("companies")
+            .order_by("username")
+        )
+        result = []
+        for u in users:
+            profile = getattr(u, "profile", None)
+            result.append({
+                "id": u.id,
+                "username": u.username,
+                "email": u.email,
+                "display_name": profile.display_name if profile else "",
+                "is_active": u.is_active,
+                "date_joined": u.date_joined,
+                "companies": [c.name for c in u.companies.all()],
+            })
+        return Response(result)
 
 class AreaViewSet(TenantMixin, viewsets.ModelViewSet):
     """Áreas de atendimento cadastradas pela empresa (tela "Equipe")."""

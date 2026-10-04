@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Logo } from '../components/Logo';
 import { Spinner, SkeletonCards } from '../components/Skeleton';
 import type { Api } from '../api';
 import type { AdminCompany, AgentStatus } from '../types';
@@ -7,9 +6,10 @@ import type { AdminCompany, AgentStatus } from '../types';
 /**
  * Painel Admin interno da Axioma: cadastro de empresas e token de API do
  * agente, cross-tenant de propósito (restrito a is_superuser no backend —
- * ver crm.views.IsSuperUser). Única tela do sistema com essa visão.
+ * ver crm.views.IsSuperUser). Uma das 3 abas do workspace do admin geral
+ * (ver AdminShell) -- sem header próprio, o shell cuida de navegação/logout.
  */
-export function Admin({ api, onLogout, onBackToCrm }: { api: Api; onLogout: () => void; onBackToCrm?: () => void }) {
+export function Admin({ api }: { api: Api }) {
   const [companies, setCompanies] = useState<AdminCompany[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -142,29 +142,8 @@ export function Admin({ api, onLogout, onBackToCrm }: { api: Api; onLogout: () =
   const visible = companies.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
-    <div className="admin-shell">
-      <header className="admin-top">
-        <div className="glow" />
-        <div className="admin-top-left">
-          <Logo size={34} />
-          <span style={{ fontFamily: "'Neuton',serif", fontWeight: 700, fontSize: 20 }}>Conecta</span>
-          <span className="admin-badge">Admin interno</span>
-        </div>
-        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 18 }}>
-          <span style={{ fontSize: 13.5, color: '#D9C7B4' }}>Axioma Operações</span>
-          {onBackToCrm && (
-            <button className="secondary" onClick={onBackToCrm}>
-              Voltar ao CRM
-            </button>
-          )}
-          <button className="logout" onClick={onLogout}>
-            Sair
-          </button>
-        </div>
-      </header>
-
-      <div className="admin-body">
-        <main className="admin-main">
+    <div className="admin-body">
+      <main className="admin-main">
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <small className="eyebrow">Plataforma</small>
@@ -365,7 +344,6 @@ export function Admin({ api, onLogout, onBackToCrm }: { api: Api; onLogout: () =
             </form>
           )}
         </aside>
-      </div>
     </div>
   );
 }

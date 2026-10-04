@@ -152,3 +152,20 @@ export type AgentStatus = {
   masked_key: string | null;
   validade: { expires_at: string; expirado: boolean } | null;
 };
+
+export type AdminOverview = {
+  empresas_total: number;
+  empresas_com_agente_ativo: number;
+  empresas_sem_agente_ativo: number;
+  usuarios_ativos: number;
+};
+
+export type AdminContaEmpresa = {
+  id: number;
+  username: string;
+  email: string;
+  display_name: string;
+  is_active: boolean;
+  date_joined: string;
+  companies: string[];
+};
