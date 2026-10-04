@@ -94,6 +94,20 @@ humano dentro do CRM (reivindicar → negociar → despachar → concluído — 
 dessas etapas tem marcador, API ou ação sua associada — `Bot encerrado=SIM`
 já é suficiente pra você permanecer em silêncio em qualquer uma delas.
 
+**Esse silêncio não é um check único — vale pra toda nova mensagem desse
+mesmo número, quantas vezes ela vier**, enquanto o lead continuar na lista de
+leads ativos (Qualificados → Atendimentos em espera → Em negociação →
+Despacho). Consulte o CRM a cada mensagem recebida (nunca confie num
+`Bot encerrado=SIM` que você viu numa mensagem anterior) e, enquanto ele
+continuar `SIM`, apenas registre a entrada e retorne `NO_REPLY` — nunca
+reabra o roteiro, nunca envie pergunta de novo, nunca reclassifique. Só
+quando o lead sair da lista de ativos (desfecho definitivo registrado —
+Encerrado, Comprometido ou Falha durante o atendimento) ele deixa de estar
+"ativo"; o contato permanece ligado a esse mesmo registro de lead mesmo
+depois disso, então uma nova mensagem do mesmo número nunca cria um lead
+novo — trate isso como limitação conhecida do fluxo atual, não como algo
+pra contornar por conta própria.
+
 ## Áudio
 
 Quando `Canal de saída=AUDIO_GRAVADO`, envie apenas o ativo pré-aprovado da etapa seguinte, sem texto, legenda ou TTS.
