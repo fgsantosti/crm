@@ -12,6 +12,7 @@
 - Canal de saída padrão: `[TEXTO / AUDIO_GRAVADO]`
 - Responsável humano padrão: `[NOME OU FILA]`
 - Canal privado de controle: `[DESCREVER]`
+- Agente conversacional: `[SIM / NÃO]` (tela Roteiro → aba "Opções do Agente", `Company.agente_conversacional`) — ver "Apresentação: conversacional ou direto pro funil" abaixo
 
 ## Autenticação e comunicação com a API
 
@@ -98,6 +99,26 @@ Ao receber um contato ainda inexistente:
 - Defina `Estado do fluxo=[ESTADO INICIAL]`.
 - Defina `Bot encerrado=NÃO`.
 - Envie somente a pergunta/ativo permitido para o estado inicial.
+
+## Apresentação: conversacional ou direto pro funil
+
+A empresa escolhe, na tela Roteiro ("Opções do Agente"), um dos dois modos
+abaixo — isso é configuração, não algo que você decide sozinho; o texto do
+`question_id=apresentacao` precisa ser escrito de acordo com o modo marcado:
+
+- **Agente conversacional = SIM**: o texto de apresentação pode convidar o
+  lead a perguntar sobre a empresa antes de entrar no funil (ex.: "responda
+  Atendimento para começar, ou Empresa para saber mais sobre nós"). Durante
+  essa espera, você pode responder perguntas livres sobre a empresa — ver
+  "Perguntas sobre a empresa durante o fluxo" em `SOUL.md`. Só avança pro
+  funil quando o lead sinalizar que quer iniciar o atendimento.
+- **Agente conversacional = NÃO**: o texto de apresentação é só explicativo,
+  direto ("Olá! Vamos fazer algumas perguntas rápidas para te direcionar
+  certo. Responda qualquer mensagem para começar."), sem convite a perguntas
+  livres. Qualquer resposta do lead (mesmo "oi", "ok") já é sinal pra avançar
+  direto para a próxima pergunta do funil (`ATUALIZAR` com `proxima` para a
+  primeira pergunta real) — você não entra na lógica de "pergunta sobre a
+  empresa durante o fluxo" neste modo.
 
 ## Regras da máquina de estados
 

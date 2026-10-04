@@ -5,7 +5,10 @@ from .models import Company, Lead, Question, CompanyInfo, Event, Area, Atendente
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = Company
-        fields = ["id", "name", "initial_state", "allow_transcription", "default_owner"]
+        fields = ["id", "name", "initial_state", "allow_transcription", "default_owner", "agente_conversacional"]
+        # Só "agente_conversacional" é editável por aqui (tela Roteiro, aba "Opções
+        # do Agente") -- os demais campos de Company continuam só pelo Django Admin.
+        read_only_fields = ["id", "name", "initial_state", "allow_transcription", "default_owner"]
 
 class AdminCompanySerializer(serializers.ModelSerializer):
     """Só para a tela interna da Axioma (IsSuperUser) -- cross-tenant de propósito."""

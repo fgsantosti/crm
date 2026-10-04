@@ -161,7 +161,9 @@ function TextoComPreview({ value, rows, onSave, variaveisRoteiro, disabled }: { 
 }
 
 export function Roteiro({ api, company, canEdit }: { api: Api; company: Company; canEdit: boolean }) {
-  const [tab, setTab] = useState<'perguntas' | 'fora-do-fluxo' | 'variaveis'>('perguntas');
+  const [tab, setTab] = useState<'perguntas' | 'fora-do-fluxo' | 'variaveis' | 'opcoes-agente'>('perguntas');
+  const [conversacional, setConversacional] = useState(company.agente_conversacional);
+  const [savingOpcoes, setSavingOpcoes] = useState(false);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [variaveis, setVariaveis] = useState<Variavel[]>([]);
   const [variaveisRoteiro, setVariaveisRoteiro] = useState<VariavelRoteiro[]>([]);
@@ -209,8 +211,22 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
 
   useEffect(() => {
     load();
+    setConversacional(company.agente_conversacional);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company.id]);
+
+  async function salvarConversacional(valor: boolean) {
+    setSavingOpcoes(true);
+    setError('');
+    try {
+      await api(`/companies/${company.id}/`, { method: 'PATCH', body: JSON.stringify({ agente_conversacional: valor }) });
+      setConversacional(valor);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingOpcoes(false);
+    }
+  }
 
   async function saveQuestion(q: Question, patch: Partial<Pick<Question, 'text' | 'variavel' | 'question_id' | 'ordem' | 'variavel_roteiro'>>) {
     setSavingQ(q.id);
@@ -418,6 +434,9 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
         </button>
         <button type="button" className={tab === 'variaveis' ? '' : 'secondary'} onClick={() => setTab('variaveis')}>
           Variáveis
+        </button>
+        <button type="button" className={tab === 'opcoes-agente' ? '' : 'secondary'} onClick={() => setTab('opcoes-agente')}>
+          Opções do Agente
         </button>
       </div>
 
@@ -706,6 +725,38 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
             )}
           </section>
         </div>
+      )}
+
+      {tab === 'opcoes-agente' && (
+        <section className="section">
+          <article className="step-card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                style={{ width: 'auto' }}
+                checked={conversacional}
+                disabled={!canEdit || savingOpcoes}
+                onChange={(e) => salvarConversacional(e.target.checked)}
+              />
+              Agente conversacional?
+            </label>
+            {conversacional ? (
+              <p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>
+                <strong>Marcado:</strong> o agente envia o texto de "Texto de apresentação" (aba "Textos fora do fluxo") e
+                pode conversar livremente sobre a empresa — respondendo com base em "Dados da empresa" — enquanto aguarda
+                o lead entrar no funil de triagem.
+              </p>
+            ) : (
+              <p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>
+                <strong>Desmarcado:</strong> o agente vai direto para o funil de triagem. Escreva, no "Texto de
+                apresentação" (aba "Textos fora do fluxo"), um texto inicial explicativo que peça para o lead responder
+                qualquer coisa confirmando que está pronto para seguir — sem conversa livre sobre a empresa nesse
+                meio-tempo.
+              </p>
+            )}
+            {savingOpcoes && <Spinner />}
+          </article>
+        </section>
       )}
     </>
   );

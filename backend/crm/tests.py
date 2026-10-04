@@ -288,6 +288,26 @@ class QualificationTests(TestCase):
         lead = Lead.objects.create(company=self.company, contact="+5585955556666", state="apresentacao")
         apply_fields(lead, self.company, {"variaveis_roteiro": {"idade": "40 anos", "slug_inexistente": "x", "nome": "tentativa de sobrescrever campo fixo"}})
         self.assertEqual(lead.variaveis_roteiro, {"idade": "40 anos"})
+    def test_company_patch_only_allows_agente_conversacional_and_blocks_atendente(self):
+        staff = get_user_model().objects.create_user(username="empresa-opcoes", is_staff=True)
+        self.company.members.add(staff)
+        c = APIClient()
+        c.force_authenticate(staff)
+
+        self.assertTrue(self.company.agente_conversacional)
+        resp = c.patch(f"/api/companies/{self.company.pk}/", {"agente_conversacional": False, "name": "Hackeado"}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["agente_conversacional"])
+        self.company.refresh_from_db()
+        self.assertFalse(self.company.agente_conversacional)
+        self.assertEqual(self.company.name, "Empresa A")  # name é read-only por aqui
+
+        atendente = get_user_model().objects.create_user(username="atendente-opcoes")
+        self.company.members.add(atendente)
+        atendente_client = APIClient()
+        atendente_client.force_authenticate(atendente)
+        negado = atendente_client.patch(f"/api/companies/{self.company.pk}/", {"agente_conversacional": True}, format="json")
+        self.assertEqual(negado.status_code, 403)
     def test_companyinfo_create_accepts_blank_content(self):
         # Bug real: "+ Nova entrada" no frontend manda content="" (preenche
         # depois); content não tinha blank=True, então todo POST de uma

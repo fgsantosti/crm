@@ -4,6 +4,8 @@ export type Company = {
   initial_state: string;
   allow_transcription: boolean;
   default_owner: string;
+  /** Marcado: agente conversa livremente sobre a empresa antes do funil. Desmarcado: vai direto pro funil com texto próprio. */
+  agente_conversacional: boolean;
 };
 
 export type Lead = {

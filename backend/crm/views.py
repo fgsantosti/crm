@@ -208,11 +208,25 @@ class IsSuperUser(permissions.BasePermission):
         user = request.user
         return bool(user and user.is_authenticated and user.is_superuser)
 
-class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
+class CompanyViewSet(viewsets.ModelViewSet):
     serializer_class = CompanySerializer
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "agent-incoming"
+    http_method_names = ["get", "post", "patch", "head", "options"]
     def get_queryset(self): return self.request.user.companies.all()
+    def create(self, request, *args, **kwargs):
+        # "post" no http_method_names é só pra incoming/delivery (@action detail=True
+        # abaixo) -- criar Company é exclusivo do Painel Admin (AdminCompanyViewSet).
+        return Response({"detail": "Use o Painel Admin interno para cadastrar uma empresa."}, status=405)
+    def get_permissions(self):
+        # Só o PATCH genérico (tela Roteiro, "Opções do Agente") é restrito à
+        # empresa/admin -- "incoming"/"delivery" são as rotas do próprio agente
+        # (POST) e continuam com a permissão padrão (IsAuthenticated), senão
+        # quebra a conta de serviço do agente. "equipe" já tem permission_classes
+        # próprio no @action.
+        if self.action == "partial_update":
+            return [permissions.IsAdminUser(), NotAgentAccount()]
+        return [permissions.IsAuthenticated()]
     @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated, NotAgentAccount])
     def equipe(self, request, pk=None):
         """Só atendentes (is_staff=False) -- nem a conta de serviço do agente,

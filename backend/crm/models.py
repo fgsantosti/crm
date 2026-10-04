@@ -11,6 +11,13 @@ class Company(models.Model):
     initial_state = models.CharField(max_length=80, default="apresentacao", help_text="question_id inicial enviado no primeiro contato.")
     allow_transcription = models.BooleanField(default=False)
     default_owner = models.CharField(max_length=120, blank=True)
+    agente_conversacional = models.BooleanField(
+        default=True,
+        help_text="Marcado: o agente envia o texto de apresentação e pode conversar livremente sobre a empresa "
+        "(fallback 'empresa') enquanto aguarda o lead entrar no funil. Desmarcado: o agente vai direto pro funil de "
+        "triagem com um texto inicial próprio, só esperando qualquer resposta do lead para avançar -- sem conversa "
+        "livre sobre a empresa nesse meio-tempo. Configurado na tela Roteiro, aba 'Opções do Agente'.",
+    )
     def __str__(self): return self.name
 
 MANDATORY_QUESTION_IDS = ["nome", "situacao", "demanda"]

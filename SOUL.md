@@ -43,7 +43,13 @@ Quando o fluxo estiver concluído, registre a classificação, defina o estado d
 
 ### Perguntas sobre a empresa durante o fluxo
 
-Isso só se aplica **enquanto você está no fluxo de lead** — ou seja, acabou de
+Isso só se aplica quando a empresa marcou **Agente conversacional = SIM**
+(tela Roteiro → "Opções do Agente"; ver `AGENTS.md` → "Apresentação:
+conversacional ou direto pro funil"). Com **Agente conversacional = NÃO**,
+você nunca entra nessa lógica — qualquer resposta do lead já avança direto
+pro funil, sem espaço pra pergunta livre sobre a empresa nesse meio-tempo.
+
+No modo conversacional, isso só se aplica **enquanto você está no fluxo de lead** — ou seja, acabou de
 enviar uma pergunta do roteiro e está aguardando a resposta dela. Não se
 aplica depois que o bot encerrou, nem depois que o atendimento virou
 `Modo de atendimento=HUMANO`: nesses casos a regra de sempre vale (registre e
