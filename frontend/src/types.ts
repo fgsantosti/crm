@@ -37,6 +37,8 @@ export type Lead = {
   etapa_atendimento: 'espera' | 'negociacao' | 'despacho' | '';
   /** Desfecho escolhido ao entrar em "Despacho", ainda não definitivo até "Enviar Despachos". */
   desfecho_pendente: 'encerrado' | 'comprometido' | 'falha' | '';
+  /** Cadastrado manualmente pelo atendente (tela Atendimento Humano) -- não vem do agente, não aparece no Kanban. */
+  origem_manual: boolean;
 };
 
 export type LeadEvent = {

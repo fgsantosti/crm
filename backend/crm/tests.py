@@ -604,6 +604,37 @@ class QualificationTests(TestCase):
         # livre de novo -- outro atendente consegue reivindicar
         reivindicado_por_b = client_b.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(reivindicado_por_b.status_code, 200)
+    def test_criar_lead_manual_nao_entra_no_kanban_e_bloqueia_contato_duplicado(self):
+        atendente = get_user_model().objects.create_user(username="atendente-manual")
+        self.company.members.add(atendente)
+        c = APIClient()
+        c.force_authenticate(atendente)
+
+        criado = c.post(
+            f"/api/leads/manual/?company={self.company.pk}",
+            {"name": "Contato Manual", "contact": "+5585977778888", "demand": "Ligou perguntando sobre honorários"},
+            format="json",
+        )
+        self.assertEqual(criado.status_code, 201)
+        body = criado.json()
+        self.assertTrue(body["origem_manual"])
+        self.assertTrue(body["bot_closed"])
+        self.assertEqual(body["owner"], "atendente-manual")
+        self.assertEqual(body["etapa_atendimento"], "")
+
+        duplicado = c.post(
+            f"/api/leads/manual/?company={self.company.pk}", {"name": "Outro", "contact": "+5585977778888"}, format="json"
+        )
+        self.assertEqual(duplicado.status_code, 400)
+
+        staff = get_user_model().objects.create_user(username="empresa-manual", is_staff=True)
+        self.company.members.add(staff)
+        staff_client = APIClient()
+        staff_client.force_authenticate(staff)
+        negado = staff_client.post(
+            f"/api/leads/manual/?company={self.company.pk}", {"name": "X", "contact": "+5585900001111"}, format="json"
+        )
+        self.assertEqual(negado.status_code, 403)
     def test_redefinir_senha_atendente_requires_empresa_and_emails_new_password(self):
         atendente = get_user_model().objects.create_user(username="atendente-x", password="senha-velha-123", email="atendente-x@example.com")
         self.company.members.add(atendente)

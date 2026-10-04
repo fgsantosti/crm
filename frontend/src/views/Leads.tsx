@@ -93,18 +93,34 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
   const podeAtender = role === 'atendente';
   const minhaIdentidade = me.display_name || me.username;
 
-  function load() {
-    setBusy(true);
-    setError('');
+  function load(silent = false) {
+    if (!silent) setBusy(true);
+    if (!silent) setError('');
     api(`/leads/?company=${company.id}`)
-      .then((d: Paginated<Lead>) => setLeads(d.results))
-      .catch((e) => setError(e.message))
-      .finally(() => setBusy(false));
+      .then((d: Paginated<Lead>) => {
+        setLeads(d.results);
+        setSelected((s) => (s ? d.results.find((l) => l.id === s.id) || s : s));
+      })
+      .catch((e) => {
+        if (!silent) setError(e.message);
+      })
+      .finally(() => {
+        if (!silent) setBusy(false);
+      });
   }
 
   useEffect(() => {
     load();
     setSelected(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [company.id]);
+
+  // Central de leads precisa pegar leads novos (criados pelo agente via WhatsApp)
+  // sem precisar recarregar a página -- silencioso (sem spinner/erro visível) pra
+  // não interromper quem está arrastando um card ou com um modal aberto.
+  useEffect(() => {
+    const id = setInterval(() => load(true), 15000);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company.id]);
 
@@ -185,6 +201,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
 
   const visible = leads
     .filter((l) => !l.desfecho)
+    .filter((l) => !l.origem_manual)
     .filter((l) => !FORA_DO_KANBAN.has(l.temperature))
     .filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()));
 

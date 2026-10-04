@@ -16,6 +16,8 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [despachandoId, setDespachandoId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [novo, setNovo] = useState(false);
+  const [salvandoNovo, setSalvandoNovo] = useState(false);
 
   const minhaIdentidade = me.display_name || me.username;
 
@@ -23,7 +25,9 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
     setBusy(true);
     setError('');
     api(`/leads/?company=${company.id}`)
-      .then((d: Paginated<Lead>) => setLeads(d.results.filter((l) => l.etapa_atendimento === 'negociacao' && !l.desfecho && l.owner === minhaIdentidade)))
+      .then((d: Paginated<Lead>) =>
+        setLeads(d.results.filter((l) => !l.desfecho && l.owner === minhaIdentidade && (l.etapa_atendimento === 'negociacao' || l.origem_manual))),
+      )
       .catch((e) => setError(e.message))
       .finally(() => setBusy(false));
   }
@@ -32,6 +36,26 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company.id]);
+
+  async function criarManual(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSalvandoNovo(true);
+    setError('');
+    const form = new FormData(e.currentTarget);
+    try {
+      const created = await api(`/leads/manual/?company=${company.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ name: form.get('name'), contact: form.get('contact'), demand: form.get('demand') }),
+      });
+      setLeads((v) => [created, ...v]);
+      setNovo(false);
+      (e.currentTarget as HTMLFormElement).reset();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSalvandoNovo(false);
+    }
+  }
 
   async function despachar(lead: Lead, desfecho: 'encerrado' | 'comprometido' | 'falha') {
     setActionBusy(lead.id);
@@ -61,19 +85,57 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
             {leads.length} caso{leads.length === 1 ? '' : 's'} sob sua responsabilidade.
           </p>
         </div>
-        <input
-          placeholder="Buscar nome ou telefone"
-          aria-label="Buscar atendimentos humanos"
-          style={{ width: 260 }}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <div style={{ display: 'flex', gap: 10 }}>
+          <input
+            placeholder="Buscar nome ou telefone"
+            aria-label="Buscar atendimentos humanos"
+            style={{ width: 260 }}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <button type="button" onClick={() => setNovo((v) => !v)}>
+            + Novo atendimento
+          </button>
+        </div>
       </header>
 
       {error && (
         <p role="alert" className="error">
           {error}
         </p>
+      )}
+
+      {novo && (
+        <form onSubmit={criarManual} className="panel" style={{ padding: 16, marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <h3 style={{ margin: 0, fontSize: 15 }}>Novo atendimento (fora do WhatsApp)</h3>
+          <small style={{ color: 'var(--muted)' }}>
+            Cadastra um contato que você está atendendo por outro canal — não passa pela triagem do agente nem aparece no
+            Kanban de Leads, só entra nas contagens do Dashboard.
+          </small>
+          <div className="fields">
+            <label style={{ margin: 0 }}>
+              Nome
+              <input name="name" />
+            </label>
+            <label style={{ margin: 0 }}>
+              Contato (telefone)
+              <input name="contact" required />
+            </label>
+          </div>
+          <label style={{ margin: 0 }}>
+            Demanda
+            <input name="demand" />
+          </label>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button disabled={salvandoNovo}>
+              {salvandoNovo && <Spinner />}
+              Cadastrar
+            </button>
+            <button type="button" className="secondary" onClick={() => setNovo(false)}>
+              Cancelar
+            </button>
+          </div>
+        </form>
       )}
 
       <section className="section">
@@ -85,6 +147,7 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
                 <div className="queue-meta">
                   <strong style={{ fontSize: 16 }}>{l.name || 'Sem nome informado'}</strong>
                   <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 12.5, color: 'var(--muted)' }}>{l.contact}</span>
+                  {l.origem_manual && <span className="chip chip-neutral">cadastro manual</span>}
                 </div>
                 <p style={{ color: 'var(--ink)', marginBottom: 4 }}>{l.demand || l.notes || 'Sem detalhes registrados.'}</p>
                 <p style={{ fontSize: 12.5 }}>

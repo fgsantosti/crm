@@ -24,6 +24,7 @@ from .services import (
     preparar_despacho as preparar_despacho_service,
     liberar_lead as liberar_lead_service,
     enviar_despachos as enviar_despachos_service,
+    criar_lead_manual as criar_lead_manual_service,
     seed_roteiro_padrao,
 )
 
@@ -339,6 +340,17 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
             return Response({"detail": "Esse perfil não despacha atendimentos."}, status=403)
         enviados = enviar_despachos_service(request.user, self.company())
         return Response({"enviados": enviados})
+    @action(detail=False, methods=["post"])
+    def manual(self, request):
+        """Atendimento Humano: atendente cadastra um atendimento próprio que não
+        veio do agente -- nunca aparece no Kanban (Lead.origem_manual), só conta
+        no Dashboard."""
+        if self._bloqueia_staff(request):
+            return Response({"detail": "Esse perfil não cadastra atendimentos."}, status=403)
+        lead, erro = criar_lead_manual_service(self.company(), request.user, request.data)
+        if erro:
+            return Response({"detail": erro}, status=400)
+        return Response(LeadSerializer(lead).data, status=201)
 
 class QuestionViewSet(TenantMixin, viewsets.ModelViewSet):
     queryset = Question.objects.all().order_by("id")

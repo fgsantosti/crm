@@ -224,6 +224,10 @@ class Lead(models.Model):
         max_length=20, choices=DESFECHO_CHOICES, blank=True,
         help_text="Desfecho escolhido ao arrastar pra 'Despacho', mas ainda NÃO definitivo -- só vira Lead.desfecho (e some do Kanban) quando o owner clica 'Enviar Despachos' (services.enviar_despachos).",
     )
+    origem_manual = models.BooleanField(
+        default=False,
+        help_text="Lead cadastrado manualmente por um atendente na tela Atendimento Humano (ver services.criar_lead_manual) -- nunca passou pelo funil do agente, não aparece no Kanban de Leads, só entra nas contagens do Dashboard.",
+    )
     class Meta:
         constraints = [models.UniqueConstraint(fields=["company", "contact"], name="unique_company_contact")]
         ordering = ["-created_at"]

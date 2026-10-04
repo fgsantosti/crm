@@ -512,6 +512,33 @@ def liberar_lead(lead_id, user):
     lead.save(update_fields=["owner", "mode", "etapa_atendimento", "desfecho_pendente"])
     return None
 
+def criar_lead_manual(company, user, dados):
+    """Atendimento Humano: o atendente cadastra um atendimento próprio que não
+    veio do WhatsApp/agente (ex.: contato por outro canal). Entra direto como
+    responsabilidade do próprio atendente que criou -- nunca passa pelo funil
+    de triagem nem aparece no Kanban de Leads (ver Lead.origem_manual), só
+    conta nas estatísticas do Dashboard. Retorna (lead, erro); erro é None se
+    criado com sucesso."""
+    nome = (dados.get("name") or "").strip()
+    contact = (dados.get("contact") or "").strip()
+    if not contact:
+        return None, "Contato é obrigatório."
+    if Lead.objects.filter(company=company, contact=contact).exists():
+        return None, "Já existe um lead com esse contato nesta empresa."
+    lead = Lead.objects.create(
+        company=company,
+        name=nome,
+        contact=contact,
+        state="ATENDIMENTO_MANUAL",
+        funnel_stage="Atendimento manual",
+        demand=(dados.get("demand") or "").strip(),
+        bot_closed=True,
+        mode="HUMANO",
+        owner=_nome_usuario(user),
+        origem_manual=True,
+    )
+    return lead, None
+
 @transaction.atomic
 def enviar_despachos(user, company):
     """Botão 'Enviar Despachos': finaliza de uma vez TODOS os leads que este
