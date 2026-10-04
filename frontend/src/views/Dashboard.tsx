@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Api } from '../api';
+import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Area, Company, Lead, Paginated } from '../types';
 import { DonutChart } from '../components/DonutChart';
 import { SkeletonTiles } from '../components/Skeleton';
@@ -13,7 +13,7 @@ type Resumo = {
   desfechos: Record<'encerrado' | 'comprometido' | 'falha', number>;
   por_area: [string, number][];
   por_mes: [string, number][];
-  por_owner: { owner: string; atendimentos: number; concluidos: number }[];
+  por_owner: { owner_id: number; owner: string; atendimentos: number; concluidos: number }[];
 };
 
 const RESUMO_VAZIO: Resumo = {
@@ -22,16 +22,6 @@ const RESUMO_VAZIO: Resumo = {
   desfechos: { encerrado: 0, comprometido: 0, falha: 0 },
   por_area: [], por_mes: [], por_owner: [],
 };
-
-// /leads/ é paginado (100 por página): sem seguir as páginas, o Kanban perdia leads.
-async function fetchTodasAsPaginas(api: Api, path: string): Promise<Lead[]> {
-  const todos: Lead[] = [];
-  for (let page = 1; ; page++) {
-    const d: Paginated<Lead> = await api(`${path}&page=${page}`);
-    todos.push(...d.results);
-    if (!d.next) return todos;
-  }
-}
 
 function rotuloMes(chave: string) {
   const [ano, mes] = chave.split('-').map(Number);
@@ -71,7 +61,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
       .then((d: Paginated<Area>) => active && setAreas(d.results))
       .catch(() => undefined);
     if (role === 'empresa') {
-      fetchTodasAsPaginas(api, `/leads/?company=${company.id}&ativos=1`)
+      fetchTodasAsPaginas<Lead>(api, `/leads/?company=${company.id}&ativos=1`)
         .then((todos) => active && setLeads(todos))
         .catch((e) => active && setError(e.message));
     }
@@ -297,7 +287,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                                 <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>{l.temperature}</small>
                               )}
                               {l.owner && col.key !== 'qualificados' && (
-                                <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>owner: {l.owner}</small>
+                                <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>owner: {l.owner_nome}</small>
                               )}
                             </div>
                           </article>
@@ -437,7 +427,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                     {byOwner.map((o) => {
                       const rate = o.atendimentos ? Math.round((o.concluidos / o.atendimentos) * 100) : 0;
                       return (
-                        <tr key={o.owner}>
+                        <tr key={o.owner_id}>
                           <td style={{ fontWeight: 600 }}>{o.owner}</td>
                           <td style={{ fontFamily: "'DM Mono',monospace" }}>{o.atendimentos}</td>
                           <td style={{ fontFamily: "'DM Mono',monospace" }}>{o.concluidos}</td>

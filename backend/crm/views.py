@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db.models import Case, When, Value, IntegerField
+from django.db.models import Case, When, Value, IntegerField, Q
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action, api_view, permission_classes, parser_classes
 from rest_framework.parsers import MultiPartParser
@@ -92,6 +92,7 @@ def me(request):
             profile.display_name = str(request.data.get("display_name") or "")[:160]
             profile.save()
     return Response({
+        "id": user.id,
         "username": user.username,
         "email": user.email,
         "display_name": profile.display_name,
@@ -278,7 +279,9 @@ class CompanyViewSet(viewsets.ModelViewSet):
 
 def _get_atendente_or_404(request, company_id, user_id):
     company = get_object_or_404(request.user.companies.all(), pk=company_id)
-    return get_object_or_404(company.members.filter(is_staff=False), pk=user_id)
+    # Conta de serviço do agente também é is_staff=False, mas nunca é "atendente":
+    # desligá-la ou trocar a senha dela derrubaria a integração com o WhatsApp.
+    return get_object_or_404(company.members.filter(is_staff=False).exclude(groups__name="agente"), pk=user_id)
 
 @api_view(["POST"])
 @permission_classes([permissions.IsAdminUser, NotAgentAccount])
@@ -310,7 +313,7 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
             return [permissions.IsAdminUser(), NotAgentAccount()]
         return [permissions.IsAuthenticated(), NotAgentAccount()]
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = super().get_queryset().select_related("owner__profile")
         if self.request.query_params.get("pending") == "1":
             # "Pendências" = coluna "Atendimentos em espera" do Kanban: já classificado,
             # já tem owner, mas ainda não entrou em negociação nem foi despachado.
@@ -321,6 +324,9 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
             # Só o que o Kanban mostra (mesma regra de Leads.leadsVisiveisNoKanban) --
             # evita que leads despachados ocupem a página e empurrem ativos pra fora.
             qs = qs.filter(desfecho="", origem_manual=False).exclude(temperature__in=FORA_DO_KANBAN)
+        if self.request.query_params.get("meus") == "1":
+            # "Meus Atendimentos": o que está em negociação comigo + meus cadastros manuais.
+            qs = qs.filter(owner=self.request.user, desfecho="").filter(Q(etapa_atendimento="negociacao") | Q(origem_manual=True))
         return qs
     @action(detail=False, methods=["get"])
     def resumo(self, request):

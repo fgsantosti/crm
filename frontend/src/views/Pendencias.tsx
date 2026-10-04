@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { Api } from '../api';
-import type { Company, Lead, Paginated } from '../types';
+import { fetchTodasAsPaginas, type Api } from '../api';
+import type { Company, Lead } from '../types';
 import { SkeletonRows } from '../components/Skeleton';
 
 export function Pendencias({ api, company }: { api: Api; company: Company }) {
@@ -13,9 +13,9 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
     let active = true;
     setBusy(true);
     setError('');
-    api(`/leads/?company=${company.id}&pending=1`)
-      .then((d: Paginated<Lead>) => {
-        if (active) setLeads(d.results);
+    fetchTodasAsPaginas<Lead>(api, `/leads/?company=${company.id}&pending=1`)
+      .then((todos) => {
+        if (active) setLeads(todos);
       })
       .catch((e) => {
         if (active) setError(e.message);
@@ -79,7 +79,7 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
                   <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 13, color: 'var(--muted)' }}>
                     {l.return_at ? new Date(l.return_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}
                   </td>
-                  <td style={{ color: 'var(--muted)' }}>{l.owner || '—'}</td>
+                  <td style={{ color: 'var(--muted)' }}>{l.owner_nome || '—'}</td>
                 </tr>
               ))}
             </tbody>

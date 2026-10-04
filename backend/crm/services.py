@@ -150,12 +150,20 @@ def receive(company, data):
     company = Company.objects.select_for_update().get(pk=company.pk)
     # Só busca/reaproveita um lead ATIVO (desfecho em aberto) pra esse contato -- se o único
     # lead existente já foi despachado, o número está livre: cria um lead novo do zero em vez
-    # de reabrir o histórico antigo. Enquanto o lead ativo não for despachado, isso sempre acha
-    # o mesmo registro (get_or_create no contato+desfecho="" ativo), nunca cria duplicata.
-    lead, created = Lead.objects.get_or_create(
-        company=company, contact=data["contact"], desfecho="",
-        defaults={"state": company.initial_state, "owner": company.default_owner},
-    )
+    # de reabrir o histórico antigo. O lock da empresa acima garante que nunca nascem dois.
+    lead = Lead.objects.filter(company=company, contact=data["contact"], desfecho="").first()
+    if not lead:
+        # Desqualificado recém-encerrado: um "ok, obrigado" logo depois da mensagem de
+        # encerramento não pode reabrir a triagem do zero -- fica mudo durante o cooldown.
+        lead = Lead.objects.filter(
+            company=company, contact=data["contact"], desfecho="desqualificado",
+            concluido_em__gte=timezone.now() - COOLDOWN_DESQUALIFICADO,
+        ).order_by("-concluido_em").first()
+    if not lead:
+        lead = Lead.objects.create(
+            company=company, contact=data["contact"], state=company.initial_state,
+            owner=resolver_usuario(company, company.default_owner),
+        )
     previous = Event.objects.filter(lead=lead, message_id=data["message_id"]).first()
     if previous:
         return {**NO_REPLY, "duplicate": True, "lead_id": str(lead.pk)}
@@ -222,6 +230,12 @@ def receive(company, data):
                     lead.funnel_stage = "Triagem concluída"
                     lead.next_action = "Revisar classificação e dar continuidade humana"
                     question_id = "encerramento"
+                    if lead.temperature in FORA_DO_KANBAN:
+                        # Nunca entra no Kanban humano, então nunca seria despachado: fecha
+                        # aqui, senão o número ficaria preso como "lead ativo" pra sempre.
+                        lead.desfecho = "desqualificado"
+                        lead.concluido_em = timezone.now()
+                        lead.next_action = ""
         else:
             escalate(lead, f"Marcador desconhecido: {marker}")
             question_id = None
@@ -423,17 +437,38 @@ def revogar_token_agente(company):
 # Espera" -> "Atendimento humano" -> encerrado/comprometido/falha) ---
 
 def _nome_usuario(user):
+    """Só pra EXIBIÇÃO -- nunca usar pra comparar dono de lead (isso é Lead.owner, FK)."""
+    if user is None:
+        return ""
     profile = getattr(user, "profile", None)
     return (profile.display_name if profile else "") or user.get_full_name() or user.username
 
+def resolver_usuario(company, texto):
+    """Texto livre (ex.: Company.default_owner) -> membro da empresa, por nome de
+    exibição, nome completo, primeiro nome ou username. Só aceita match único."""
+    texto = (texto or "").strip().lower()
+    if not texto:
+        return None
+    candidatos = []
+    for u in company.members.filter(is_active=True).exclude(groups__name="agente").select_related("profile"):
+        profile = getattr(u, "profile", None)
+        chaves = {(profile.display_name if profile else ""), u.get_full_name(), u.first_name, u.username}
+        if texto in {c.strip().lower() for c in chaves if c}:
+            candidatos.append(u)
+    return candidatos[0] if len(candidatos) == 1 else None
+
 def _validar_lead_classificavel(lead):
     """Checagem comum a toda transição pós-triagem do Kanban (Qualificados em
-    diante): precisa ter terminado o funil e não pode ser Desqualificado/
+    diante): precisa ter terminado o funil -- ou ter sido escalado pra humano no
+    meio dele (falha de entrega, pedido humano, área desconhecida...), senão esse
+    lead ficaria preso sem ninguém poder assumir -- e não pode ser Desqualificado/
     Desconfiado (esses nunca entram na fila de atendimento humano)."""
-    if not lead.bot_closed:
+    if not lead.bot_closed and lead.mode != "HUMANO":
         return "Este lead ainda não concluiu a triagem."
     if lead.temperature in FORA_DO_KANBAN:
         return "Leads classificados como Desqualificado ou Desconfiado não entram na fila de atendimento humano."
+    if lead.desfecho:
+        return "Este atendimento já foi concluído."
     return None
 
 @transaction.atomic
@@ -445,12 +480,12 @@ def reivindicar_lead(lead_id, user):
     lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
     if not lead:
         return "Lead não encontrado."
-    if lead.owner:
+    if lead.owner_id:
         return "Este atendimento já foi assumido por outro atendente."
     erro = _validar_lead_classificavel(lead)
     if erro:
         return erro
-    lead.owner = _nome_usuario(user)
+    lead.owner = user
     lead.etapa_atendimento = "espera"
     lead.save(update_fields=["owner", "etapa_atendimento"])
     return None
@@ -464,13 +499,12 @@ def mover_para_negociacao(lead_id, user):
     lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
     if not lead:
         return "Lead não encontrado."
-    nome = _nome_usuario(user)
-    if lead.owner and lead.owner != nome:
+    if lead.owner_id and lead.owner_id != user.pk:
         return "Só quem assumiu este atendimento pode movê-lo."
     erro = _validar_lead_classificavel(lead)
     if erro:
         return erro
-    lead.owner = nome
+    lead.owner = user
     lead.mode = "HUMANO"
     lead.etapa_atendimento = "negociacao"
     lead.save(update_fields=["owner", "mode", "etapa_atendimento"])
@@ -486,16 +520,15 @@ def preparar_despacho(lead_id, desfecho, user, auto_falha=False):
     lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
     if not lead:
         return "Lead não encontrado."
-    nome = _nome_usuario(user)
-    if lead.owner and lead.owner != nome:
+    if lead.owner_id and lead.owner_id != user.pk:
         return "Só quem assumiu este atendimento pode despachá-lo."
     erro = _validar_lead_classificavel(lead)
     if erro:
         return erro
     desfecho_final = "falha" if auto_falha else desfecho
-    if desfecho_final not in dict(Lead.DESFECHO_CHOICES):
+    if desfecho_final not in Lead.DESFECHO_DESPACHO:
         return "Classificação de despacho inválida."
-    lead.owner = nome
+    lead.owner = user
     lead.etapa_atendimento = "despacho"
     lead.desfecho_pendente = desfecho_final
     lead.save(update_fields=["owner", "etapa_atendimento", "desfecho_pendente"])
@@ -509,11 +542,18 @@ def liberar_lead(lead_id, user):
     lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
     if not lead:
         return "Lead não encontrado."
-    nome = _nome_usuario(user)
-    if lead.owner and lead.owner != nome:
+    if not lead.owner_id and not lead.etapa_atendimento:
+        return "Este atendimento não está assumido por ninguém."
+    if lead.owner_id and lead.owner_id != user.pk:
         return "Só quem assumiu este atendimento pode devolvê-lo pra Qualificados."
-    lead.owner = ""
-    lead.mode = "AUTOMÁTICO"
+    if lead.desfecho:
+        return "Este atendimento já foi concluído."
+    lead.owner = None
+    # Só volta pra AUTOMÁTICO quem já terminou a triagem (aí bot_closed mantém o bot
+    # mudo de qualquer jeito). Lead escalado no meio do funil continua HUMANO --
+    # senão "devolver" religaria o agente num caso que pediu humano.
+    if lead.bot_closed:
+        lead.mode = "AUTOMÁTICO"
     lead.etapa_atendimento = ""
     lead.desfecho_pendente = ""
     lead.save(update_fields=["owner", "mode", "etapa_atendimento", "desfecho_pendente"])
@@ -526,26 +566,36 @@ def criar_lead_manual(company, user, dados):
     de triagem nem aparece no Kanban de Leads (ver Lead.origem_manual), só
     conta nas estatísticas do Dashboard. Retorna (lead, erro); erro é None se
     criado com sucesso."""
-    nome = (dados.get("name") or "").strip()
-    contact = (dados.get("contact") or "").strip()
-    if not contact:
-        return None, "Contato é obrigatório."
-    # Só bloqueia se já existir um lead ATIVO pra esse contato -- um lead antigo já despachado
-    # não impede um novo cadastro (mesma regra de "ativo" usada em services.receive).
-    if Lead.objects.filter(company=company, contact=contact, desfecho="").exists():
+    from django.db import IntegrityError
+    from .serializers import LeadManualSerializer
+    entrada = LeadManualSerializer(data=dados)
+    if not entrada.is_valid():
+        campo, erros = next(iter(entrada.errors.items()))
+        return None, str(erros[0]) if campo == "non_field_errors" else f"{LeadManualSerializer.ROTULOS.get(campo, campo)}: {erros[0]}"
+    v = entrada.validated_data
+    try:
+        with transaction.atomic():
+            # Lock da empresa: mesma serialização de services.receive, então a checagem
+            # de duplicado e a criação nunca correm em paralelo com outro cadastro/agente.
+            Company.objects.select_for_update().get(pk=company.pk)
+            # Só bloqueia se já existir um lead ATIVO pra esse contato -- um lead antigo já
+            # despachado não impede um novo cadastro (mesma regra de "ativo" de receive).
+            if Lead.objects.filter(company=company, contact=v["contact"], desfecho="").exists():
+                return None, "Já existe um lead ativo com esse contato nesta empresa."
+            lead = Lead.objects.create(
+                company=company,
+                name=v["name"],
+                contact=v["contact"],
+                state="ATENDIMENTO_MANUAL",
+                funnel_stage="Atendimento manual",
+                demand=v["demand"],
+                bot_closed=True,
+                mode="HUMANO",
+                owner=user,
+                origem_manual=True,
+            )
+    except IntegrityError:
         return None, "Já existe um lead ativo com esse contato nesta empresa."
-    lead = Lead.objects.create(
-        company=company,
-        name=nome,
-        contact=contact,
-        state="ATENDIMENTO_MANUAL",
-        funnel_stage="Atendimento manual",
-        demand=(dados.get("demand") or "").strip(),
-        bot_closed=True,
-        mode="HUMANO",
-        owner=_nome_usuario(user),
-        origem_manual=True,
-    )
     return lead, None
 
 @transaction.atomic
@@ -553,14 +603,15 @@ def enviar_despachos(user, company):
     """Botão 'Enviar Despachos': finaliza de uma vez TODOS os leads que este
     atendente já reservou na coluna Despacho DESTA empresa (desfecho_pendente
     -> desfecho definitivo). Devolve a quantidade enviada."""
-    nome = _nome_usuario(user)
-    leads = list(Lead.objects.select_for_update().filter(company=company, owner=nome, etapa_atendimento="despacho").exclude(desfecho_pendente=""))
+    leads = list(Lead.objects.select_for_update().filter(company=company, owner=user, etapa_atendimento="despacho", desfecho="").exclude(desfecho_pendente=""))
+    agora = timezone.now()
     for lead in leads:
         lead.desfecho = lead.desfecho_pendente
+        lead.concluido_em = agora
         lead.desfecho_pendente = ""
         lead.etapa_atendimento = ""
         lead.next_action = ""
-        lead.save(update_fields=["desfecho", "desfecho_pendente", "etapa_atendimento", "next_action"])
+        lead.save(update_fields=["desfecho", "concluido_em", "desfecho_pendente", "etapa_atendimento", "next_action"])
     return len(leads)
 
 # --- Variáveis do Agente: peso (1-10) de cada pergunta sugere urgência ---
@@ -582,6 +633,7 @@ URGENCIA_RANK = {temp: i for i, (_, _, temp) in enumerate(URGENCIA_POR_FAIXA)}
 # assumidos por atendente, só contam nas estatísticas do dashboard.
 FORA_DO_KANBAN = {"Desqualificado", "Desconfiado"}
 PODE_ASSUMIR_A_PARTIR_DE = "Remarketing"
+COOLDOWN_DESQUALIFICADO = timedelta(hours=24)
 
 def calcular_urgencia_sugerida(pesos):
     """Sugestão auxiliar a partir da média dos pesos (1-10) das Variaveis das
@@ -600,6 +652,8 @@ def _categoria_status(lead):
     """Categoria exclusiva (cada lead cai em exatamente uma) usada no donut/tiles
     do Dashboard -- antes "Concluído" (bot_closed) e "Atendimento humano"
     (mode=HUMANO) se sobrepunham e a soma passava do total."""
+    if lead["desfecho"] == "desqualificado":
+        return "desqualificado"
     if lead["desfecho"]:
         return "despachado"
     if not lead["bot_closed"] and lead["mode"] != "HUMANO":
@@ -619,8 +673,13 @@ def resumo_dashboard(company, dias=None, area="", busca=""):
     if area:
         qs = qs.filter(especialidade=area)
     if busca:
-        qs = qs.filter(Q(name__icontains=busca) | Q(contact__icontains=busca) | Q(owner__icontains=busca))
+        qs = qs.filter(
+            Q(name__icontains=busca) | Q(contact__icontains=busca) | Q(owner__username__icontains=busca)
+            | Q(owner__first_name__icontains=busca) | Q(owner__profile__display_name__icontains=busca)
+        )
     rows = list(qs.values("created_at", "desfecho", "bot_closed", "mode", "temperature", "especialidade", "owner"))
+    User = get_user_model()
+    nomes = {u.pk: _nome_usuario(u) for u in User.objects.filter(pk__in={r["owner"] for r in rows if r["owner"]}).select_related("profile")}
 
     status = {"despachado": 0, "automatico": 0, "equipe": 0, "desqualificado": 0}
     desfechos = {"encerrado": 0, "comprometido": 0, "falha": 0}
@@ -635,7 +694,7 @@ def resumo_dashboard(company, dias=None, area="", busca=""):
         mes = timezone.localtime(r["created_at"], tz).strftime("%Y-%m")
         por_mes[mes] = por_mes.get(mes, 0) + 1
         if r["owner"]:
-            o = por_owner.setdefault(r["owner"], {"owner": r["owner"], "atendimentos": 0, "concluidos": 0})
+            o = por_owner.setdefault(r["owner"], {"owner_id": r["owner"], "owner": nomes.get(r["owner"], ""), "atendimentos": 0, "concluidos": 0})
             o["atendimentos"] += 1
             if r["desfecho"]:
                 o["concluidos"] += 1

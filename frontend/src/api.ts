@@ -2,6 +2,16 @@ const base = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 export type Api = (path: string, init?: RequestInit) => Promise<any>;
 
+/** Listas da API são paginadas (100 por página): segue `next` até o fim. */
+export async function fetchTodasAsPaginas<T>(api: Api, path: string): Promise<T[]> {
+  const todos: T[] = [];
+  for (let page = 1; ; page++) {
+    const d: { next: string | null; results: T[] } = await api(`${path}${path.includes('?') ? '&' : '?'}page=${page}`);
+    todos.push(...d.results);
+    if (!d.next) return todos;
+  }
+}
+
 // O access token vive só em memória (nunca localStorage/sessionStorage): some
 // ao recarregar a página, e volta via refresh silencioso usando o cookie
 // httpOnly do refresh token, que o JavaScript nunca consegue ler (proteção

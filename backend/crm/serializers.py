@@ -1,3 +1,4 @@
+import re
 from django.utils import timezone
 from rest_framework import serializers
 from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, VariavelRoteiro, MANDATORY_OFFFLOW_QUESTION_IDS, MANDATORY_QUESTION_IDS
@@ -31,6 +32,13 @@ class AdminCompanySerializer(serializers.ModelSerializer):
         return not (status["validade"] and status["validade"]["expirado"])
 
 class LeadSerializer(serializers.ModelSerializer):
+    # owner é o id do usuário (compare com /me/.id); owner_nome é só pra exibir.
+    owner_nome = serializers.SerializerMethodField()
+
+    def get_owner_nome(self, obj):
+        from .services import _nome_usuario
+        return _nome_usuario(obj.owner)
+
     class Meta:
         model = Lead
         fields = "__all__"
@@ -43,6 +51,27 @@ class LeadSerializer(serializers.ModelSerializer):
         if attrs.get("mode") == "AUTOMÁTICO" and self.instance and self.instance.mode == "HUMANO":
             raise serializers.ValidationError("Retomada exige comando administrativo autorizado; indisponível nesta versão.")
         return attrs
+
+class LeadManualSerializer(serializers.Serializer):
+    """Entrada do cadastro manual (tela Meus Atendimentos): limites iguais aos do
+    model (senão estoura DataError/500) e contato normalizado pra E.164 -- mesma
+    chave que o agente usa, senão o mesmo cliente vira dois leads ativos."""
+    ROTULOS = {"name": "Nome", "contact": "Contato", "demand": "Demanda"}
+    name = serializers.CharField(max_length=160, required=False, allow_blank=True, default="", trim_whitespace=True)
+    contact = serializers.CharField(max_length=40, error_messages={"required": "obrigatório.", "blank": "obrigatório."})
+    demand = serializers.CharField(max_length=300, required=False, allow_blank=True, default="", trim_whitespace=True)
+
+    def validate_contact(self, value):
+        digitos = re.sub(r"\D", "", value)
+        if value.strip().startswith("+"):
+            e164 = f"+{digitos}"
+        elif digitos.startswith("55") and len(digitos) in (12, 13):
+            e164 = f"+{digitos}"
+        else:
+            e164 = f"+55{digitos}"
+        if not re.fullmatch(r"\+[1-9]\d{7,14}", e164):
+            raise serializers.ValidationError("use um telefone válido com DDD (ex.: +55 85 99999-8888).")
+        return e164
 
 class VariavelSerializer(serializers.ModelSerializer):
     class Meta:

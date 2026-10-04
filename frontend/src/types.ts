@@ -29,12 +29,17 @@ export type Lead = {
   next_action: string;
   return_at: string | null;
   priority: 'Alta' | 'Média' | 'Baixa';
-  owner: string;
+  /** id do usuário responsável -- compare com Me.id, nunca por nome. */
+  owner: number | null;
+  /** Só pra exibição. */
+  owner_nome: string;
   mode: 'AUTOMÁTICO' | 'HUMANO';
   last_audio_id: string;
   bot_closed: boolean;
   notes: string;
-  desfecho: 'encerrado' | 'comprometido' | 'falha' | '';
+  /** 'desqualificado' é automático (classificado Desqualificado/Desconfiado), nunca escolhido no Despacho. */
+  desfecho: 'encerrado' | 'comprometido' | 'falha' | 'desqualificado' | '';
+  concluido_em: string | null;
   /** Coluna do Kanban pós-classificação em que esse owner já está. Vazio = ainda em "Qualificados". */
   etapa_atendimento: 'espera' | 'negociacao' | 'despacho' | '';
   /** Desfecho escolhido ao entrar em "Despacho", ainda não definitivo até "Enviar Despachos". */
@@ -99,6 +104,7 @@ export type Paginated<T> = { count: number; next: string | null; previous: strin
 export type Role = 'atendente' | 'empresa' | 'admin';
 
 export type Me = {
+  id: number;
   username: string;
   email: string;
   display_name: string;

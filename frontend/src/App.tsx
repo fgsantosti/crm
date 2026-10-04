@@ -92,11 +92,16 @@ export function App() {
   useEffect(() => {
     if (!company) return;
     let active = true;
-    Promise.all([api(`/leads/?company=${company.id}`), api(`/leads/?company=${company.id}&pending=1`)])
-      .then(([main, pending]: [Paginated<Lead>, Paginated<Lead>]) => {
+    // Só os `count` (total no servidor) -- nunca contar em cima de results, que é só a 1ª página.
+    Promise.all([
+      api(`/leads/?company=${company.id}&ativos=1`),
+      api(`/leads/?company=${company.id}&pending=1`),
+      api(`/leads/?company=${company.id}&meus=1`),
+    ])
+      .then(([ativos, pending, meus]: [Paginated<Lead>, Paginated<Lead>, Paginated<Lead>]) => {
         if (!active) return;
-        setLeadsCount(main.count);
-        setHumanCount(main.results.filter((l) => l.etapa_atendimento === 'negociacao').length);
+        setLeadsCount(ativos.count);
+        setHumanCount(meus.count);
         setPendingCount(pending.count);
       })
       .catch(() => {});

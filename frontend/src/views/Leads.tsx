@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Api } from '../api';
-import type { Company, Lead, LeadEvent, Me, Paginated } from '../types';
+import { fetchTodasAsPaginas, type Api } from '../api';
+import type { Company, Lead, LeadEvent, Me } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 
 // Mesma ordem de services.URGENCIA_POR_FAIXA no backend (menos urgente -> mais urgente).
@@ -26,7 +26,9 @@ export const COLUMNS: { key: ColumnKey; label: string }[] = [
 ];
 
 export function columnOf(l: Lead): ColumnKey {
-  if (!l.bot_closed) return 'novos';
+  // Escalado pra humano no meio da triagem (pedido humano, falha de entrega...) já vai
+  // pra Qualificados -- senão ficava preso em "Novos" sem ninguém poder assumir.
+  if (!l.bot_closed && l.mode !== 'HUMANO') return 'novos';
   if (l.etapa_atendimento === 'espera') return 'espera';
   if (l.etapa_atendimento === 'negociacao') return 'negociacao';
   if (l.etapa_atendimento === 'despacho') return 'despacho';
@@ -109,17 +111,25 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
   const [cadastroSemAtendimentoModal, setCadastroSemAtendimentoModal] = useState<Lead | null>(null);
   const [despachoClassificarModal, setDespachoClassificarModal] = useState<Lead | null>(null);
   const [enviandoDespachos, setEnviandoDespachos] = useState(false);
+  const [desqualificadosCount, setDesqualificadosCount] = useState(0);
 
   const podeAtender = role === 'atendente';
-  const minhaIdentidade = me.display_name || me.username;
 
   function load(silent = false) {
     if (!silent) setBusy(true);
     if (!silent) setError('');
-    api(`/leads/?company=${company.id}`)
-      .then((d: Paginated<Lead>) => {
-        setLeads(d.results);
-        setSelected((s) => (s ? d.results.find((l) => l.id === s.id) || s : s));
+    // Só os ativos, todas as páginas: concluídos nunca são apagados e, sem o filtro,
+    // empurravam os ativos mais antigos pra fora da 1ª página.
+    // Desqualificados/desconfiados ficam fora do filtro de ativos -- a contagem vem do resumo.
+    if (!silent) {
+      api(`/leads/resumo/?company=${company.id}&dias=all`)
+        .then((r: { desqualificados: number }) => setDesqualificadosCount(r.desqualificados))
+        .catch(() => {});
+    }
+    fetchTodasAsPaginas<Lead>(api, `/leads/?company=${company.id}&ativos=1`)
+      .then((todos) => {
+        setLeads(todos);
+        setSelected((s) => (s ? todos.find((l) => l.id === s.id) || s : s));
       })
       .catch((e) => {
         if (!silent) setError(e.message);
@@ -217,7 +227,6 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
     }
   }
 
-  const desqualificados = leads.filter((l) => FORA_DO_KANBAN.has(l.temperature));
 
   const visible = leadsVisiveisNoKanban(leads).filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()));
 
@@ -230,14 +239,14 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
     const col = columnOf(l);
     if (col === 'novos') return false;
     if (col === 'qualificados') return true;
-    return l.owner === minhaIdentidade;
+    return l.owner === me.id;
   }
 
   // Card de outro atendente (já reivindicado/em negociação/despacho por alguém que não é você):
   // fica cinza, não clicável e não arrastável -- só o owner mexe nele.
   function ehDeOutroOwner(l: Lead): boolean {
     const col = columnOf(l);
-    return (col === 'espera' || col === 'negociacao' || col === 'despacho') && !!l.owner && l.owner !== minhaIdentidade;
+    return (col === 'espera' || col === 'negociacao' || col === 'despacho') && l.owner !== null && l.owner !== me.id;
   }
 
   function onDropEm(target: ColumnKey, lead: Lead | null) {
@@ -291,7 +300,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
     }
   }
 
-  const minhasNoDespacho = leads.filter((l) => columnOf(l) === 'despacho' && l.owner === minhaIdentidade && !l.desfecho);
+  const minhasNoDespacho = leads.filter((l) => columnOf(l) === 'despacho' && l.owner === me.id && !l.desfecho);
 
   return (
     <>
@@ -361,7 +370,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
                         tabIndex={bloqueado ? -1 : 0}
                         role="button"
                         aria-disabled={bloqueado}
-                        aria-label={bloqueado ? `${l.name || l.contact} — em atendimento com ${l.owner}` : `Ver detalhes de ${l.name || l.contact}`}
+                        aria-label={bloqueado ? `${l.name || l.contact} — em atendimento com ${l.owner_nome}` : `Ver detalhes de ${l.name || l.contact}`}
                         onKeyDown={(e) => {
                           if (!bloqueado && (e.key === 'Enter' || e.key === ' ')) {
                             e.preventDefault();
@@ -393,7 +402,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
                             <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>{l.temperature}</small>
                           )}
                           {l.owner && col.key !== 'qualificados' && (
-                            <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>owner: {l.owner}</small>
+                            <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>owner: {l.owner_nome}</small>
                           )}
                         </div>
                       </article>
@@ -424,8 +433,8 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
         )}
         <p className="table-note">
           Exibindo até 100 leads por consulta.
-          {desqualificados.length > 0 && (
-            <> · {desqualificados.length} lead{desqualificados.length === 1 ? '' : 's'} desqualificado{desqualificados.length === 1 ? '' : 's'}/desconfiado{desqualificados.length === 1 ? '' : 's'} (fora do fluxo, ver Dashboard)</>
+          {desqualificadosCount > 0 && (
+            <> · {desqualificadosCount} lead{desqualificadosCount === 1 ? '' : 's'} desqualificado{desqualificadosCount === 1 ? '' : 's'}/desconfiado{desqualificadosCount === 1 ? '' : 's'} (fora do fluxo, ver Dashboard)</>
           )}
         </p>
       </section>
@@ -449,7 +458,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
             {selected.owner && (
               <>
                 {' '}
-                · Responsável: <strong style={{ color: 'var(--ink)' }}>{selected.owner}</strong>
+                · Responsável: <strong style={{ color: 'var(--ink)' }}>{selected.owner_nome}</strong>
               </>
             )}
           </p>

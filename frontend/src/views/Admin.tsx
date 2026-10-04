@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Spinner, SkeletonCards } from '../components/Skeleton';
-import type { Api } from '../api';
+import { fetchTodasAsPaginas, type Api } from '../api';
 import type { AdminCompany, AgentStatus } from '../types';
 
 /**
@@ -29,8 +29,8 @@ export function Admin({ api }: { api: Api }) {
   function loadCompanies() {
     setBusy(true);
     setError('');
-    api('/admin-companies/')
-      .then((d: { results: AdminCompany[] }) => setCompanies(d.results))
+    fetchTodasAsPaginas<AdminCompany>(api, '/admin-companies/')
+      .then(setCompanies)
       .catch((e) => setError(e.message))
       .finally(() => setBusy(false));
   }

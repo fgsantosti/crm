@@ -523,9 +523,10 @@ class QualificationTests(TestCase):
         negado = client.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(negado.status_code, 400)
         lead.refresh_from_db()
-        self.assertEqual(lead.owner, "")
+        self.assertIsNone(lead.owner)
 
         lead.temperature = "Remarketing"
+        lead.desfecho = ""
         lead.save()
         ok = client.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(ok.status_code, 200)
@@ -536,7 +537,7 @@ class QualificationTests(TestCase):
         self.delivered(self.send("3", marker="VALIDAR"))
         self.send("4", marker="CLASSIFICADO", fields={"temperatura": "Quente", "prioridade": "Alta"})
         lead = Lead.objects.get()
-        self.assertEqual(lead.owner, "")
+        self.assertIsNone(lead.owner)
 
         staff = get_user_model().objects.create_user(username="empresa-assumir", is_staff=True)
         self.company.members.add(staff)
@@ -556,20 +557,20 @@ class QualificationTests(TestCase):
         ok = client_a.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(ok.status_code, 200)
         lead.refresh_from_db()
-        self.assertEqual(lead.owner, "atendente-a")
+        self.assertEqual(lead.owner, atendente_a)
         self.assertEqual(lead.etapa_atendimento, "espera")
         self.assertEqual(lead.mode, "AUTOMÁTICO")  # só vira HUMANO ao entrar em negociação
 
         ja_assumido = client_b.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(ja_assumido.status_code, 400)
         lead.refresh_from_db()
-        self.assertEqual(lead.owner, "atendente-a")
+        self.assertEqual(lead.owner, atendente_a)
 
         # owner/etapa_atendimento não podem mais ser trocados por PATCH livre
-        bypass = client_a.patch(f"/api/leads/{lead.pk}/?company={self.company.pk}", {"owner": "hackeado"}, format="json")
+        bypass = client_a.patch(f"/api/leads/{lead.pk}/?company={self.company.pk}", {"owner": atendente_b.pk}, format="json")
         self.assertEqual(bypass.status_code, 200)
         lead.refresh_from_db()
-        self.assertEqual(lead.owner, "atendente-a")
+        self.assertEqual(lead.owner, atendente_a)
     def test_negociar_lead_from_qualificados_or_espera_and_blocks_other_owner(self):
         self.delivered(self.send())
         self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": "nome"}))
@@ -588,7 +589,7 @@ class QualificationTests(TestCase):
         ok = client_a.post(f"/api/leads/{lead.pk}/negociar/?company={self.company.pk}")
         self.assertEqual(ok.status_code, 200)
         lead.refresh_from_db()
-        self.assertEqual(lead.owner, "atendente-neg-a")
+        self.assertEqual(lead.owner, atendente_a)
         self.assertEqual(lead.mode, "HUMANO")
         self.assertEqual(lead.etapa_atendimento, "negociacao")
 
@@ -609,7 +610,7 @@ class QualificationTests(TestCase):
         resp = client.post(f"/api/leads/{lead.pk}/preparar-despacho/?company={self.company.pk}", {"auto_falha": True}, format="json")
         self.assertEqual(resp.status_code, 200)
         lead.refresh_from_db()
-        self.assertEqual(lead.owner, "atendente-auto-falha")
+        self.assertEqual(lead.owner, atendente)
         self.assertEqual(lead.etapa_atendimento, "despacho")
         self.assertEqual(lead.desfecho_pendente, "falha")
         self.assertEqual(lead.desfecho, "")  # ainda não é definitivo
@@ -665,7 +666,7 @@ class QualificationTests(TestCase):
         ok = client_a.post(f"/api/leads/{lead.pk}/liberar/?company={self.company.pk}")
         self.assertEqual(ok.status_code, 200)
         lead.refresh_from_db()
-        self.assertEqual(lead.owner, "")
+        self.assertIsNone(lead.owner)
         self.assertEqual(lead.etapa_atendimento, "")
 
         # livre de novo -- outro atendente consegue reivindicar
@@ -720,7 +721,8 @@ class QualificationTests(TestCase):
         body = criado.json()
         self.assertTrue(body["origem_manual"])
         self.assertTrue(body["bot_closed"])
-        self.assertEqual(body["owner"], "atendente-manual")
+        self.assertEqual(body["owner"], atendente.pk)
+        self.assertEqual(body["owner_nome"], "atendente-manual")
         self.assertEqual(body["etapa_atendimento"], "")
 
         duplicado = c.post(
@@ -1040,6 +1042,8 @@ class DashboardResumoTests(TestCase):
         self.other = Company.objects.create(name="Outra")
         self.user = get_user_model().objects.create_user(username="dash-op")
         self.company.members.add(self.user)
+        self.ana = get_user_model().objects.create_user(username="ana")
+        self.company.members.add(self.ana)
         self.client = APIClient()
         self.client.force_authenticate(self.user)
 
@@ -1048,7 +1052,7 @@ class DashboardResumoTests(TestCase):
 
     def test_resumo_conta_todos_os_leads_mesmo_acima_de_uma_pagina(self):
         for i in range(105):
-            self.lead(f"+55859990{i:05d}", bot_closed=True, mode="HUMANO", owner="ana", desfecho="encerrado", temperature="Quente")
+            self.lead(f"+55859990{i:05d}", bot_closed=True, mode="HUMANO", owner=self.ana, desfecho="encerrado", temperature="Quente")
         self.lead("+5585888000001")
         data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
         self.assertEqual(data["total"], 106)
@@ -1060,22 +1064,22 @@ class DashboardResumoTests(TestCase):
         self.lead("+5585000000001")  # automático
         self.lead("+5585000000002", mode="HUMANO")  # escalado pelo CRM
         self.lead("+5585000000003", bot_closed=True, temperature="Quente")  # qualificado, ainda sem owner
-        self.lead("+5585000000004", bot_closed=True, mode="HUMANO", owner="ana", etapa_atendimento="negociacao", temperature="Quente")
+        self.lead("+5585000000004", bot_closed=True, mode="HUMANO", owner=self.ana, etapa_atendimento="negociacao", temperature="Quente")
         self.lead("+5585000000005", bot_closed=True, temperature="Desqualificado")
-        self.lead("+5585000000006", bot_closed=True, mode="HUMANO", owner="ana", desfecho="falha", temperature="Quente")
+        self.lead("+5585000000006", bot_closed=True, mode="HUMANO", owner=self.ana, desfecho="falha", temperature="Quente")
         data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
         self.assertEqual(data["status"], {"despachado": 1, "automatico": 1, "equipe": 3, "desqualificado": 1})
         self.assertEqual(sum(data["status"].values()), data["total"])
 
     def test_resumo_taxa_por_atendente_usa_desfecho_nao_bot_closed(self):
-        self.lead("+5585000000011", bot_closed=True, mode="HUMANO", owner="ana", etapa_atendimento="negociacao")
-        self.lead("+5585000000012", bot_closed=True, mode="HUMANO", owner="ana", desfecho="encerrado")
+        self.lead("+5585000000011", bot_closed=True, mode="HUMANO", owner=self.ana, etapa_atendimento="negociacao")
+        self.lead("+5585000000012", bot_closed=True, mode="HUMANO", owner=self.ana, desfecho="encerrado")
         self.lead("+5585000000013")  # sem owner: não entra na tabela de atendentes
         data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
-        self.assertEqual(data["por_owner"], [{"owner": "ana", "atendimentos": 2, "concluidos": 1}])
+        self.assertEqual(data["por_owner"], [{"owner_id": self.ana.pk, "owner": "ana", "atendimentos": 2, "concluidos": 1}])
 
     def test_resumo_mesmo_contato_reaberto_conta_os_dois_leads(self):
-        self.lead("+5585000000021", bot_closed=True, mode="HUMANO", owner="ana", desfecho="encerrado")
+        self.lead("+5585000000021", bot_closed=True, mode="HUMANO", owner=self.ana, desfecho="encerrado")
         self.lead("+5585000000021")
         data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
         self.assertEqual(data["total"], 2)
@@ -1108,3 +1112,139 @@ class DashboardResumoTests(TestCase):
         self.lead("+5585000000054", bot_closed=True, temperature="Desconfiado")
         ids = [l["id"] for l in self.client.get(f"/api/leads/?company={self.company.pk}&ativos=1").json()["results"]]
         self.assertEqual(ids, [str(ativo.pk)])
+
+class VarreduraFixesTests(TestCase):
+    """Regressões da varredura de bugs: dono do lead por usuário (FK), lead escalado
+    assumível, desqualificado não mudo pra sempre, liberar sem religar bot, cadastro
+    manual validado e conta do agente fora das ações de equipe."""
+    def setUp(self):
+        self.company = Company.objects.create(name="Empresa Fix")
+        for qid, text in [("apresentacao", "Olá!"), ("nome", "Seu nome?"), ("validar", "Confirma?"), ("encerramento", "Obrigado.")]:
+            Question.objects.create(company=self.company, question_id=qid, text=text)
+        User = get_user_model()
+        self.maria = User.objects.create_user(username="maria@x.com", first_name="Maria")
+        self.joao = User.objects.create_user(username="joao@x.com", first_name="João")
+        self.company.members.add(self.maria, self.joao)
+
+    def send(self, mid="1", contact="+5585911112222", **kwargs):
+        data = {"contact": contact, "message_id": mid, "kind": "text", "marker": "Q", "question_id": "apresentacao",
+                "fields": {}, "human_required": False, "reason": "pedido humano", **kwargs}
+        return receive(self.company, data)
+
+    def classificar(self, temperatura="Quente", contact="+5585911112222"):
+        for mid, kw in [("c1", {}), ("c2", {"marker": "ATUALIZAR", "fields": {"nome": "Ana", "proxima": "nome"}}), ("c3", {"marker": "VALIDAR"})]:
+            Event.objects.filter(pk=self.send(f"{contact}{mid}", contact=contact, **kw)["event_id"]).update(delivery="SENT")
+        self.send(f"{contact}c4", contact=contact, marker="CLASSIFICADO", fields={"temperatura": temperatura, "prioridade": "Alta"})
+        return Lead.objects.filter(contact=contact).latest("created_at")
+
+    def cliente(self, user):
+        c = APIClient()
+        c.force_authenticate(user)
+        return c
+
+    def url(self, lead, acao):
+        return f"/api/leads/{lead.pk}/{acao}/?company={self.company.pk}"
+
+    def test_dono_do_lead_e_o_usuario_mesmo_trocando_ou_imitando_nome(self):
+        from .models import Profile
+        lead = self.classificar()
+        maria = self.cliente(self.maria)
+        self.assertEqual(maria.post(self.url(lead, "reivindicar")).status_code, 200)
+        me = maria.get("/api/me/").json()
+        detalhe = maria.get(f"/api/leads/{lead.pk}/?company={self.company.pk}").json()
+        self.assertEqual(detalhe["owner"], me["id"])
+        self.assertEqual(detalhe["owner_nome"], "Maria")
+        # Maria troca o nome de exibição: continua dona.
+        Profile.objects.update_or_create(user=self.maria, defaults={"display_name": "Maria Silva"})
+        # João copia o nome dela: não vira dono.
+        Profile.objects.update_or_create(user=self.joao, defaults={"display_name": "Maria Silva"})
+        self.assertEqual(self.cliente(self.joao).post(self.url(lead, "negociar")).status_code, 400)
+        self.assertEqual(maria.post(self.url(lead, "negociar")).status_code, 200)
+        lead.refresh_from_db()
+        self.assertEqual(lead.owner, self.maria)
+
+    def test_desligar_atendente_solta_os_leads_dele(self):
+        lead = self.classificar()
+        self.cliente(self.maria).post(self.url(lead, "negociar"))
+        self.maria.delete()
+        lead.refresh_from_db()
+        self.assertIsNone(lead.owner)
+        self.assertEqual(self.cliente(self.joao).post(self.url(lead, "negociar")).status_code, 200)
+
+    def test_lead_escalado_antes_da_triagem_pode_ser_assumido_e_aparece_nos_ativos(self):
+        self.send("1")
+        self.send("2", human_required=True)
+        lead = Lead.objects.get()
+        self.assertEqual(lead.mode, "HUMANO")
+        self.assertFalse(lead.bot_closed)
+        maria = self.cliente(self.maria)
+        ativos = maria.get(f"/api/leads/?company={self.company.pk}&ativos=1").json()["results"]
+        self.assertIn(str(lead.pk), [l["id"] for l in ativos])
+        self.assertEqual(maria.post(self.url(lead, "reivindicar")).status_code, 200)
+        self.assertEqual(self.send("3")["action"], "NO_REPLY")
+
+    def test_liberar_nao_religa_bot_de_lead_escalado_nem_lead_sem_dono(self):
+        self.send("1")
+        self.send("2", human_required=True)
+        lead = Lead.objects.get()
+        maria = self.cliente(self.maria)
+        self.assertEqual(maria.post(self.url(lead, "liberar")).status_code, 400)  # ninguém assumiu
+        lead.refresh_from_db()
+        self.assertEqual(lead.mode, "HUMANO")
+        maria.post(self.url(lead, "reivindicar"))
+        self.assertEqual(maria.post(self.url(lead, "liberar")).status_code, 200)
+        lead.refresh_from_db()
+        self.assertEqual(lead.mode, "HUMANO")
+        self.assertIsNone(lead.owner)
+        self.assertEqual(self.send("3")["action"], "NO_REPLY")
+
+    def test_desqualificado_sai_dos_ativos_e_reabre_so_depois_do_cooldown(self):
+        lead = self.classificar("Desqualificado")
+        self.assertEqual(lead.desfecho, "desqualificado")
+        self.assertIsNotNone(lead.concluido_em)
+        self.assertEqual(self.send("depois-1")["action"], "NO_REPLY")  # "ok, obrigado" logo depois
+        self.assertEqual(Lead.objects.count(), 1)
+        Lead.objects.filter(pk=lead.pk).update(concluido_em=timezone.now() - timedelta(hours=25))
+        self.assertEqual(self.send("depois-2")["action"], "TEXTO")
+        self.assertEqual(Lead.objects.count(), 2)
+        # Atendente nunca escolhe o desfecho automático no despacho.
+        novo = Lead.objects.get(desfecho="")
+        Lead.objects.filter(pk=novo.pk).update(bot_closed=True, temperature="Quente")
+        resp = self.cliente(self.maria).post(self.url(novo, "preparar-despacho"), {"desfecho": "desqualificado"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_lead_manual_valida_tamanho_normaliza_contato_e_nunca_da_500(self):
+        maria = self.cliente(self.maria)
+        url = f"/api/leads/manual/?company={self.company.pk}"
+        ok = maria.post(url, {"name": "Cliente", "contact": "(85) 99999-8888"}, format="json")
+        self.assertEqual(ok.status_code, 201)
+        self.assertEqual(ok.json()["contact"], "+5585999998888")
+        self.assertEqual(ok.json()["owner"], self.maria.pk)
+        duplicado = maria.post(url, {"contact": "+55 85 99999-8888"}, format="json")
+        self.assertEqual(duplicado.status_code, 400)
+        for payload in [{"contact": "1" * 30}, {"contact": "+5585977776666", "name": "x" * 200}, {"contact": "+5585977776666", "demand": "x" * 400}, {"contact": "abc"}, {}]:
+            resp = maria.post(url, payload, format="json")
+            self.assertEqual(resp.status_code, 400, payload)
+            self.assertIn("detail", resp.json())
+
+    def test_equipe_nao_desliga_nem_redefine_senha_da_conta_do_agente(self):
+        from django.contrib.auth.models import Group
+        agente = get_user_model().objects.create_user(username="agente.empresa-fix")
+        agente.groups.add(Group.objects.get_or_create(name="agente")[0])
+        self.company.members.add(agente)
+        empresa = get_user_model().objects.create_user(username="empresa-fix", is_staff=True)
+        self.company.members.add(empresa)
+        c = self.cliente(empresa)
+        self.assertEqual(c.post(f"/api/companies/{self.company.pk}/equipe/{agente.pk}/redefinir-senha/").status_code, 404)
+        self.assertEqual(c.delete(f"/api/companies/{self.company.pk}/equipe/{agente.pk}/").status_code, 404)
+        self.assertTrue(get_user_model().objects.filter(pk=agente.pk).exists())
+
+    def test_meus_lista_so_negociacao_e_manuais_do_proprio_atendente(self):
+        lead = self.classificar()
+        maria = self.cliente(self.maria)
+        maria.post(self.url(lead, "negociar"))
+        maria.post(f"/api/leads/manual/?company={self.company.pk}", {"contact": "+5585933334444"}, format="json")
+        self.cliente(self.joao).post(f"/api/leads/manual/?company={self.company.pk}", {"contact": "+5585955556666"}, format="json")
+        meus = maria.get(f"/api/leads/?company={self.company.pk}&meus=1").json()
+        self.assertEqual(meus["count"], 2)
+        self.assertTrue(all(l["owner"] == self.maria.pk for l in meus["results"]))

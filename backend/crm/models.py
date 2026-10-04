@@ -193,9 +193,14 @@ class Lead(models.Model):
         ("encerrado", "Encerrado"),
         ("comprometido", "Comprometido"),
         ("falha", "Falha durante o atendimento"),
+        # Automático: CLASSIFICADO como Desqualificado/Desconfiado (nunca entram no Kanban
+        # humano, então nunca receberiam desfecho e o número ficaria mudo pra sempre).
+        ("desqualificado", "Desqualificado na triagem"),
     ]
+    # Desfechos que um atendente pode escolher no Despacho (o automático fica de fora).
+    DESFECHO_DESPACHO = {"encerrado", "comprometido", "falha"}
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id =models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     name = models.CharField(max_length=160, blank=True)
     contact = models.CharField(max_length=20)
@@ -211,13 +216,17 @@ class Lead(models.Model):
     next_action = models.CharField(max_length=250, blank=True)
     return_at = models.DateTimeField(null=True, blank=True)
     priority = models.CharField(max_length=10, choices=[("Alta", "Alta"), ("Média", "Média"), ("Baixa", "Baixa")], default="Média")
-    owner = models.CharField(max_length=120, blank=True)
-    mode = models.CharField(max_length=10, choices=[("AUTOMÁTICO", "Automático"), ("HUMANO", "Humano")], default="AUTOMÁTICO")
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="leads_atendidos",
+        help_text="Atendente responsável. FK (não texto): trocar o nome de exibição nunca faz o atendente perder os próprios leads.",
+    )
+    mode =models.CharField(max_length=10, choices=[("AUTOMÁTICO", "Automático"), ("HUMANO", "Humano")], default="AUTOMÁTICO")
     last_audio_id = models.CharField(max_length=250, blank=True)
     bot_closed = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
     variaveis_roteiro = models.JSONField(default=dict, blank=True, help_text="slug->texto coletado nas perguntas com Variável de roteiro customizada (ver services.apply_fields/render_text). Os 3 builtin (nome/especialidade/tema) não usam isto -- já são campos próprios do Lead.")
-    desfecho = models.CharField(max_length=20, choices=DESFECHO_CHOICES, blank=True, help_text="Só setado ao despachar um atendimento humano -- definitivo (ver services.enviar_despachos). Lead some do Kanban quando preenchido.")
+    desfecho = models.CharField(max_length=20, choices=DESFECHO_CHOICES, blank=True, help_text="Definitivo: setado ao despachar (services.enviar_despachos) ou automaticamente ao classificar como Desqualificado/Desconfiado. Lead some do Kanban quando preenchido.")
+    concluido_em = models.DateTimeField(null=True, blank=True, help_text="Quando o desfecho virou definitivo.")
     ETAPA_ATENDIMENTO_CHOICES = [
         ("espera", "Atendimentos em espera"),
         ("negociacao", "Em negociação"),

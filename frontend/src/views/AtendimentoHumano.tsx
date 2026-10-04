@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { Api } from '../api';
-import type { Company, Lead, Me, Paginated } from '../types';
+import { fetchTodasAsPaginas, type Api } from '../api';
+import type { Company, Lead, Me } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 
 const DESFECHO_OPTIONS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string; help: string }[] = [
@@ -19,15 +19,12 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
   const [novo, setNovo] = useState(false);
   const [salvandoNovo, setSalvandoNovo] = useState(false);
 
-  const minhaIdentidade = me.display_name || me.username;
-
   function load() {
     setBusy(true);
     setError('');
-    api(`/leads/?company=${company.id}`)
-      .then((d: Paginated<Lead>) =>
-        setLeads(d.results.filter((l) => !l.desfecho && l.owner === minhaIdentidade && (l.etapa_atendimento === 'negociacao' || l.origem_manual))),
-      )
+    // Filtro no servidor (meus=1): dono pelo id do usuário, todas as páginas.
+    fetchTodasAsPaginas<Lead>(api, `/leads/?company=${company.id}&meus=1`)
+      .then((todos) => setLeads(todos.filter((l) => l.owner === me.id)))
       .catch((e) => setError(e.message))
       .finally(() => setBusy(false));
   }
