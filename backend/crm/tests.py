@@ -1033,3 +1033,78 @@ class QualificationTests(TestCase):
             agent_client.post(f"/api/company-info/?company={self.company.pk}", {"title": "x", "content": "y"}, format="json").status_code,
             403,
         )
+
+class DashboardResumoTests(TestCase):
+    def setUp(self):
+        self.company = Company.objects.create(name="Empresa Dash")
+        self.other = Company.objects.create(name="Outra")
+        self.user = get_user_model().objects.create_user(username="dash-op")
+        self.company.members.add(self.user)
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def lead(self, contact, company=None, **kw):
+        return Lead.objects.create(company=company or self.company, contact=contact, state="x", **kw)
+
+    def test_resumo_conta_todos_os_leads_mesmo_acima_de_uma_pagina(self):
+        for i in range(105):
+            self.lead(f"+55859990{i:05d}", bot_closed=True, mode="HUMANO", owner="ana", desfecho="encerrado", temperature="Quente")
+        self.lead("+5585888000001")
+        data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
+        self.assertEqual(data["total"], 106)
+        self.assertEqual(data["desfechos"]["encerrado"], 105)
+        self.assertEqual(data["status"]["despachado"], 105)
+        self.assertEqual(data["status"]["automatico"], 1)
+
+    def test_resumo_status_e_exclusivo_e_soma_o_total(self):
+        self.lead("+5585000000001")  # automático
+        self.lead("+5585000000002", mode="HUMANO")  # escalado pelo CRM
+        self.lead("+5585000000003", bot_closed=True, temperature="Quente")  # qualificado, ainda sem owner
+        self.lead("+5585000000004", bot_closed=True, mode="HUMANO", owner="ana", etapa_atendimento="negociacao", temperature="Quente")
+        self.lead("+5585000000005", bot_closed=True, temperature="Desqualificado")
+        self.lead("+5585000000006", bot_closed=True, mode="HUMANO", owner="ana", desfecho="falha", temperature="Quente")
+        data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
+        self.assertEqual(data["status"], {"despachado": 1, "automatico": 1, "equipe": 3, "desqualificado": 1})
+        self.assertEqual(sum(data["status"].values()), data["total"])
+
+    def test_resumo_taxa_por_atendente_usa_desfecho_nao_bot_closed(self):
+        self.lead("+5585000000011", bot_closed=True, mode="HUMANO", owner="ana", etapa_atendimento="negociacao")
+        self.lead("+5585000000012", bot_closed=True, mode="HUMANO", owner="ana", desfecho="encerrado")
+        self.lead("+5585000000013")  # sem owner: não entra na tabela de atendentes
+        data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
+        self.assertEqual(data["por_owner"], [{"owner": "ana", "atendimentos": 2, "concluidos": 1}])
+
+    def test_resumo_mesmo_contato_reaberto_conta_os_dois_leads(self):
+        self.lead("+5585000000021", bot_closed=True, mode="HUMANO", owner="ana", desfecho="encerrado")
+        self.lead("+5585000000021")
+        data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
+        self.assertEqual(data["total"], 2)
+        self.assertEqual(data["status"]["despachado"], 1)
+
+    def test_resumo_filtra_periodo_area_e_isola_empresa(self):
+        antigo = self.lead("+5585000000031", especialidade="Consumidor")
+        Lead.objects.filter(pk=antigo.pk).update(created_at=timezone.now() - timedelta(days=60))
+        self.lead("+5585000000032", especialidade="Trabalhista")
+        self.lead("+5585000000033", company=self.other)
+        base = f"/api/leads/resumo/?company={self.company.pk}"
+        self.assertEqual(self.client.get(base + "&dias=all").json()["total"], 2)
+        self.assertEqual(self.client.get(base + "&dias=30").json()["total"], 1)
+        self.assertEqual(self.client.get(base + "&dias=all&area=Consumidor").json()["total"], 1)
+        self.assertEqual(self.client.get(f"/api/leads/resumo/?company={self.other.pk}").status_code, 404)
+        self.assertEqual(self.client.get(base + "&dias=abc").status_code, 400)
+
+    def test_resumo_agrupa_mes_por_ano_mes_em_ordem(self):
+        a = self.lead("+5585000000041")
+        b = self.lead("+5585000000042")
+        Lead.objects.filter(pk=a.pk).update(created_at=timezone.now().replace(year=2025, month=3, day=10))
+        Lead.objects.filter(pk=b.pk).update(created_at=timezone.now().replace(year=2026, month=3, day=10))
+        meses = [m for m, _ in self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()["por_mes"]]
+        self.assertEqual(meses, ["2025-03", "2026-03"])
+
+    def test_lista_ativos_exclui_despachados_manuais_e_desqualificados(self):
+        ativo = self.lead("+5585000000051", bot_closed=True, temperature="Quente")
+        self.lead("+5585000000052", bot_closed=True, desfecho="encerrado", temperature="Quente")
+        self.lead("+5585000000053", bot_closed=True, mode="HUMANO", origem_manual=True)
+        self.lead("+5585000000054", bot_closed=True, temperature="Desconfiado")
+        ids = [l["id"] for l in self.client.get(f"/api/leads/?company={self.company.pk}&ativos=1").json()["results"]]
+        self.assertEqual(ids, [str(ativo.pk)])

@@ -1,11 +1,49 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Api } from '../api';
-import type { Company, Lead, Paginated } from '../types';
+import type { Area, Company, Lead, Paginated } from '../types';
 import { DonutChart } from '../components/DonutChart';
 import { SkeletonTiles } from '../components/Skeleton';
 import { COLUMNS, URGENCIA_COR, columnOf, leadsVisiveisNoKanban, ordenarColuna } from './Leads';
 
-const DAY = 24 * 60 * 60 * 1000;
+type Resumo = {
+  total: number;
+  triagem_concluida: number;
+  desqualificados: number;
+  status: { despachado: number; automatico: number; equipe: number; desqualificado: number };
+  desfechos: Record<'encerrado' | 'comprometido' | 'falha', number>;
+  por_area: [string, number][];
+  por_mes: [string, number][];
+  por_owner: { owner: string; atendimentos: number; concluidos: number }[];
+};
+
+const RESUMO_VAZIO: Resumo = {
+  total: 0, triagem_concluida: 0, desqualificados: 0,
+  status: { despachado: 0, automatico: 0, equipe: 0, desqualificado: 0 },
+  desfechos: { encerrado: 0, comprometido: 0, falha: 0 },
+  por_area: [], por_mes: [], por_owner: [],
+};
+
+// /leads/ é paginado (100 por página): sem seguir as páginas, o Kanban perdia leads.
+async function fetchTodasAsPaginas(api: Api, path: string): Promise<Lead[]> {
+  const todos: Lead[] = [];
+  for (let page = 1; ; page++) {
+    const d: Paginated<Lead> = await api(`${path}&page=${page}`);
+    todos.push(...d.results);
+    if (!d.next) return todos;
+  }
+}
+
+function rotuloMes(chave: string) {
+  const [ano, mes] = chave.split('-').map(Number);
+  return new Date(ano, mes - 1, 1).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
+}
+
+const STATUS_DONUT: { key: keyof Resumo['status']; label: string; color: string }[] = [
+  { key: 'despachado', label: 'Despachado', color: 'var(--success)' },
+  { key: 'automatico', label: 'Em triagem automática', color: 'var(--accent)' },
+  { key: 'equipe', label: 'Com a equipe', color: 'var(--danger)' },
+  { key: 'desqualificado', label: 'Desqualificado/desconfiado', color: 'var(--muted)' },
+];
 
 const DESFECHO_LABELS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string }[] = [
   { value: 'encerrado', label: 'Encerrado', color: 'var(--success)' },
@@ -15,77 +53,73 @@ const DESFECHO_LABELS: { value: 'encerrado' | 'comprometido' | 'falha'; label: s
 
 export function Dashboard({ api, company, role }: { api: Api; company: Company; role: 'atendente' | 'empresa' }) {
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [resumo, setResumo] = useState<Resumo>(RESUMO_VAZIO);
+  const [areas, setAreas] = useState<Area[]>([]);
   const [search, setSearch] = useState('');
+  const [buscaAtendente, setBuscaAtendente] = useState('');
   const [area, setArea] = useState('');
   const [periodo, setPeriodo] = useState<'30' | 'all'>('30');
   const [busy, setBusy] = useState(false);
+  const [carregou, setCarregou] = useState(false);
   const [excluindoId, setExcluindoId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [recarregar, setRecarregar] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    api(`/areas/?company=${company.id}`)
+      .then((d: Paginated<Area>) => active && setAreas(d.results))
+      .catch(() => undefined);
+    if (role === 'empresa') {
+      fetchTodasAsPaginas(api, `/leads/?company=${company.id}&ativos=1`)
+        .then((todos) => active && setLeads(todos))
+        .catch((e) => active && setError(e.message));
+    }
+    return () => {
+      active = false;
+    };
+  }, [company.id, role, recarregar]);
 
   useEffect(() => {
     let active = true;
     setBusy(true);
     setError('');
-    api(`/leads/?company=${company.id}`)
-      .then((d: Paginated<Lead>) => {
-        if (active) setLeads(d.results);
-      })
-      .catch((e) => {
-        if (active) setError(e.message);
-      })
-      .finally(() => {
-        if (active) setBusy(false);
-      });
+    const params = new URLSearchParams({ company: String(company.id), dias: periodo === '30' ? '30' : 'all' });
+    if (area) params.set('area', area);
+    if (search.trim()) params.set('q', search.trim());
+    const timer = setTimeout(() => {
+      api(`/leads/resumo/?${params.toString()}`)
+        .then((d: Resumo) => {
+          if (active) setResumo(d);
+        })
+        .catch((e) => {
+          if (active) setError(e.message);
+        })
+        .finally(() => {
+          if (active) {
+            setBusy(false);
+            setCarregou(true);
+          }
+        });
+    }, search ? 250 : 0);
     return () => {
       active = false;
+      clearTimeout(timer);
     };
-  }, [company.id]);
+  }, [company.id, area, periodo, search, recarregar]);
 
-  const filtered = useMemo(() => {
-    const now = Date.now();
-    return leads.filter((l) => {
-      if (search && !`${l.name} ${l.contact} ${l.owner}`.toLowerCase().includes(search.toLowerCase())) return false;
-      if (area && l.especialidade !== area) return false;
-      if (periodo === '30' && now - new Date(l.created_at).getTime() > 30 * DAY) return false;
-      return true;
-    });
-  }, [leads, search, area, periodo]);
-
-  const total = filtered.length;
-  const desqualificados = filtered.filter((l) => l.temperature === 'Desqualificado' || l.temperature === 'Desconfiado').length;
-  const concluidos = filtered.filter((l) => l.bot_closed).length;
-  const automatico = filtered.filter((l) => !l.bot_closed && l.mode === 'AUTOMÁTICO').length;
-  const humano = filtered.filter((l) => l.mode === 'HUMANO').length;
-  const concluidosPorDesfecho = DESFECHO_LABELS.map((d) => ({ ...d, count: filtered.filter((l) => l.desfecho === d.value).length }));
+  const total = resumo.total;
+  const desqualificados = resumo.desqualificados;
+  const concluidos = resumo.triagem_concluida;
+  const automatico = resumo.status.automatico;
+  const humano = resumo.status.equipe;
+  const concluidosPorDesfecho = DESFECHO_LABELS.map((d) => ({ ...d, count: resumo.desfechos[d.value] }));
   const totalDespachados = concluidosPorDesfecho.reduce((sum, d) => sum + d.count, 0);
 
-  const monthly = useMemo(() => {
-    const buckets = new Map<string, number>();
-    filtered.forEach((l) => {
-      const key = new Date(l.created_at).toLocaleDateString('pt-BR', { month: 'short' });
-      buckets.set(key, (buckets.get(key) || 0) + 1);
-    });
-    return Array.from(buckets.entries());
-  }, [filtered]);
+  const monthly = resumo.por_mes.map(([k, v]) => [rotuloMes(k), v] as [string, number]);
   const maxMonthly = Math.max(1, ...monthly.map(([, v]) => v));
-
-  const byOwner = useMemo(() => {
-    const buckets = new Map<string, number>();
-    filtered.forEach((l) => {
-      const key = l.owner || 'Sem responsável';
-      buckets.set(key, (buckets.get(key) || 0) + 1);
-    });
-    return Array.from(buckets.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
-  }, [filtered]);
-
-  const byArea = useMemo(() => {
-    const buckets = new Map<string, number>();
-    filtered.forEach((l) => {
-      const key = l.especialidade || 'Sem especialidade';
-      buckets.set(key, (buckets.get(key) || 0) + 1);
-    });
-    return Array.from(buckets.entries()).sort((a, b) => b[1] - a[1]);
-  }, [filtered]);
+  const byArea = resumo.por_area;
+  const byOwner = resumo.por_owner.filter((o) => o.owner.toLowerCase().includes(buscaAtendente.toLowerCase()));
 
   const pct = (n: number) => (total ? ` · ${Math.round((n / total) * 100)}%` : '');
 
@@ -101,6 +135,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
     try {
       await api(`/leads/${lead.id}/?company=${company.id}`, { method: 'DELETE' });
       setLeads((v) => v.filter((l) => l.id !== lead.id));
+      setRecarregar((n) => n + 1);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -140,10 +175,11 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
           <label className="select-field">
             <select value={area} onChange={(e) => setArea(e.target.value)}>
               <option value="">Todas as áreas</option>
-              <option value="Previdenciário">Previdenciário</option>
-              <option value="Consumidor">Consumidor</option>
-              <option value="Trabalhista">Trabalhista</option>
-              <option value="Fora de escopo">Fora de escopo</option>
+              {areas.map((a) => (
+                <option key={a.id} value={a.name}>
+                  {a.name}
+                </option>
+              ))}
             </select>
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
               <path d="M4 6l4 4 4-4" stroke="#8A7A68" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -175,7 +211,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
 
       <section className="section">
         <h2>Resumo</h2>
-        {busy && !leads.length ? (
+        {busy && !carregou ? (
           <SkeletonTiles />
         ) : (
           <div className="tiles">
@@ -216,7 +252,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
               <h2>Kanban de atendimento</h2>
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>Somente visualização — a empresa não assume nem contata leads.</span>
             </div>
-            {busy && !leads.length ? (
+            {!carregou ? (
               <SkeletonTiles />
             ) : (
               <div className="kanban">
@@ -286,7 +322,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
             {totalDespachados} lead{totalDespachados === 1 ? '' : 's'} despachado{totalDespachados === 1 ? '' : 's'} pela equipe
           </span>
         </div>
-        {busy && !leads.length ? (
+        {busy && !carregou ? (
           <SkeletonTiles />
         ) : (
           <div className="tiles">
@@ -311,36 +347,20 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 28, alignItems: 'center', justifyContent: 'center' }}>
               <DonutChart
                 segments={[
-                  { label: 'Concluído', value: concluidos, color: 'var(--success)' },
-                  { label: 'Em triagem automática', value: automatico, color: 'var(--accent)' },
-                  { label: 'Atendimento humano', value: humano, color: 'var(--danger)' },
+                  ...STATUS_DONUT.map((st) => ({ label: st.label, value: resumo.status[st.key], color: st.color })),
                 ].filter((s) => s.value > 0)}
               />
               <ul className="legend">
-                <li>
-                  <span className="legend-dot" style={{ background: 'var(--success)' }} />
-                  <span style={{ flex: 1 }}>Concluído</span>
-                  <strong style={{ fontFamily: "'DM Mono',monospace" }}>
-                    {concluidos}
-                    {pct(concluidos)}
-                  </strong>
-                </li>
-                <li>
-                  <span className="legend-dot" style={{ background: 'var(--accent)' }} />
-                  <span style={{ flex: 1 }}>Em triagem automática</span>
-                  <strong style={{ fontFamily: "'DM Mono',monospace" }}>
-                    {automatico}
-                    {pct(automatico)}
-                  </strong>
-                </li>
-                <li>
-                  <span className="legend-dot" style={{ background: 'var(--danger)' }} />
-                  <span style={{ flex: 1 }}>Atendimento humano</span>
-                  <strong style={{ fontFamily: "'DM Mono',monospace" }}>
-                    {humano}
-                    {pct(humano)}
-                  </strong>
-                </li>
+                {STATUS_DONUT.map((st) => (
+                  <li key={st.key}>
+                    <span className="legend-dot" style={{ background: st.color }} />
+                    <span style={{ flex: 1 }}>{st.label}</span>
+                    <strong style={{ fontFamily: "'DM Mono',monospace" }}>
+                      {resumo.status[st.key]}
+                      {pct(resumo.status[st.key])}
+                    </strong>
+                  </li>
+                ))}
               </ul>
             </div>
           </article>
@@ -399,7 +419,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                   <circle cx="7" cy="7" r="5" stroke="#8A7A68" strokeWidth="1.5" />
                   <path d="M11 11l3.5 3.5" stroke="#8A7A68" strokeWidth="1.5" strokeLinecap="round" />
                 </svg>
-                <input placeholder="Buscar atendente" aria-label="Buscar atendente" value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 220 }} />
+                <input placeholder="Buscar atendente" aria-label="Buscar atendente" value={buscaAtendente} onChange={(e) => setBuscaAtendente(e.target.value)} style={{ width: 220 }} />
               </label>
             </div>
             <div className="panel">
@@ -409,19 +429,18 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                     <tr>
                       <th>Atendente</th>
                       <th>Atendimentos</th>
-                      <th>Concluídos</th>
+                      <th>Despachados</th>
                       <th>Taxa de conclusão</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {byOwner.map(([name, count]) => {
-                      const done = filtered.filter((l) => (l.owner || 'Sem responsável') === name && l.bot_closed).length;
-                      const rate = count ? Math.round((done / count) * 100) : 0;
+                    {byOwner.map((o) => {
+                      const rate = o.atendimentos ? Math.round((o.concluidos / o.atendimentos) * 100) : 0;
                       return (
-                        <tr key={name}>
-                          <td style={{ fontWeight: 600 }}>{name}</td>
-                          <td style={{ fontFamily: "'DM Mono',monospace" }}>{count}</td>
-                          <td style={{ fontFamily: "'DM Mono',monospace" }}>{done}</td>
+                        <tr key={o.owner}>
+                          <td style={{ fontWeight: 600 }}>{o.owner}</td>
+                          <td style={{ fontFamily: "'DM Mono',monospace" }}>{o.atendimentos}</td>
+                          <td style={{ fontFamily: "'DM Mono',monospace" }}>{o.concluidos}</td>
                           <td style={{ color: rate >= 50 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{rate}%</td>
                         </tr>
                       );

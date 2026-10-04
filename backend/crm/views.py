@@ -27,6 +27,7 @@ from .services import (
     enviar_despachos as enviar_despachos_service,
     criar_lead_manual as criar_lead_manual_service,
     seed_roteiro_padrao,
+    resumo_dashboard, FORA_DO_KANBAN,
 )
 
 def _avatar_url(request, profile):
@@ -316,7 +317,24 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
             qs = qs.filter(etapa_atendimento="espera").annotate(
                 rank=Case(When(priority="Alta", then=Value(0)), When(priority="Média", then=Value(1)), default=Value(2), output_field=IntegerField())
             ).order_by("rank", "return_at")
+        if self.request.query_params.get("ativos") == "1":
+            # Só o que o Kanban mostra (mesma regra de Leads.leadsVisiveisNoKanban) --
+            # evita que leads despachados ocupem a página e empurrem ativos pra fora.
+            qs = qs.filter(desfecho="", origem_manual=False).exclude(temperature__in=FORA_DO_KANBAN)
         return qs
+    @action(detail=False, methods=["get"])
+    def resumo(self, request):
+        """Agregados do Dashboard sobre todos os leads da empresa (não paginado)."""
+        raw = request.query_params.get("dias", "")
+        try:
+            dias = int(raw) if raw not in ("", "all") else None
+        except ValueError:
+            return Response({"detail": "dias precisa ser um número inteiro ou 'all'."}, status=400)
+        return Response(resumo_dashboard(
+            self.company(), dias=dias,
+            area=request.query_params.get("area", ""),
+            busca=request.query_params.get("q", "").strip(),
+        ))
     @action(detail=True)
     def events(self, request, pk=None):
         return Response(EventSerializer(self.get_object().events.all(), many=True).data)

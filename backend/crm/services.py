@@ -595,3 +595,58 @@ def calcular_urgencia_sugerida(pesos):
         if minimo <= media <= maximo:
             return temperatura
     return URGENCIA_POR_FAIXA[0][2] if media < 1 else URGENCIA_POR_FAIXA[-1][2]
+
+def _categoria_status(lead):
+    """Categoria exclusiva (cada lead cai em exatamente uma) usada no donut/tiles
+    do Dashboard -- antes "Concluído" (bot_closed) e "Atendimento humano"
+    (mode=HUMANO) se sobrepunham e a soma passava do total."""
+    if lead["desfecho"]:
+        return "despachado"
+    if not lead["bot_closed"] and lead["mode"] != "HUMANO":
+        return "automatico"
+    if lead["bot_closed"] and lead["mode"] != "HUMANO" and lead["temperature"] in FORA_DO_KANBAN:
+        return "desqualificado"
+    return "equipe"
+
+def resumo_dashboard(company, dias=None, area="", busca=""):
+    """Agregados do Dashboard calculados no servidor sobre TODOS os leads da
+    empresa (o frontend antes contava só a 1ª página paginada de /leads/, então
+    leads antigos -- justamente os já despachados -- sumiam das contas)."""
+    from django.db.models import Q
+    qs = Lead.objects.filter(company=company)
+    if dias:
+        qs = qs.filter(created_at__gte=timezone.now() - timedelta(days=dias))
+    if area:
+        qs = qs.filter(especialidade=area)
+    if busca:
+        qs = qs.filter(Q(name__icontains=busca) | Q(contact__icontains=busca) | Q(owner__icontains=busca))
+    rows = list(qs.values("created_at", "desfecho", "bot_closed", "mode", "temperature", "especialidade", "owner"))
+
+    status = {"despachado": 0, "automatico": 0, "equipe": 0, "desqualificado": 0}
+    desfechos = {"encerrado": 0, "comprometido": 0, "falha": 0}
+    por_area, por_mes, por_owner = {}, {}, {}
+    tz = timezone.get_current_timezone()
+    for r in rows:
+        status[_categoria_status(r)] += 1
+        if r["desfecho"] in desfechos:
+            desfechos[r["desfecho"]] += 1
+        chave_area = r["especialidade"] or "Sem especialidade"
+        por_area[chave_area] = por_area.get(chave_area, 0) + 1
+        mes = timezone.localtime(r["created_at"], tz).strftime("%Y-%m")
+        por_mes[mes] = por_mes.get(mes, 0) + 1
+        if r["owner"]:
+            o = por_owner.setdefault(r["owner"], {"owner": r["owner"], "atendimentos": 0, "concluidos": 0})
+            o["atendimentos"] += 1
+            if r["desfecho"]:
+                o["concluidos"] += 1
+
+    return {
+        "total": len(rows),
+        "triagem_concluida": sum(1 for r in rows if r["bot_closed"]),
+        "desqualificados": sum(1 for r in rows if r["temperature"] in FORA_DO_KANBAN),
+        "status": status,
+        "desfechos": desfechos,
+        "por_area": sorted(por_area.items(), key=lambda kv: -kv[1]),
+        "por_mes": sorted(por_mes.items()),
+        "por_owner": sorted(por_owner.values(), key=lambda o: -o["atendimentos"]),
+    }
