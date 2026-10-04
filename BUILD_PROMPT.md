@@ -1,31 +1,42 @@
-# BUILD_PROMPT.md — Construção do Gateway WhatsApp ↔ Axioma Agent
+# BUILD_PROMPT.md — Construção do Gateway WhatsApp ↔ Agent
 
-> Este documento é um prompt de construção, não documentação de referência.
-> Ele é para o agente/ferramenta responsável por **montar o Gateway do zero**
-> — o componente que liga o WhatsApp ao Agent chamado **Axioma Agent**, que
-> por sua vez opera segundo `SOUL.md` e `AGENTS.md` deste repositório. Leia
-> os três documentos (`SOUL.md`, `AGENTS.md`, `docs/integracao-agente.md`)
-> antes de escrever qualquer código — o contrato com o CRM já está definido
-> ali e não deve ser reinventado aqui.
+> Este documento é um prompt de construção, não documentação de referência,
+> e é **genérico**: serve pra qualquer agent (qualquer nome, qualquer
+> plataforma/runtime — OpenClaw, outro framework, ou implementação própria)
+> que vá operar segundo um `SOUL.md`+`AGENTS.md` deste padrão e precise de
+> um Gateway WhatsApp próprio. Não assuma nome fixo de agent nem plataforma
+> fixa em nada do que for construído a partir daqui.
+>
+> Antes de escrever qualquer código, leia os três documentos do agent em
+> questão (`SOUL.md`, `AGENTS.md` dele, e `docs/integracao-agente.md` deste
+> repositório) — o contrato com o CRM já está definido ali e não deve ser
+> reinventado aqui.
+>
+> **Nota sobre o prefixo `AXIOMA` nos marcadores:** `[[AXIOMA:...]]` é uma
+> constante fixa do protocolo da API do Conecta CRM (definida pelo backend,
+> nunca muda), não o nome do agent. Um agent chamado de outro jeito (ex.:
+> "Suporte Clínica X") ainda emite exatamente `[[AXIOMA:Q:...]]` etc. — não
+> troque esse prefixo por conta própria, ele não tem relação com a
+> identidade do agent.
 
 ## Papel do Gateway (o que ele é e o que ele não é)
 
 O Gateway é a **única** peça que fala com a API do WhatsApp e com a API do
-Axioma Agent. Ele nunca decide conteúdo, nunca mantém roteiro, nunca guarda
-dados da empresa — isso é 100% do CRM, por contrato (`docs/integracao-agente.md`).
+agent. Ele nunca decide conteúdo, nunca mantém roteiro, nunca guarda dados
+da empresa — isso é 100% do CRM, por contrato (`docs/integracao-agente.md`).
 O Gateway só:
 
 1. Recebe mensagem inbound do WhatsApp.
-2. Encaminha pro Axioma Agent (sessão correta).
+2. Encaminha pro agent (sessão correta).
 3. Intercepta a saída do agent (que é **sempre** um marcador `[[AXIOMA:...]]`,
-   nunca texto livre — ver `AGENTS.md` → "Saída externa controlada").
+   nunca texto livre — ver `AGENTS.md` do agent → "Saída externa controlada").
 4. Resolve esse marcador chamando o CRM (`POST /incoming/`).
 5. Envia ao WhatsApp **somente** o `content` que o CRM devolveu.
 6. Confirma a entrega (`POST /delivery/`).
 
 ## Sessão por contato
 
-**Cada novo contato do WhatsApp leva a uma sessão nova do Axioma Agent.**
+**Cada novo contato do WhatsApp leva a uma sessão nova do agent.**
 Isso significa:
 
 - A chave de sessão é o número em E.164 (`+55...`) **por empresa**
@@ -35,15 +46,15 @@ Isso significa:
   precisa (e não deve) tentar adivinhar no CRM se aquele contato já teve
   lead antes — o CRM já resolve isso sozinho em `/incoming/` (cria lead novo
   automaticamente se o anterior já foi despachado; reaproveita o lead ativo
-  se ainda não foi). O Gateway só abre uma sessão de agent quando não tem
-  uma sessão já em memória para aquele par.
+  se ainda não foi). O Gateway só abre uma sessão nova quando não tem uma
+  sessão já em memória para aquele par.
 - Uma sessão fica aberta enquanto o Gateway estiver recebendo mensagens
   dela. Ela pode (e deve) ser fechada/descartada por timeout de inatividade
   (ex.: sem nenhuma mensagem nova por N horas — defina um valor razoável,
   algo entre 12h e 48h) — isso é só gestão de memória/custo do lado do
   Gateway, **nunca** é o que determina se o agent pode ou não responder.
   Quem decide isso é sempre o CRM via `Bot encerrado`/`NO_REPLY` (ver
-  `SOUL.md` → "Máquina de estados"). Uma sessão nova só repete o roteiro do
+  `SOUL.md` do agent → "Máquina de estados"). Uma sessão nova só repete o roteiro do
   zero se o CRM mandar (`action="TEXTO"` com `question_id="apresentacao"`
   de novo); se o CRM disser `NO_REPLY`, a sessão nova fica muda também,
   exatamente como uma sessão antiga ficaria.
@@ -55,9 +66,9 @@ Isso significa:
 
 O único texto que pode chegar ao WhatsApp do cliente é o `content` devolvido
 por `POST /incoming/`. Nunca, em hipótese alguma, o texto que o LLM gerou
-(a saída crua do turno do Axioma Agent) é enviado ao cliente — mesmo que
-pareça um marcador malformado, mesmo que a chamada ao CRM falhe, mesmo que
-a sessão não seja reconhecida como "do Axioma".
+(a saída crua do turno do agent) é enviado ao cliente — mesmo que pareça um
+marcador malformado, mesmo que a chamada ao CRM falhe, mesmo que a sessão
+não seja reconhecida como válida.
 
 Implemente isso assim, não como uma checagem isolada fácil de pular:
 
@@ -111,6 +122,20 @@ Se a empresa permitir transcrição (`AGENTS.md` → "Áudio de saída e entrada
 o Gateway transcreve a mensagem de voz recebida **uma única vez** antes de
 passar pro agent, e nunca guarda a transcrição completa — só o necessário
 pra aquele turno. Isso é responsabilidade do Gateway, não do CRM nem do LLM.
+
+## Saída de áudio por TTS (futuro — não implementar ainda)
+
+Vai existir uma opção futura na tela Roteiro → "Opções do Agente" (mesmo
+lugar de `Agente conversacional`), algo como **"Agente envia áudio"**, que
+quando marcada faz o Gateway enviar a resposta como áudio sintetizado (TTS)
+em vez de texto — mesmo em `action="TEXTO"`. Isso ainda **não está
+especificado nem implementado** (nem o campo no `Company`, nem o contrato
+de `/incoming/`, nem o parser de ação) — é só um aviso pra quem for montar
+o Gateway agora: não hardcode a suposição de que `action="TEXTO"` significa
+"sempre manda texto puro ao WhatsApp" de um jeito que vá exigir reescrita
+grande depois. Deixe o ponto de envio (texto vs. áudio) isolado numa função
+única, fácil de estender com essa opção quando ela for desenhada. Isso é
+trabalho futuro, não desta rodada.
 
 ## O que validar antes de apontar para um número real
 
