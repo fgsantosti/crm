@@ -110,6 +110,7 @@ export function App() {
     setCompanies([]);
     setCompanyId('');
     setView('dashboard');
+    setScreen('app');
     setError('');
   }
 
