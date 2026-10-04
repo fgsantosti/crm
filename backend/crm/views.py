@@ -293,8 +293,13 @@ class TenantMixin:
 class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
     queryset = Lead.objects.all()
     serializer_class = LeadSerializer
-    http_method_names = ["get", "patch", "post", "head", "options"]
-    permission_classes = [permissions.IsAuthenticated, NotAgentAccount]
+    http_method_names = ["get", "patch", "post", "delete", "head", "options"]
+    def get_permissions(self):
+        # Excluir um lead é fallback de admin (empresa) pra destravar um caso preso no Kanban
+        # (ex.: o agente nunca o classificou) -- nunca disponível pra atendente nem pro agente.
+        if self.action == "destroy":
+            return [permissions.IsAdminUser(), NotAgentAccount()]
+        return [permissions.IsAuthenticated(), NotAgentAccount()]
     def get_queryset(self):
         qs = super().get_queryset()
         if self.request.query_params.get("pending") == "1":

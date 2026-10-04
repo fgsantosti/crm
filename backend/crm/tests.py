@@ -655,6 +655,25 @@ class QualificationTests(TestCase):
             f"/api/leads/manual/?company={self.company.pk}", {"name": "X", "contact": "+5585900001111"}, format="json"
         )
         self.assertEqual(negado.status_code, 403)
+    def test_excluir_lead_e_fallback_de_admin_preso_no_kanban(self):
+        self.delivered(self.send())
+        lead = Lead.objects.get()
+
+        atendente = get_user_model().objects.create_user(username="atendente-exclui")
+        staff = get_user_model().objects.create_user(username="empresa-exclui", is_staff=True)
+        self.company.members.add(atendente, staff)
+
+        atendente_client = APIClient()
+        atendente_client.force_authenticate(atendente)
+        negado = atendente_client.delete(f"/api/leads/{lead.pk}/?company={self.company.pk}")
+        self.assertEqual(negado.status_code, 403)
+        self.assertTrue(Lead.objects.filter(pk=lead.pk).exists())
+
+        staff_client = APIClient()
+        staff_client.force_authenticate(staff)
+        ok = staff_client.delete(f"/api/leads/{lead.pk}/?company={self.company.pk}")
+        self.assertEqual(ok.status_code, 204)
+        self.assertFalse(Lead.objects.filter(pk=lead.pk).exists())
     def test_redefinir_senha_atendente_requires_empresa_and_emails_new_password(self):
         atendente = get_user_model().objects.create_user(username="atendente-x", password="senha-velha-123", email="atendente-x@example.com")
         self.company.members.add(atendente)

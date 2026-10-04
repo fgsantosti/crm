@@ -180,6 +180,16 @@ Mude para `Modo de atendimento=HUMANO` e não responda automaticamente quando ho
 
 Registre a ocorrência, atualize `Responsável`, `Prioridade` e `Próxima ação`. Não retome a automação sem comando privado autorizado.
 
+### Lead que nunca encerra
+
+Se a conversa morrer no meio do roteiro (contato some, fica ambíguo demais pra sempre, ou
+qualquer outro motivo que impeça concluir a triagem), não deixe o lead parado indefinidamente
+em `Bot encerrado=NÃO`: classifique-o como `Desqualificado` (`CLASSIFICADO` com o que já foi
+coletado) assim que ficar claro que ele não vai avançar. Leads presos sem nunca encerrar
+atrapalham o Kanban — isso não deveria acontecer. Como último recurso, se mesmo assim um lead
+ficar preso, o admin da empresa pode excluí-lo manualmente no Kanban (ver "Depois do
+CLASSIFICADO" abaixo), mas isso é fallback, não o comportamento esperado.
+
 ## Depois do `CLASSIFICADO`: Kanban humano (Qualificados → Despacho)
 
 O seu trabalho **termina** quando você emite `[[AXIOMA:CLASSIFICADO:{...}]]` e
@@ -196,6 +206,11 @@ novo existe pra elas**:
 4. **Despacho** — o atendente já decidiu o desfecho (Encerrado/Comprometido/
    Falha), mas ainda não confirmou o envio final.
 5. **Concluído** — desfecho definitivo; o lead sai do Kanban.
+
+Fallback de emergência: o admin da empresa pode excluir um lead direto do Kanban (botão "×" no
+canto do card) se ele ficar preso sem nunca encerrar — ver "Lead que nunca encerra" acima. Isso
+é exclusivo de conta humana admin; a conta de serviço do agente nunca tem permissão pra excluir
+nada.
 
 Isso não muda nada do que você já faz: `Bot encerrado=SIM` já bloqueia toda
 resposta automática (ver "Máquina de estados" acima), independente de qual

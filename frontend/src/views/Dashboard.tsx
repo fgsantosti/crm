@@ -19,6 +19,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   const [area, setArea] = useState('');
   const [periodo, setPeriodo] = useState<'30' | 'all'>('30');
   const [busy, setBusy] = useState(false);
+  const [excluindoId, setExcluindoId] = useState<string | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -89,6 +90,23 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   const pct = (n: number) => (total ? ` · ${Math.round((n / total) * 100)}%` : '');
 
   const kanbanLeads = useMemo(() => leadsVisiveisNoKanban(leads), [leads]);
+
+  // Fallback de admin: destrava um lead preso no Kanban (ex.: o agente nunca o classificou).
+  // O agente deve tratar leads assim como Desqualificado antes de nunca encerrar -- isso é
+  // só o botão de emergência caso aconteça mesmo assim.
+  async function removerLead(lead: Lead) {
+    if (!window.confirm(`Excluir "${lead.name || lead.contact}" do Kanban? Essa ação não pode ser desfeita.`)) return;
+    setExcluindoId(lead.id);
+    setError('');
+    try {
+      await api(`/leads/${lead.id}/?company=${company.id}`, { method: 'DELETE' });
+      setLeads((v) => v.filter((l) => l.id !== lead.id));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setExcluindoId(null);
+    }
+  }
 
   return (
     <>
@@ -214,7 +232,21 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                       </div>
                       <div className="kanban-col-body">
                         {items.map((l) => (
-                          <article key={l.id} className="kanban-card" style={{ cursor: 'default' }}>
+                          <article key={l.id} className="kanban-card" style={{ cursor: 'default', position: 'relative' }}>
+                            <button
+                              type="button"
+                              aria-label={`Excluir ${l.name || l.contact} (fallback para lead preso no Kanban)`}
+                              title="Excluir (fallback para lead preso no Kanban)"
+                              onClick={() => removerLead(l)}
+                              disabled={excluindoId === l.id}
+                              style={{
+                                position: 'absolute', top: 6, right: 6, width: 22, height: 22, padding: 0,
+                                borderRadius: '50%', background: 'var(--panel-muted)', color: 'var(--danger)',
+                                fontSize: 13, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              }}
+                            >
+                              ×
+                            </button>
                             <span
                               className="priority-dot"
                               style={URGENCIA_COR[l.temperature] ? { background: URGENCIA_COR[l.temperature] } : undefined}
