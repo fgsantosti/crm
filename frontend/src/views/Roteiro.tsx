@@ -447,7 +447,10 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
           {canEdit && flowQuestions.length > 1 && (
             <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>Arraste os cartões pelo ⠿ para reordenar o fluxo.</p>
           )}
-          {flowQuestions.map((q) => (
+          {/* Container único com as etapas numeradas: deixa claro a ordem real do fluxo
+              e dá uma faixa maior (o número) pra soltar o card, sem depender só do ⠿. */}
+          <div className="step-list">
+          {flowQuestions.map((q, index) => (
             <article
               key={q.id}
               className="step-card"
@@ -464,14 +467,22 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                   // Só o "pegador" é draggable (não o card inteiro): o card tem textarea/select por
                   // dentro, e arrastar a partir deles nunca inicia o drag nativo do navegador --
                   // precisa de uma área não-interativa dedicada pra isso funcionar de verdade.
+                  // setData é obrigatório pro Firefox considerar o drag válido (Chrome tolera sem,
+                  // mas sem isso o drag simplesmente não inicia lá).
                   <span
                     aria-hidden
                     draggable
-                    onDragStart={() => setDragId(q.id)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('text/plain', String(q.id));
+                      setDragId(q.id);
+                    }}
                     onDragEnd={() => setDragId(null)}
-                    style={{ color: 'var(--muted)', cursor: 'grab' }}
+                    className="step-handle"
+                    title="Arraste para reordenar"
                   >
-                    ⠿
+                    <span className="step-number">{index + 1}</span>
+                    <span aria-hidden>⠿</span>
                   </span>
                 )}
                 <span className="step-tag">{MANDATORY_LABELS[q.question_id] || q.question_id}</span>
@@ -553,6 +564,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
               )}
             </article>
           ))}
+          </div>
           {!busy && !flowQuestions.length && <div className="empty">Nenhuma pergunta cadastrada para esta empresa ainda.</div>}
 
           {canEdit && (
