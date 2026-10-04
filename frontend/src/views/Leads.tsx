@@ -5,9 +5,9 @@ import type { Company, Lead, LeadEvent, Me, Paginated } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 
 // Mesma ordem de services.URGENCIA_POR_FAIXA no backend (menos urgente -> mais urgente).
-const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Remarketing: 2, Qualificado: 3, Quente: 4 };
-const URGENCIA_COR: Record<string, string> = { Remarketing: '#2563EB', Qualificado: '#D4A72C', Quente: '#E2574C' };
-const FORA_DO_KANBAN = new Set(['Desqualificado', 'Desconfiado']);
+export const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Remarketing: 2, Qualificado: 3, Quente: 4 };
+export const URGENCIA_COR: Record<string, string> = { Remarketing: '#2563EB', Qualificado: '#D4A72C', Quente: '#E2574C' };
+export const FORA_DO_KANBAN = new Set(['Desqualificado', 'Desconfiado']);
 
 const DESFECHO_OPTIONS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string; help: string }[] = [
   { value: 'encerrado', label: 'Encerrado', color: 'var(--success)', help: 'Sucesso de comunicação — o cliente conseguiu realizar o que desejava.' },
@@ -15,9 +15,9 @@ const DESFECHO_OPTIONS: { value: 'encerrado' | 'comprometido' | 'falha'; label: 
   { value: 'falha', label: 'Falha durante o atendimento', color: 'var(--danger)', help: 'O cliente desistiu ou cessou o contato durante o atendimento humano.' },
 ];
 
-type ColumnKey = 'novos' | 'qualificados' | 'espera' | 'negociacao' | 'despacho';
+export type ColumnKey = 'novos' | 'qualificados' | 'espera' | 'negociacao' | 'despacho';
 
-const COLUMNS: { key: ColumnKey; label: string }[] = [
+export const COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'novos', label: 'Novos Leads' },
   { key: 'qualificados', label: 'Qualificados' },
   { key: 'espera', label: 'Atendimentos em espera' },
@@ -25,12 +25,32 @@ const COLUMNS: { key: ColumnKey; label: string }[] = [
   { key: 'despacho', label: 'Despacho' },
 ];
 
-function columnOf(l: Lead): ColumnKey {
+export function columnOf(l: Lead): ColumnKey {
   if (!l.bot_closed) return 'novos';
   if (l.etapa_atendimento === 'espera') return 'espera';
   if (l.etapa_atendimento === 'negociacao') return 'negociacao';
   if (l.etapa_atendimento === 'despacho') return 'despacho';
   return 'qualificados';
+}
+
+/** Leads visíveis no Kanban: desfecho já definitivo, cadastro manual e Desqualificado/Desconfiado nunca aparecem aqui. */
+export function leadsVisiveisNoKanban(leads: Lead[]): Lead[] {
+  return leads.filter((l) => !l.desfecho && !l.origem_manual && !FORA_DO_KANBAN.has(l.temperature));
+}
+
+export function ordenarColuna(key: ColumnKey, items: Lead[]): Lead[] {
+  if (key === 'qualificados') {
+    // Mais fria primeiro, mais quente por último (azul -> vermelho).
+    return [...items].sort((a, b) => (URGENCIA_RANK[a.temperature] ?? 9) - (URGENCIA_RANK[b.temperature] ?? 9));
+  }
+  if (key === 'negociacao') {
+    // Ordem de chegada: mais antigo primeiro, recém-chegado aparece por último.
+    return [...items].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  }
+  if (key === 'espera' || key === 'despacho') {
+    return [...items].sort((a, b) => (URGENCIA_RANK[b.temperature] ?? -1) - (URGENCIA_RANK[a.temperature] ?? -1));
+  }
+  return items;
 }
 
 function Overlay({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
@@ -199,22 +219,10 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
 
   const desqualificados = leads.filter((l) => FORA_DO_KANBAN.has(l.temperature));
 
-  const visible = leads
-    .filter((l) => !l.desfecho)
-    .filter((l) => !l.origem_manual)
-    .filter((l) => !FORA_DO_KANBAN.has(l.temperature))
-    .filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()));
+  const visible = leadsVisiveisNoKanban(leads).filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()));
 
   function orderedItems(key: ColumnKey) {
-    const items = visible.filter((l) => columnOf(l) === key);
-    if (key === 'qualificados') {
-      // Mais fria primeiro, mais quente por último (azul -> vermelho).
-      return [...items].sort((a, b) => (URGENCIA_RANK[a.temperature] ?? 9) - (URGENCIA_RANK[b.temperature] ?? 9));
-    }
-    if (key === 'espera' || key === 'negociacao' || key === 'despacho') {
-      return [...items].sort((a, b) => (URGENCIA_RANK[b.temperature] ?? -1) - (URGENCIA_RANK[a.temperature] ?? -1));
-    }
-    return items;
+    return ordenarColuna(key, visible.filter((l) => columnOf(l) === key));
   }
 
   function podeArrastar(l: Lead): boolean {
@@ -223,6 +231,13 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
     if (col === 'novos') return false;
     if (col === 'qualificados') return true;
     return l.owner === minhaIdentidade;
+  }
+
+  // Card de outro atendente (já reivindicado/em negociação/despacho por alguém que não é você):
+  // fica cinza, não clicável e não arrastável -- só o owner mexe nele.
+  function ehDeOutroOwner(l: Lead): boolean {
+    const col = columnOf(l);
+    return (col === 'espera' || col === 'negociacao' || col === 'despacho') && !!l.owner && l.owner !== minhaIdentidade;
   }
 
   function onDropEm(target: ColumnKey, lead: Lead | null) {
@@ -325,24 +340,31 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
                     </small>
                   </div>
                   <div className="kanban-col-body">
-                    {items.map((l) => (
+                    {items.map((l) => {
+                      const bloqueado = ehDeOutroOwner(l);
+                      return (
                       <article
                         key={l.id}
                         className={`kanban-card${selected?.id === l.id ? ' selected' : ''}`}
                         draggable={podeArrastar(l)}
                         onDragStart={() => setDragId(l.id)}
                         onDragEnd={() => setDragId(null)}
-                        onClick={() => setSelected(l)}
-                        tabIndex={0}
+                        onClick={() => !bloqueado && setSelected(l)}
+                        tabIndex={bloqueado ? -1 : 0}
                         role="button"
-                        aria-label={`Ver detalhes de ${l.name || l.contact}`}
+                        aria-disabled={bloqueado}
+                        aria-label={bloqueado ? `${l.name || l.contact} — em atendimento com ${l.owner}` : `Ver detalhes de ${l.name || l.contact}`}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
+                          if (!bloqueado && (e.key === 'Enter' || e.key === ' ')) {
                             e.preventDefault();
                             setSelected(l);
                           }
                         }}
-                        style={{ opacity: dragId === l.id ? 0.5 : 1, cursor: podeArrastar(l) ? 'grab' : undefined }}
+                        style={{
+                          opacity: dragId === l.id ? 0.5 : bloqueado ? 0.45 : 1,
+                          cursor: bloqueado ? 'not-allowed' : podeArrastar(l) ? 'grab' : undefined,
+                          filter: bloqueado ? 'grayscale(1)' : undefined,
+                        }}
                       >
                         <span
                           className={`priority-dot${col.key === 'qualificados' || col.key === 'espera' || col.key === 'negociacao' || col.key === 'despacho' ? '' : ` priority-dot-${l.priority === 'Alta' ? 'alta' : l.priority === 'Média' ? 'media' : 'baixa'}`}`}
@@ -367,7 +389,8 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
                           )}
                         </div>
                       </article>
-                    ))}
+                      );
+                    })}
                     {!items.length && <p style={{ fontSize: 12.5, color: 'var(--muted-soft)', padding: '4px 2px' }}>Nenhum lead aqui.</p>}
                   </div>
                   {col.key === 'despacho' && minhasNoDespacho.length > 0 && (
