@@ -14,7 +14,7 @@ def servir_media(request, path):
     return serve(request, path, document_root=settings.MEDIA_ROOT)
 from rest_framework.routers import DefaultRouter
 from crm.views import (
-    CompanyViewSet, LeadViewSet, QuestionViewSet, CompanyInfoViewSet, AreaViewSet, AtendenteInviteViewSet, AdminCompanyViewSet, VariavelViewSet, VariavelRoteiroViewSet,
+    CompanyViewSet, LeadViewSet, QuestionViewSet, CompanyInfoViewSet, AreaViewSet, AtendenteInviteViewSet, BlacklistViewSet, AdminCompanyViewSet, VariavelViewSet, VariavelRoteiroViewSet,
     me, avatar, validar_convite, trocar_senha, trocar_email_solicitar, trocar_email_confirmar, excluir_conta,
     redefinir_senha_atendente_view, desligar_atendente,
     LoginView, RefreshView, logout_view,
@@ -25,6 +25,7 @@ router.register("leads", LeadViewSet)
 router.register("questions", QuestionViewSet)
 router.register("company-info", CompanyInfoViewSet, basename="companyinfo")
 router.register("areas", AreaViewSet, basename="area")
+router.register("blacklist", BlacklistViewSet, basename="blacklist")
 router.register("convites", AtendenteInviteViewSet, basename="convite")
 router.register("admin-companies", AdminCompanyViewSet, basename="admin-company")
 router.register("variaveis", VariavelViewSet, basename="variavel")

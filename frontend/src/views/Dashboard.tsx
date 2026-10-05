@@ -10,7 +10,7 @@ type Resumo = {
   triagem_concluida: number;
   desqualificados: number;
   status: { despachado: number; automatico: number; equipe: number; desqualificado: number };
-  desfechos: Record<'encerrado' | 'comprometido' | 'falha', number>;
+  desfechos: Record<'encerrado' | 'comprometido' | 'falha' | 'bloqueado', number>;
   por_area: [string, number][];
   por_mes: [string, number][];
   por_owner: { owner_id: number; owner: string; atendimentos: number; concluidos: number; sucesso: number }[];
@@ -25,7 +25,7 @@ type LeadConcluido = {
   temperature: string;
   priority: string;
   especialidade: string;
-  desfecho: 'encerrado' | 'comprometido' | 'falha';
+  desfecho: 'encerrado' | 'comprometido' | 'falha' | 'bloqueado';
   owner: string;
   concluido_em: string | null;
   created_at: string;
@@ -35,7 +35,7 @@ type LeadConcluido = {
 const RESUMO_VAZIO: Resumo = {
   total: 0, triagem_concluida: 0, desqualificados: 0,
   status: { despachado: 0, automatico: 0, equipe: 0, desqualificado: 0 },
-  desfechos: { encerrado: 0, comprometido: 0, falha: 0 },
+  desfechos: { encerrado: 0, comprometido: 0, falha: 0, bloqueado: 0 },
   por_area: [], por_mes: [], por_owner: [], sucesso: 0, concluidos: [],
 };
 
@@ -51,10 +51,11 @@ const STATUS_DONUT: { key: keyof Resumo['status']; label: string; color: string 
   { key: 'desqualificado', label: 'Desqualificado/desconfiado', color: 'var(--muted)' },
 ];
 
-const DESFECHO_LABELS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string }[] = [
+const DESFECHO_LABELS: { value: LeadConcluido['desfecho']; label: string; color: string }[] = [
   { value: 'encerrado', label: 'Encerrado', color: 'var(--success)' },
   { value: 'comprometido', label: 'Comprometido', color: 'var(--warn)' },
   { value: 'falha', label: 'Falha durante o atendimento', color: 'var(--danger)' },
+  { value: 'bloqueado', label: 'Bloqueado', color: '#111111' },
 ];
 
 export function Dashboard({ api, company, role }: { api: Api; company: Company; role: 'atendente' | 'empresa' }) {

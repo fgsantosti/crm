@@ -12,7 +12,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.authtoken.models import Token
 from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
-from .models import Lead, Question, Event, Company, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
+from .models import Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,20 @@ FIELD_MAP = {
     "prioridade": "priority",
 }
 
+def normalizar_contato(valor):
+    """Telefone como a pessoa digita -> E.164 (+55 quando falta DDI). None se inválido."""
+    valor = (valor or "").strip()
+    digitos = re.sub(r"\D", "", valor)
+    if not digitos:
+        return None
+    if valor.startswith("+"):
+        e164 = f"+{digitos}"
+    elif digitos.startswith("55") and len(digitos) in (12, 13):
+        e164 = f"+{digitos}"
+    else:
+        e164 = f"+55{digitos}"
+    return e164 if re.fullmatch(r"\+[1-9]\d{7,14}", e164) else None
+
 def escalate(lead, reason):
     lead.mode = "HUMANO"
     lead.priority = "Alta"
@@ -100,7 +114,7 @@ def apply_fields(lead, company, fields):
     builtin já são os campos fixos acima, nome/especialidade/tema).
     """
     especialidade = fields.get("especialidade")
-    if especialidade and not company.areas.filter(name=especialidade).exists():
+    if especialidade and not _eh_fora_de_escopo(especialidade) and not company.areas.filter(name=especialidade).exists():
         return f"Área desconhecida: '{especialidade}' não está cadastrada em Equipe"
     for key, model_field in FIELD_MAP.items():
         if key in fields and fields[key]:
@@ -157,18 +171,13 @@ def avaliar_contato(company, contact):
     # O próprio número do agente (normalmente o mesmo em que a equipe atende) nunca é lead.
     if company.numero_agente and contact == company.numero_agente:
         return None, False, "proprio_numero"
-    # Só um lead ATIVO (desfecho em aberto) prende o número; depois do despacho ele fica livre
-    # e a próxima mensagem abre um lead novo do zero.
+    # BlackList: o número nunca entra no funil (sem lead, sem evento).
+    if Blacklist.objects.filter(company=company, contact=contact).exists():
+        return None, False, "blacklist"
+    # Só um lead ATIVO (desfecho em aberto) prende o número; depois do despacho (ou de uma
+    # desqualificação automática) ele fica livre e a próxima mensagem abre um lead novo do zero.
     lead = Lead.objects.filter(company=company, contact=contact, desfecho="").first()
     if not lead:
-        # Desqualificado recém-encerrado: um "ok, obrigado" logo depois da mensagem de
-        # encerramento não pode reabrir a triagem do zero -- fica mudo durante o cooldown.
-        recente = Lead.objects.filter(
-            company=company, contact=contact, desfecho="desqualificado",
-            concluido_em__gte=timezone.now() - COOLDOWN_DESQUALIFICADO,
-        ).order_by("-concluido_em").first()
-        if recente:
-            return recente, False, "cooldown_desqualificado"
         return None, True, "sem_lead"
     if lead.mode == "HUMANO":
         return lead, False, "humano"
@@ -231,6 +240,8 @@ def receive(company, data):
     if motivo == "proprio_numero":
         # Mensagem do número do agente pra ele mesmo não cria lead nem evento.
         return {**NO_REPLY, "proprio_numero": True}
+    if motivo == "blacklist":
+        return {**NO_REPLY, "blacklist": True}
     lead_novo = lead is None
     if lead_novo:
         # O lock da empresa acima garante que nunca nascem dois leads ativos pro mesmo contato.
@@ -245,10 +256,17 @@ def receive(company, data):
         summary=f"Marcador recebido: {data['marker']}",
     )
     result = dict(NO_REPLY)
+    # Triagem que não pode continuar (travada ou erro do agente) nunca vai pra equipe:
+    # o lead é apagado e o número recomeça do zero na próxima mensagem.
+    apagar_lead, motivo_apagar = False, ""
     pendentes = Event.objects.filter(lead=lead, delivery="PENDING").exclude(pk=event.pk)
 
     if not aceita:
         pass
+    elif data["human_required"] and data["reason"] == "fora de escopo":
+        desqualificar_fora_de_escopo(lead)
+    elif data["human_required"] and data["reason"] == "falha de integração":
+        apagar_lead, motivo_apagar = True, "Agente sinalizou falha de integração"
     elif data["human_required"]:
         escalate(lead, data["reason"])
     elif pendentes.filter(created_at__gte=timezone.now() - JANELA_ENTREGA_PENDENTE).exists():
@@ -267,20 +285,27 @@ def receive(company, data):
             marker, fields = "Q", {}
             event.marker = "Q"
             data = {**data, "question_id": company.initial_state}
-        if marker == "Q":
+        if marker in {"ATUALIZAR", "VALIDAR", "CLASSIFICADO"} and _eh_fora_de_escopo(fields.get("especialidade") or lead.especialidade):
+            # Fora de escopo não precisa concluir nem validar o roteiro e nunca recebe
+            # a urgência comercial enviada pelo agente.
+            apply_fields(lead, company, fields)
+            desqualificar_fora_de_escopo(lead)
+            question_id = None
+        elif marker == "Q":
             question_id = data["question_id"]
             if not question_id:
-                escalate(lead, "Marcador Q sem question_id: revisar integração do agente")
+                apagar_lead, motivo_apagar = True, "Marcador Q sem question_id: revisar integração do agente"
                 question_id = None
             elif _spin_fora_da_area(company, lead, question_id):
-                escalate(lead, "Pergunta SPIN de área diferente da classificada")
+                apagar_lead, motivo_apagar = True, "Pergunta SPIN de área diferente da classificada"
                 question_id = None
             else:
                 lead.state = question_id
         elif marker == "REPETIR":
             if contar_repeticoes(lead, excluir_pk=event.pk) >= MAX_REPETICOES:
-                # Último recurso: a ponte avança antes disso; aqui nunca reenvia em loop.
-                escalate(lead, "Triagem travada: contato não respondeu a pergunta após 3 repetições")
+                # Último recurso (a ponte avança antes disso): triagem travada não vai pra equipe,
+                # o lead é apagado e o número recomeça do zero na próxima mensagem.
+                apagar_lead, motivo_apagar = True, "Triagem travada: 3 repetições sem resposta"
                 question_id = None
             else:
                 # Na validação o estado é "VALIDANDO", mas a pergunta reenviada é "validar".
@@ -289,25 +314,28 @@ def receive(company, data):
         elif marker == "ATUALIZAR":
             field_error = apply_fields(lead, company, fields)
             if field_error:
-                escalate(lead, field_error)
+                apagar_lead, motivo_apagar = True, field_error
+                question_id = None
+            elif _eh_fora_de_escopo(lead.especialidade):
+                desqualificar_fora_de_escopo(lead)
                 question_id = None
             else:
                 question_id = fields.get("proxima", "")
                 if not question_id:
-                    escalate(lead, "ATUALIZAR sem 'proxima': configurar roteiro aprovado")
+                    apagar_lead, motivo_apagar = True, "ATUALIZAR sem 'proxima': configurar roteiro aprovado"
                     question_id = None
                 elif question_id in RESERVED_QUESTION_IDS:
-                    escalate(lead, f"'{question_id}' é reservado (validar/encerramento não são 'proxima' válidos): revisar fluxo do agente")
+                    apagar_lead, motivo_apagar = True, f"'{question_id}' é reservado (validar/encerramento não são 'proxima' válidos): revisar fluxo do agente"
                     question_id = None
                 elif _spin_fora_da_area(company, lead, question_id):
                     # apply_fields já rodou: uma especialidade enviada neste mesmo ATUALIZAR vale.
-                    escalate(lead, "Pergunta SPIN de área diferente da classificada")
+                    apagar_lead, motivo_apagar = True, "Pergunta SPIN de área diferente da classificada"
                     question_id = None
                 elif question_id == lead.state:
                     # Avançar para a mesma pergunta é uma repetição disfarçada: conta no mesmo limite.
                     event.marker = "REPETIR"
                     if contar_repeticoes(lead, excluir_pk=event.pk) >= MAX_REPETICOES:
-                        escalate(lead, "Triagem travada: contato não respondeu a pergunta após 3 repetições")
+                        apagar_lead, motivo_apagar = True, "Triagem travada: 3 repetições sem resposta"
                         question_id = None
                     else:
                         event.summary = "Mesma pergunta pedida de novo; contada como repetição"
@@ -317,25 +345,25 @@ def receive(company, data):
         elif marker == "VALIDAR":
             field_error = apply_fields(lead, company, fields)
             if field_error:
-                escalate(lead, field_error)
+                apagar_lead, motivo_apagar = True, field_error
                 question_id = None
             else:
                 question_id = "validar"
                 lead.state = "VALIDANDO"
         elif marker == "CLASSIFICADO":
             antecipado = bool(fields.get("encerramento_antecipado"))
-            if lead.state != "VALIDANDO" and not antecipado:
-                escalate(lead, "CLASSIFICADO recebido sem VALIDAR anterior: revisar fluxo do agente")
+            if antecipado:
+                apagar_lead, motivo_apagar = True, "Triagem abandonada antes de concluir o roteiro"
+                question_id = None
+            elif lead.state != "VALIDANDO":
+                apagar_lead, motivo_apagar = True, "CLASSIFICADO recebido sem VALIDAR anterior: revisar fluxo do agente"
                 question_id = None
             else:
-                if antecipado:
-                    fields, field_error = _aplicar_encerramento_antecipado(lead, company, fields)
-                else:
-                    fields, field_error = _aplicar_notas_urgencia(lead, company, fields)
+                fields, field_error = _aplicar_notas_urgencia(lead, company, fields)
                 if not field_error:
                     field_error = apply_fields(lead, company, fields)
                 if field_error:
-                    escalate(lead, field_error)
+                    apagar_lead, motivo_apagar = True, field_error
                     question_id = None
                 else:
                     lead.bot_closed = True
@@ -350,22 +378,29 @@ def receive(company, data):
                         lead.concluido_em = timezone.now()
                         lead.next_action = ""
         else:
-            escalate(lead, f"Marcador desconhecido: {marker}")
+            apagar_lead, motivo_apagar = True, f"Marcador desconhecido: {marker}"
             question_id = None
 
         if question_id:
             question = Question.objects.filter(company=company, question_id=question_id).first()
             if not question:
+                # Erro de configuração da empresa (não do agente): fica visível pra empresa corrigir.
                 escalate(lead, f"Configurar roteiro aprovado para question_id={question_id}")
             else:
                 # Áudio (gravação/TTS) é aplicado depois, fora da transação: ver aplicar_audio().
                 asset = render_text(question.text, lead, company)
                 if not asset:
-                    escalate(lead, "Ativo aprovado ausente")
+                    escalate(lead, "Configurar texto aprovado (vazio) no Roteiro")
                 else:
                     result = {"action": "TEXTO", "content": asset, "question_id": question_id}
                     event.delivery = "PENDING"
         lead.save()
+
+    if apagar_lead:
+        logger.warning("Lead %s (%s) apagado e triagem reiniciada: %s", lead.pk, company.name, motivo_apagar)
+        lead_id = str(lead.pk)
+        lead.delete()  # eventos vão junto (CASCADE)
+        return {**NO_REPLY, "lead_id": lead_id, "lead_apagado": True, "lead_novo": False}
 
     result.update({"lead_id": str(lead.pk), "event_id": event.pk, "lead_novo": lead_novo})
     event.result = result
@@ -793,7 +828,6 @@ PRIORIDADE_POR_TEMPERATURA = {"Quente": "Alta", "Qualificado": "Média"}
 # assumidos por atendente, só contam nas estatísticas do dashboard.
 FORA_DO_KANBAN = {"Desqualificado", "Desconfiado"}
 PODE_ASSUMIR_A_PARTIR_DE = "Remarketing"
-COOLDOWN_DESQUALIFICADO = timedelta(hours=24)
 # "Concluído com sucesso" = desfecho Encerrado (o cliente conseguiu o que queria);
 # Comprometido e Falha também são conclusões, mas não de sucesso.
 DESFECHO_SUCESSO = "encerrado"
@@ -837,42 +871,78 @@ def _aplicar_notas_urgencia(lead, company, fields):
     }
     return fields, None
 
-def _aplicar_encerramento_antecipado(lead, company, fields):
-    """Contato desistiu no meio da triagem: classifica com as notas que houver (perguntas
-    não respondidas não entram); sem nenhuma nota válida, Desqualificado/Baixa. Nunca escala."""
-    fields, erro = _aplicar_notas_urgencia(lead, company, fields)
-    if erro or (not fields.get("notas") and not fields.get("temperatura")):
-        fields = {**fields, "temperatura": "Desqualificado", "prioridade": "Baixa"}
-        lead.urgencia_detalhe = {"notas": {}, "pesos": {}, "score": None, "temperatura_calculada": "Desqualificado"}
-    elif not fields.get("prioridade"):
-        fields = {**fields, "prioridade": PRIORIDADE_POR_TEMPERATURA.get(fields["temperatura"], "Baixa")}
-        if not lead.urgencia_detalhe or "temperatura_calculada" not in lead.urgencia_detalhe:
-            lead.urgencia_detalhe = {"notas": {}, "pesos": {}, "score": None, "temperatura_calculada": fields["temperatura"]}
-    lead.urgencia_detalhe = {**(lead.urgencia_detalhe or {}), "motivo": "encerramento_antecipado"}
-    return fields, None
-
 TRIAGEM_ABANDONADA_APOS = timedelta(hours=24)
 
-def classificar_triagens_abandonadas(agora=None):
-    """Triagem automática parada há 24h+ sem resposta do contato: classifica como
-    Remarketing/Baixa e entrega à equipe, pra nenhum lead ficar preso na triagem.
-    Idempotente (só pega leads ainda em triagem). Retorna quantos foram classificados."""
+def apagar_triagens_abandonadas(agora=None):
+    """Triagem automática parada há 24h+ sem resposta do contato: o lead (e os eventos) são
+    apagados -- triagem que não terminou nunca vai pra equipe; o número recomeça do zero.
+    Idempotente. Retorna quantos leads foram apagados."""
     agora = agora or timezone.now()
+    limite = agora - TRIAGEM_ABANDONADA_APOS
     leads = Lead.objects.filter(
-        desfecho="", bot_closed=False, origem_manual=False, last_contact__lt=agora - TRIAGEM_ABANDONADA_APOS,
+        Q(last_contact__lt=limite) | Q(last_contact__isnull=True, created_at__lt=limite),
+        desfecho="", bot_closed=False, origem_manual=False,
     ).exclude(mode="HUMANO")
     total = 0
-    for lead in leads:
-        lead.temperature = "Remarketing"
-        lead.priority = "Baixa"
-        lead.bot_closed = True
-        lead.state = "ENCERRADO_CLASSIFICADO"
-        lead.funnel_stage = "Triagem concluída"
-        lead.next_action = "Triagem abandonada pelo contato: retomar contato"
-        lead.urgencia_detalhe = {"motivo": "abandono", "score": None}
-        lead.save(update_fields=["temperature", "priority", "bot_closed", "state", "funnel_stage", "next_action", "urgencia_detalhe"])
-        total += 1
+    company_ids = list(leads.order_by().values_list("company_id", flat=True).distinct())
+    for company_id in company_ids:
+        with transaction.atomic():
+            # receive usa o mesmo lock: reavalia a inatividade após qualquer entrada concorrente.
+            if not Company.objects.select_for_update().filter(pk=company_id).first():
+                continue
+            _, por_modelo = leads.filter(company_id=company_id).delete()
+            total += por_modelo.get("crm.Lead", 0)
     return total
+
+def _eh_fora_de_escopo(especialidade):
+    return (especialidade or "").strip().lower() == "fora de escopo"
+
+def desqualificar_fora_de_escopo(lead):
+    """Fora de escopo nunca chega a Qualificados nem fica com prioridade Alta: desqualifica na
+    hora (fora do Kanban, conta nas estatísticas) e libera o número."""
+    lead.temperature = "Desqualificado"
+    lead.priority = "Baixa"
+    lead.mode = "AUTOMÁTICO"
+    lead.bot_closed = True
+    lead.state = "ENCERRADO_CLASSIFICADO"
+    lead.funnel_stage = "Triagem concluída"
+    lead.next_action = "Fora de escopo"
+    lead.desfecho = "desqualificado"
+    lead.concluido_em = timezone.now()
+    lead.urgencia_detalhe = {**(lead.urgencia_detalhe or {}), "motivo": "fora_de_escopo"}
+    lead.save()
+
+@transaction.atomic
+def despachar_e_bloquear(lead_id, user, motivo=""):
+    """Atendente dono conclui o lead com desfecho "bloqueado" e põe o número na BlackList,
+    numa transação só (sem passar pela fila de Enviar Despachos). Retorna erro (str) ou None."""
+    company_id = Lead.objects.filter(pk=lead_id).values_list("company_id", flat=True).first()
+    if company_id is None:
+        return "Lead não encontrado."
+    # Mesma ordem de locks do incoming: nenhuma mensagem cria um novo lead
+    # entre a conclusão do atendimento e a inclusão na BlackList.
+    Company.objects.select_for_update().get(pk=company_id)
+    lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
+    if not lead or not lead.company.members.filter(pk=user.pk).exists():
+        return "Lead não encontrado."
+    if lead.owner_id != user.pk:
+        return "Só quem assumiu este atendimento pode despachá-lo."
+    if lead.desfecho:
+        return "Este lead já foi concluído."
+    if not lead.origem_manual and lead.etapa_atendimento not in {"negociacao", "despacho"}:
+        return "Este lead ainda não está em Meus Atendimentos."
+    Blacklist.objects.get_or_create(
+        company=lead.company, contact=lead.contact,
+        defaults={"motivo": motivo or "Despachado e bloqueado pelo atendente", "adicionado_por": user},
+    )
+    lead.desfecho = "bloqueado"
+    lead.desfecho_pendente = ""
+    lead.etapa_atendimento = ""
+    lead.concluido_em = timezone.now()
+    lead.next_action = ""
+    lead.bot_closed = True
+    lead.save(update_fields=["desfecho", "desfecho_pendente", "etapa_atendimento", "concluido_em", "next_action", "bot_closed"])
+    return None
 
 def contexto_agente(company):
     """Tudo que o agente precisa pra conduzir o roteiro da empresa, sem efeitos colaterais."""
@@ -952,7 +1022,7 @@ def resumo_dashboard(company, dias=None, area="", busca=""):
     nomes = {u.pk: _nome_usuario(u) for u in User.objects.filter(pk__in={r["owner"] for r in rows if r["owner"]}).select_related("profile")}
 
     status = {"despachado": 0, "automatico": 0, "equipe": 0, "desqualificado": 0}
-    desfechos = {"encerrado": 0, "comprometido": 0, "falha": 0}
+    desfechos = {"encerrado": 0, "comprometido": 0, "falha": 0, "bloqueado": 0}
     por_area, por_mes, por_owner = {}, {}, {}
     tz = timezone.get_current_timezone()
     for r in rows:
@@ -966,7 +1036,7 @@ def resumo_dashboard(company, dias=None, area="", busca=""):
         if r["owner"]:
             o = por_owner.setdefault(r["owner"], {"owner_id": r["owner"], "owner": nomes.get(r["owner"], ""), "atendimentos": 0, "concluidos": 0, "sucesso": 0})
             o["atendimentos"] += 1
-            if r["desfecho"] in Lead.DESFECHO_DESPACHO:
+            if r["desfecho"] in Lead.DESFECHO_CONCLUIDO:
                 o["concluidos"] += 1
             if r["desfecho"] == DESFECHO_SUCESSO:
                 o["sucesso"] += 1
@@ -974,7 +1044,7 @@ def resumo_dashboard(company, dias=None, area="", busca=""):
     # Despachados pela equipe (encerrado/comprometido/falha), mais recentes primeiro --
     # mesmos filtros de período/área/busca de todo o resto do resumo.
     concluidos = sorted(
-        (r for r in rows if r["desfecho"] in Lead.DESFECHO_DESPACHO),
+        (r for r in rows if r["desfecho"] in Lead.DESFECHO_CONCLUIDO),
         key=lambda r: r["concluido_em"] or r["created_at"], reverse=True,
     )
     return {

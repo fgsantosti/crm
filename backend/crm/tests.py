@@ -4,7 +4,7 @@ from django.core import mail
 from django.test import Client, TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
-from .models import Company, Question, Lead, Event, Area, AtendenteInvite, PasswordChangeRequired, AgentTokenExpiry, CompanyInfo, Variavel, VariavelRoteiro
+from .models import Blacklist, Company, Question, Lead, Event, Area, AtendenteInvite, PasswordChangeRequired, AgentTokenExpiry, CompanyInfo, Variavel, VariavelRoteiro
 from .services import receive
 
 class QualificationTests(TestCase):
@@ -78,20 +78,20 @@ class QualificationTests(TestCase):
         self.assertEqual(lead.temperature, "Quente")
         self.assertEqual(lead.priority, "Alta")
         self.assertEqual(self.send("5")["action"], "NO_REPLY")
-    def test_classificado_without_validar_is_escalated_not_closed(self):
+    def assertTriagemReiniciada(self, result):
+        # Erro do agente / triagem travada: nunca vai pra equipe -- lead apagado, número livre.
+        self.assertEqual(result["action"], "NO_REPLY")
+        self.assertTrue(result.get("lead_apagado"))
+        self.assertEqual(Lead.objects.filter(contact="+5585999999999").count(), 0)
+    def test_classificado_without_validar_reinicia_triagem(self):
         self.delivered(self.send())
-        self.send("2", marker="CLASSIFICADO", fields={"temperatura": "Quente", "prioridade": "Alta"})
-        lead = Lead.objects.get()
-        self.assertFalse(lead.bot_closed)
-        self.assertEqual(lead.mode, "HUMANO")
-    def test_q_without_question_id_is_escalated_and_returns_200_shaped_result(self):
-        # Lead novo sempre começa pela apresentação; o Q sem id escala num lead já existente.
+        r = self.send("2", marker="CLASSIFICADO", fields={"temperatura": "Quente", "prioridade": "Alta"})
+        self.assertTriagemReiniciada(r)
+    def test_q_without_question_id_reinicia_triagem(self):
+        # Lead novo sempre começa pela apresentação; o Q sem id num lead já existente reinicia.
         self.delivered(self.send())
         result = self.send("2", question_id="")
-        self.assertNotEqual(result.get("action"), "ERROR")
-        self.assertIn("action", result)
-        lead = Lead.objects.get()
-        self.assertEqual(lead.mode, "HUMANO")
+        self.assertTriagemReiniciada(result)
     def test_repetir_resends_current_question(self):
         self.delivered(self.send())
         result = self.send("2", marker="REPETIR")
@@ -99,10 +99,7 @@ class QualificationTests(TestCase):
         self.assertEqual(Lead.objects.get().state, "apresentacao")
     def test_atualizar_requires_proxima(self):
         self.delivered(self.send())
-        self.send("2", marker="ATUALIZAR", fields={"nome": "Maria"})
-        lead = Lead.objects.get()
-        self.assertEqual(lead.mode, "HUMANO")
-        self.assertEqual(lead.name, "Maria")
+        self.assertTriagemReiniciada(self.send("2", marker="ATUALIZAR", fields={"nome": "Maria"}))
     def test_human_request(self):
         self.send(human_required=True)
         self.assertEqual(Lead.objects.get().mode, "HUMANO")
@@ -135,11 +132,10 @@ class QualificationTests(TestCase):
             self.assertEqual(r["action"], "TEXTO")
             self.delivered(r)
         self.assertEqual(status_contato(self.company, "+5585999999999")["repeticoes"], 3)
-        r = self.send("r3", marker="REPETIR")
-        self.assertEqual(r["action"], "NO_REPLY")
-        lead = Lead.objects.get()
-        self.assertEqual(lead.mode, "HUMANO")
-        self.assertIn("3 repetições", lead.next_action)
+        self.assertTriagemReiniciada(self.send("r3", marker="REPETIR"))
+        # Próxima mensagem do mesmo número recomeça do zero pela apresentação.
+        r = self.send("r4", marker="REPETIR")
+        self.assertEqual((r["action"], r["question_id"], r["lead_novo"]), ("TEXTO", "apresentacao", True))
     def test_repeticoes_zera_com_marcador_de_avanco(self):
         from .services import status_contato
         self.delivered(self.send())
@@ -156,9 +152,7 @@ class QualificationTests(TestCase):
             self.assertEqual(r["question_id"], "nome")
             self.delivered(r)
         self.assertEqual(status_contato(self.company, "+5585999999999")["repeticoes"], 3)
-        r = self.send("a4", marker="ATUALIZAR", fields={"proxima": "nome"})
-        self.assertEqual(r["action"], "NO_REPLY")
-        self.assertIn("3 repetições", Lead.objects.get().next_action)
+        self.assertTriagemReiniciada(self.send("a4", marker="ATUALIZAR", fields={"proxima": "nome"}))
     def test_repetir_na_validacao_reenvia_validar(self):
         self.delivered(self.send())
         self.delivered(self.send("v1", marker="VALIDAR", fields={"nome": "Ana"}))
@@ -174,20 +168,11 @@ class QualificationTests(TestCase):
         self.delivered(self.send())
         self.delivered(self.send("2", marker="ATUALIZAR", fields={"proxima": "nome"}))
         r = self.send("3", marker="CLASSIFICADO", fields={"encerramento_antecipado": True, "notas": {"nome": 9.5, "inexistente": 2}})
-        self.assertEqual(r["question_id"], "encerramento")
-        lead = Lead.objects.get()
-        self.assertTrue(lead.bot_closed)
-        self.assertEqual(lead.temperature, "Quente")
-        self.assertEqual(lead.priority, "Alta")
-        self.assertEqual(lead.urgencia_detalhe["motivo"], "encerramento_antecipado")
-    def test_encerramento_antecipado_sem_notas_vira_desqualificado(self):
+        self.assertTriagemReiniciada(r)
+    def test_encerramento_antecipado_sem_notas_remove_triagem(self):
         self.delivered(self.send())
         r = self.send("2", marker="CLASSIFICADO", fields={"encerramento_antecipado": True})
-        self.assertEqual(r["action"], "TEXTO")
-        lead = Lead.objects.get()
-        self.assertEqual((lead.temperature, lead.priority, lead.mode), ("Desqualificado", "Baixa", "AUTOMÁTICO"))
-        self.assertEqual(lead.desfecho, "desqualificado")
-        self.assertEqual(lead.urgencia_detalhe["motivo"], "encerramento_antecipado")
+        self.assertTriagemReiniciada(r)
     def test_encerramento_antecipado_pela_api_aceita_sem_notas(self):
         token_user = get_user_model().objects.create_user(username="agente-x")
         self.company.members.add(token_user)
@@ -198,28 +183,27 @@ class QualificationTests(TestCase):
         Event.objects.filter(pk=r1["event_id"]).update(delivery="SENT")
         r2 = c.post(base, {**payload, "message_id": "m2", "marker": "CLASSIFICADO", "fields": {"encerramento_antecipado": True}}, format="json")
         self.assertEqual(r2.status_code, 200)
-        self.assertEqual(Lead.objects.get(contact="+5585911112222").temperature, "Desqualificado")
+        self.assertTrue(r2.json()["lead_apagado"])
+        self.assertFalse(Lead.objects.filter(contact="+5585911112222").exists())
         r3 = c.post(base, {**payload, "message_id": "m3", "marker": "CLASSIFICADO", "fields": {}}, format="json")
         self.assertEqual(r3.status_code, 400)
-    def test_triagem_abandonada_vira_remarketing_e_e_idempotente(self):
-        from .services import classificar_triagens_abandonadas
+    def test_triagem_abandonada_e_apagada_e_e_idempotente(self):
+        from .services import apagar_triagens_abandonadas
         self.delivered(self.send())
         parado = Lead.objects.get()
         Lead.objects.filter(pk=parado.pk).update(last_contact=timezone.now() - timedelta(hours=25))
         recente = Lead.objects.create(company=self.company, contact="+5585900000002", state="nome", last_contact=timezone.now())
         humano = Lead.objects.create(company=self.company, contact="+5585900000003", mode="HUMANO", last_contact=timezone.now() - timedelta(days=3))
         manual = Lead.objects.create(company=self.company, contact="+5585900000004", origem_manual=True, last_contact=timezone.now() - timedelta(days=3))
-        self.assertEqual(classificar_triagens_abandonadas(), 1)
-        parado.refresh_from_db()
-        self.assertEqual((parado.temperature, parado.priority, parado.state), ("Remarketing", "Baixa", "ENCERRADO_CLASSIFICADO"))
-        self.assertTrue(parado.bot_closed)
-        self.assertEqual(parado.urgencia_detalhe, {"motivo": "abandono", "score": None})
-        self.assertEqual(parado.next_action, "Triagem abandonada pelo contato: retomar contato")
+        self.assertEqual(apagar_triagens_abandonadas(), 1)
+        self.assertFalse(Lead.objects.filter(pk=parado.pk).exists())
+        self.assertFalse(Event.objects.filter(lead_id=parado.pk).exists())
         for outro in (recente, humano, manual):
-            outro.refresh_from_db()
-            self.assertFalse(outro.bot_closed)
-        self.assertEqual(classificar_triagens_abandonadas(), 0)
-        self.assertEqual(self.send("9")["action"], "NO_REPLY")
+            self.assertTrue(Lead.objects.filter(pk=outro.pk).exists())
+        self.assertEqual(apagar_triagens_abandonadas(), 0)
+        # O número recomeça do zero.
+        r = self.send("9")
+        self.assertEqual((r["action"], r["lead_novo"]), ("TEXTO", True))
     def test_classificado_sempre_em_uma_das_cinco_temperaturas(self):
         from .services import calcular_urgencia
         cinco = {"Desqualificado", "Desconfiado", "Remarketing", "Qualificado", "Quente"}
@@ -238,11 +222,12 @@ class QualificationTests(TestCase):
         self.assertEqual(self.client.get(f"/api/leads/?company={self.other.pk}").status_code, 404)
         self.assertEqual(self.client.post(f"/api/companies/{self.other.pk}/incoming/", {}).status_code, 404)
         self.assertEqual(self.client.get("/api/leads/").status_code, 404)
-    def test_failed_delivery_hands_off(self):
+    def test_failed_delivery_na_triagem_reinicia(self):
         result = self.send()
         response = self.client.post(f"/api/companies/{self.company.pk}/delivery/", {"event_id": result["event_id"], "status": "FAILED"}, format="json")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(Lead.objects.get().mode, "HUMANO")
+        self.assertTrue(response.json()["lead_apagado"])
+        self.assertEqual(Lead.objects.count(), 0)
     def test_unauthenticated_denied(self):
         self.client.force_authenticate(None)
         self.assertEqual(self.client.get("/api/companies/").status_code, 401)
@@ -259,13 +244,9 @@ class QualificationTests(TestCase):
     def test_atualizar_rejects_reserved_proxima_values(self):
         self.delivered(self.send())
         for reservado in ["validar", "encerramento"]:
+            self.delivered(self.send(f"q-{reservado}"))
             result = self.send(f"m-{reservado}", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": reservado})
-            self.assertEqual(result["action"], "NO_REPLY")
-            lead = Lead.objects.get()
-            self.assertEqual(lead.mode, "HUMANO")
-            lead.mode = "AUTOMÁTICO"
-            lead.next_action = ""
-            lead.save()
+            self.assertTriagemReiniciada(result)
     def test_question_create_requires_variavel_and_delete_blocks_mandatory(self):
         staff = get_user_model().objects.create_user(username="empresa-roteiro", is_staff=True)
         self.company.members.add(staff)
@@ -458,11 +439,7 @@ class QualificationTests(TestCase):
     def test_atualizar_rejects_especialidade_not_registered_as_area(self):
         self.delivered(self.send())
         result = self.send("2", marker="ATUALIZAR", fields={"especialidade": "Área Inventada", "proxima": "nome"})
-        self.assertEqual(result["action"], "NO_REPLY")
-        lead = Lead.objects.get()
-        self.assertEqual(lead.mode, "HUMANO")
-        self.assertIn("Área desconhecida", lead.next_action)
-        self.assertEqual(lead.especialidade, "")
+        self.assertTriagemReiniciada(result)
     def test_atualizar_accepts_especialidade_registered_as_area(self):
         self.delivered(self.send())
         result = self.send("2", marker="ATUALIZAR", fields={"especialidade": "Trabalhista", "proxima": "nome"})
@@ -1340,14 +1317,12 @@ class VarreduraFixesTests(TestCase):
         self.assertIsNone(lead.owner)
         self.assertEqual(self.send("3")["action"], "NO_REPLY")
 
-    def test_desqualificado_sai_dos_ativos_e_reabre_so_depois_do_cooldown(self):
+    def test_desqualificado_sai_dos_ativos_e_libera_o_numero_na_hora(self):
         lead = self.classificar("Desqualificado")
         self.assertEqual(lead.desfecho, "desqualificado")
         self.assertIsNotNone(lead.concluido_em)
-        self.assertEqual(self.send("depois-1")["action"], "NO_REPLY")  # "ok, obrigado" logo depois
-        self.assertEqual(Lead.objects.count(), 1)
-        Lead.objects.filter(pk=lead.pk).update(concluido_em=timezone.now() - timedelta(hours=25))
-        self.assertEqual(self.send("depois-2")["action"], "TEXTO")
+        # Sem quarentena: a próxima mensagem já abre um lead novo do zero.
+        self.assertEqual(self.send("depois-1")["action"], "TEXTO")
         self.assertEqual(Lead.objects.count(), 2)
         # Atendente nunca escolhe o desfecho automático no despacho.
         novo = Lead.objects.get(desfecho="")
@@ -1666,13 +1641,12 @@ class AgenteContextoEUrgenciaTests(TestCase):
         self.send("c", contact="+5585911114444", marker="CLASSIFICADO", fields={"notas": {"situacao": 10}, "prioridade": "Baixa"})
         self.assertEqual(Lead.objects.get(contact="+5585911114444").priority, "Baixa")
 
-    def test_classificado_com_notas_sem_peso_escala_para_humano(self):
+    def test_classificado_com_notas_sem_peso_reinicia_triagem(self):
         self.ate_validar()
         r = self.send("c", marker="CLASSIFICADO", fields={"notas": {"nome": 10, "inexistente": 9}})
         self.assertEqual(r["action"], "NO_REPLY")
-        lead = Lead.objects.get()
-        self.assertEqual(lead.mode, "HUMANO")
-        self.assertFalse(lead.bot_closed)
+        self.assertTrue(r["lead_apagado"])
+        self.assertEqual(Lead.objects.count(), 0)
 
     def test_classificado_exige_notas_ou_temperatura_e_prioridade(self):
         from .serializers import IncomingSerializer
@@ -1761,12 +1735,12 @@ class ContatoFecharDonoPendenciasTests(TestCase):
         self.assertEqual(self.contato("+5586994238125").json()["motivo"], "proprio_numero")
         self.assertFalse(self.contato("+5586994238125").json()["aceita_agente"])
 
-    def test_contato_humano_e_cooldown_desqualificado(self):
+    def test_contato_humano_e_desqualificado_liberado(self):
         self.send("h1", contact="+5585900000001", human_required=True)
         self.assertEqual(self.contato("+5585900000001").json()["motivo"], "humano")
         self.classificar(contact="+5585900000002", temperatura="Desqualificado")
         r = self.contato("+5585900000002").json()
-        self.assertEqual((r["aceita_agente"], r["motivo"]), (False, "cooldown_desqualificado"))
+        self.assertEqual((r["aceita_agente"], r["motivo"]), (True, "sem_lead"))
 
     def test_contato_permissoes_e_validacao(self):
         self.assertEqual(self.contato("5585911114444").status_code, 400)
@@ -2154,13 +2128,12 @@ class SpinPorAreaTests(TestCase):
         self.send("1")
         st = self.agent.get(f"/api/companies/{self.company.id}/agente/contato/?contact=%2B5585977776666").json()
         self.assertEqual(st["especialidade"], "")
-        # SPIN antes de classificar a área → humano
+        # SPIN antes de classificar a área → erro do agente: triagem reiniciada
         r = self.send("2", marker="ATUALIZAR", fields={"proxima": "trab_situacao"})
-        self.assertEqual(r["action"], "NO_REPLY")
-        lead = Lead.objects.get(contact="+5585977776666")
-        self.assertEqual((lead.mode, lead.next_action), ("HUMANO", "Pergunta SPIN de área diferente da classificada"))
+        self.assertEqual((r["action"], r.get("lead_apagado")), ("NO_REPLY", True))
+        self.assertFalse(Lead.objects.filter(contact="+5585977776666").exists())
 
-    def test_spin_da_area_certa_avanca_e_de_outra_area_escala(self):
+    def test_spin_da_area_certa_avanca_e_de_outra_area_reinicia(self):
         self.criar("trab_situacao", self.trab, "situacao")
         self.criar("cons_situacao", self.cons, "situacao")
         self.send("1")
@@ -2169,8 +2142,8 @@ class SpinPorAreaTests(TestCase):
         st = self.agent.get(f"/api/companies/{self.company.id}/agente/contato/?contact=%2B5585977776666").json()
         self.assertEqual(st["especialidade"], "Trabalhista")
         r = self.send("3", marker="ATUALIZAR", fields={"proxima": "cons_situacao"})
-        self.assertEqual(r["action"], "NO_REPLY")
-        self.assertEqual(Lead.objects.get(contact="+5585977776666").next_action, "Pergunta SPIN de área diferente da classificada")
+        self.assertEqual((r["action"], r.get("lead_apagado")), ("NO_REPLY", True))
+        self.assertFalse(Lead.objects.filter(contact="+5585977776666").exists())
 
     def test_reorder_persiste_ordem_dentro_da_lista(self):
         a = self.criar("trab_a", self.trab, "situacao", ordem=0)
@@ -2181,3 +2154,179 @@ class SpinPorAreaTests(TestCase):
         self.assertEqual([q["question_id"] for q in r["spin"]["Trabalhista"]], ["trab_b", "trab_a"])
         fixa_nome = Question.objects.get(company=self.company, question_id="nome")
         self.assertIsNone(fixa_nome.area)
+
+
+class BlacklistEFiltragemTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        self.company = Company.objects.create(name="Bloqueios")
+        self.other = Company.objects.create(name="Outra empresa")
+        self.ana = get_user_model().objects.create_user(username="ana-bloqueios")
+        self.bia = get_user_model().objects.create_user(username="bia-bloqueios")
+        self.empresa = get_user_model().objects.create_user(username="empresa-bloqueios", is_staff=True)
+        self.agente = get_user_model().objects.create_user(username="agente.bloqueios")
+        self.agente.groups.add(Group.objects.get_or_create(name="agente")[0])
+        self.company.members.add(self.ana, self.bia, self.empresa, self.agente)
+        self.contact = "+5585999998888"
+        self.client = APIClient()
+        self.client.force_authenticate(self.ana)
+        for qid in ["apresentacao", "nome", "validar", "encerramento"]:
+            Question.objects.create(company=self.company, question_id=qid, text=f"Pergunta {qid}")
+
+    def send(self, mid, **kwargs):
+        data = {"contact": self.contact, "message_id": mid, "kind": "text", "marker": "Q", "question_id": "apresentacao",
+                "fields": {}, "human_required": False, "reason": "pedido humano", **kwargs}
+        result = receive(self.company, data)
+        if result.get("event_id"):
+            Event.objects.filter(pk=result["event_id"]).update(delivery="SENT")
+        return result
+
+    def test_empresa_e_atendentes_adicionam_normalizam_e_removem(self):
+        base = f"/api/blacklist/?company={self.company.pk}"
+        for user in [self.ana, self.empresa]:
+            with self.subTest(user=user.username):
+                self.client.force_authenticate(user)
+                response = self.client.post(base, {"contact": "(85) 99999-8888", "motivo": "Teste"}, format="json")
+                self.assertEqual(response.status_code, 201)
+                self.assertEqual(response.json()["contact"], self.contact)
+                self.assertEqual(response.json()["adicionado_por"], user.pk)
+                self.client.force_authenticate(self.bia)
+                self.assertEqual(self.client.get(base).json()["count"], 1)
+                self.assertEqual(self.client.post(base, {"contact": self.contact}, format="json").status_code, 400)
+                self.assertEqual(self.client.delete(f"/api/blacklist/{response.json()['id']}/?company={self.company.pk}").status_code, 204)
+        self.assertEqual(self.client.post(base, {"contact": "abc"}, format="json").status_code, 400)
+
+    def test_blacklist_isolada_e_agente_sem_acesso(self):
+        entry = Blacklist.objects.create(company=self.company, contact=self.contact)
+        base = f"/api/blacklist/?company={self.company.pk}"
+        self.assertEqual(self.client.get(f"/api/blacklist/?company={self.other.pk}").status_code, 404)
+        foreign = Blacklist.objects.create(company=self.other, contact=self.contact)
+        self.assertEqual(self.client.delete(f"/api/blacklist/{foreign.pk}/?company={self.company.pk}").status_code, 404)
+        self.client.force_authenticate(self.agente)
+        self.assertEqual(self.client.get(base).status_code, 403)
+        self.assertEqual(self.client.post(base, {"contact": self.contact}, format="json").status_code, 403)
+        self.assertEqual(self.client.delete(f"/api/blacklist/{entry.pk}/?company={self.company.pk}").status_code, 403)
+
+    def test_bot_ignora_texto_audio_e_marcadores_sem_lead_ou_evento(self):
+        Blacklist.objects.create(company=self.company, contact=self.contact)
+        self.client.force_authenticate(self.agente)
+        status = self.client.get(f"/api/companies/{self.company.pk}/agente/contato/", {"contact": self.contact}).json()
+        self.assertEqual((status["aceita_agente"], status["motivo"], status["lead_id"]), (False, "blacklist", None))
+        for kind in ["text", "audio"]:
+            for marker in ["Q", "REPETIR", "ATUALIZAR", "VALIDAR", "CLASSIFICADO"]:
+                result = self.client.post(f"/api/companies/{self.company.pk}/incoming/", {
+                    "contact": self.contact, "message_id": f"{kind}-{marker}", "kind": kind,
+                    "marker": marker, "question_id": "apresentacao", "fields": {"temperatura": "Quente", "prioridade": "Alta"},
+                }, format="json")
+                self.assertEqual(result.status_code, 200)
+                self.assertEqual(result.json(), {"action": "NO_REPLY", "blacklist": True})
+        self.assertFalse(Lead.objects.exists())
+        self.assertFalse(Event.objects.exists())
+        # Mesmo número continua livre na outra empresa.
+        self.assertEqual(receive(self.other, {"contact": self.contact, "message_id": "outra", "kind": "text", "marker": "Q",
+                                            "question_id": "apresentacao", "fields": {}, "human_required": False})["lead_novo"], True)
+
+    def test_bloqueio_com_lead_ativo_nao_altera_nem_processa_entrada(self):
+        self.send("inicial")
+        lead = Lead.objects.get()
+        Blacklist.objects.create(company=self.company, contact=self.contact)
+        before = Event.objects.count()
+        self.assertEqual(self.send("bloqueado", marker="VALIDAR")["action"], "NO_REPLY")
+        self.assertEqual(Event.objects.count(), before)
+        lead.refresh_from_db()
+        self.assertEqual(lead.state, "apresentacao")
+
+    def test_despachar_bloquear_e_desbloquear_libera_nova_triagem(self):
+        lead = Lead.objects.create(company=self.company, contact=self.contact, bot_closed=True,
+                                   owner=self.ana, mode="HUMANO", etapa_atendimento="negociacao", temperature="Quente")
+        result = self.client.post(f"/api/leads/{lead.pk}/despachar-bloquear/?company={self.company.pk}", {}, format="json")
+        self.assertEqual(result.status_code, 200)
+        lead.refresh_from_db()
+        self.assertEqual((lead.desfecho, lead.desfecho_pendente, lead.etapa_atendimento), ("bloqueado", "", ""))
+        self.assertIsNotNone(lead.concluido_em)
+        for filtro in ["ativos", "meus", "pending"]:
+            self.assertEqual(self.client.get(f"/api/leads/?company={self.company.pk}&{filtro}=1").json()["count"], 0)
+        resumo = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
+        self.assertEqual(resumo["desfechos"]["bloqueado"], 1)
+        self.assertEqual((resumo["por_owner"][0]["concluidos"], resumo["sucesso"]), (1, 0))
+        self.assertEqual(self.send("ignorado")["action"], "NO_REPLY")
+        entry = Blacklist.objects.get()
+        self.client.force_authenticate(self.empresa)
+        self.assertEqual(self.client.delete(f"/api/blacklist/{entry.pk}/?company={self.company.pk}").status_code, 204)
+        result = self.send("novo", marker="REPETIR")
+        self.assertEqual((result["lead_novo"], result["question_id"]), (True, "apresentacao"))
+        self.assertNotEqual(result["lead_id"], str(lead.pk))
+        lead.refresh_from_db()
+        self.assertEqual(lead.desfecho, "bloqueado")
+
+    def test_so_dono_em_meus_atendimentos_bloqueia(self):
+        lead = Lead.objects.create(company=self.company, contact=self.contact, bot_closed=True, owner=self.ana, etapa_atendimento="negociacao")
+        url = f"/api/leads/{lead.pk}/despachar-bloquear/?company={self.company.pk}"
+        for user, code in [(self.bia, 400), (self.empresa, 403), (self.agente, 403)]:
+            self.client.force_authenticate(user)
+            self.assertEqual(self.client.post(url, {}, format="json").status_code, code)
+        self.assertFalse(Blacklist.objects.exists())
+        self.client.force_authenticate(self.ana)
+        lead.etapa_atendimento = "espera"
+        lead.save()
+        self.assertEqual(self.client.post(url, {}, format="json").status_code, 400)
+        lead.etapa_atendimento = "despacho"
+        lead.desfecho_pendente = "encerrado"
+        lead.save()
+        Blacklist.objects.create(company=self.company, contact=self.contact)
+        self.assertEqual(self.client.post(url, {}, format="json").status_code, 200)
+        self.assertEqual(Blacklist.objects.count(), 1)
+        self.assertEqual(self.client.post(url, {}, format="json").status_code, 400)
+
+    def test_atendimento_manual_tambem_pode_bloquear(self):
+        lead = Lead.objects.create(company=self.company, contact=self.contact, owner=self.ana, origem_manual=True)
+        response = self.client.post(f"/api/leads/{lead.pk}/despachar-bloquear/?company={self.company.pk}", {}, format="json")
+        self.assertEqual(response.status_code, 200)
+        lead.refresh_from_db()
+        self.assertTrue(lead.bot_closed)
+
+    def test_fora_de_escopo_nao_qualifica_nem_fica_alta_em_nenhum_marcador(self):
+        # Mesmo sem uma Area "Fora de escopo" cadastrada, sai do funil.
+        for marker in ["ATUALIZAR", "VALIDAR", "CLASSIFICADO"]:
+            with self.subTest(marker=marker):
+                self.send(f"inicio-{marker}")
+                result = self.send(marker, marker=marker, fields={"especialidade": "Fora de escopo", "nome": "Ana",
+                                    "proxima": "nome", "temperatura": "Quente", "prioridade": "Alta"})
+                self.assertEqual(result["action"], "NO_REPLY")
+                lead = Lead.objects.get(pk=result["lead_id"])
+                self.assertEqual((lead.temperature, lead.priority, lead.desfecho, lead.name), ("Desqualificado", "Baixa", "desqualificado", "Ana"))
+                self.assertEqual(self.client.get(f"/api/leads/?company={self.company.pk}&ativos=1").json()["count"], 0)
+        self.assertEqual(Lead.objects.count(), 3)
+        self.assertTrue(self.send("reinicio")["lead_novo"])
+
+    def test_fora_de_escopo_human_required_e_pedido_humano_distintos(self):
+        result = self.send("fora", human_required=True, reason="fora de escopo")
+        lead = Lead.objects.get(pk=result["lead_id"])
+        self.assertEqual((lead.temperature, lead.priority, lead.desfecho), ("Desqualificado", "Baixa", "desqualificado"))
+        self.assertEqual(self.client.get(f"/api/leads/?company={self.company.pk}&pending=1").json()["count"], 0)
+        self.send("humano", human_required=True, reason="pedido humano")
+        self.assertEqual(self.client.get(f"/api/leads/?company={self.company.pk}&pending=1").json()["count"], 1)
+
+    def test_triagem_sem_last_contact_antiga_e_removida(self):
+        from .services import apagar_triagens_abandonadas
+        lead = Lead.objects.create(company=self.company, contact=self.contact)
+        Lead.objects.filter(pk=lead.pk).update(created_at=timezone.now() - timedelta(days=2))
+        self.assertEqual(apagar_triagens_abandonadas(), 1)
+        self.assertTrue(self.send("reinicio")["lead_novo"])
+
+    def test_migracao_corrige_legados_sem_apagar_atendimentos_assumidos(self):
+        import importlib
+        from django.apps import apps
+        from django.db import connection
+        from types import SimpleNamespace
+        fora = Lead.objects.create(company=self.company, contact=self.contact, priority="Alta", mode="HUMANO", next_action="fora de escopo")
+        abandonado = Lead.objects.create(company=self.company, contact="+5585999998887", bot_closed=True, temperature="Remarketing", urgencia_detalhe={"motivo": "abandono"})
+        assumido = Lead.objects.create(company=self.company, contact="+5585999998886", bot_closed=True, owner=self.ana, urgencia_detalhe={"motivo": "abandono"})
+        corrigir = importlib.import_module("crm.migrations.0030_fora_de_escopo_desqualificado").corrigir
+        corrigir(apps, SimpleNamespace(connection=connection))
+        fora.refresh_from_db()
+        self.assertEqual((fora.priority, fora.temperature, fora.desfecho), ("Baixa", "Desqualificado", "desqualificado"))
+        self.assertFalse(Lead.objects.filter(pk=abandonado.pk).exists())
+        self.assertTrue(Lead.objects.filter(pk=assumido.pk).exists())
+        corrigir(apps, SimpleNamespace(connection=connection))
+        self.assertEqual(Lead.objects.count(), 2)

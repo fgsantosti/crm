@@ -42,16 +42,15 @@ export function leadsVisiveisNoKanban(leads: Lead[]): Lead[] {
 }
 
 export function ordenarColuna(key: ColumnKey, items: Lead[]): Lead[] {
-  if (key === 'qualificados') {
-    // Mais fria primeiro, mais quente por último (azul -> vermelho).
-    return [...items].sort((a, b) => (URGENCIA_RANK[a.temperature] ?? 9) - (URGENCIA_RANK[b.temperature] ?? 9));
-  }
+  const chegada = (a: Lead, b: Lead) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
   if (key === 'negociacao') {
     // Ordem de chegada: mais antigo primeiro, recém-chegado aparece por último.
-    return [...items].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    return [...items].sort(chegada);
   }
-  if (key === 'espera' || key === 'despacho') {
-    return [...items].sort((a, b) => (URGENCIA_RANK[b.temperature] ?? -1) - (URGENCIA_RANK[a.temperature] ?? -1));
+  if (key === 'qualificados' || key === 'espera' || key === 'despacho') {
+    // Maior urgência primeiro; empate segue a ordem de chegada.
+    return [...items].sort((a, b) => (b.urgencia_rank ?? URGENCIA_RANK[b.temperature] ?? -1)
+      - (a.urgencia_rank ?? URGENCIA_RANK[a.temperature] ?? -1) || chegada(a, b));
   }
   return items;
 }

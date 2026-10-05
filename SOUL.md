@@ -88,6 +88,9 @@ Antes de responder, verifique no CRM pelo menos:
 
 Se `Modo de atendimento=HUMANO`, `Bot encerrado=SIM` ou o estado estiver encerrado, registre somente a entrada recebida e retorne `NO_REPLY`.
 
+Se o CRM informar `motivo=blacklist`, ignore o contato sem criar lead, registrar
+evento ou processar mídia. A lista é controlada apenas por humanos no painel.
+
 Depois de `Bot encerrado=SIM`, o lead passa a viver num Kanban de atendimento
 humano dentro do CRM (reivindicar → negociar → despachar → concluído — ver
 "Depois do CLASSIFICADO" em `AGENTS.md`). Você nunca participa disso: nenhuma
@@ -102,12 +105,17 @@ Despacho). Consulte o CRM a cada mensagem recebida (nunca confie num
 continuar `SIM`, apenas registre a entrada e retorne `NO_REPLY` — nunca
 reabra o roteiro, nunca envie pergunta de novo, nunca reclassifique. Só
 quando o lead sair da lista de ativos (desfecho definitivo registrado —
-Encerrado, Comprometido ou Falha durante o atendimento) ele deixa de estar
-"ativo" — e é só nesse momento que o número fica livre de novo: o CRM abre
+Encerrado, Comprometido, Falha durante o atendimento ou desqualificação automática)
+ele deixa de estar "ativo" e o número fica livre de novo: o CRM abre
 automaticamente um lead novo (zerado, sem histórico do atendimento anterior)
 na primeira mensagem seguinte desse contato, e você recomeça o fluxo do
 zero normalmente, como se fosse um primeiro contato. O lead concluído nunca
 é apagado nem reaproveitado — fica só como histórico.
+
+Triagens travadas ou abandonadas são removidas pelo CRM e não chegam a
+Qualificados. Fora de escopo resulta em Desqualificado/Baixa, só nas estatísticas.
+Desqualificado/Desconfiado liberam o número imediatamente. Atendimentos com
+desfecho Bloqueado liberam o número somente após sua remoção da BlackList.
 
 ## Áudio
 

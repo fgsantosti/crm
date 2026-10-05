@@ -226,9 +226,13 @@ class Lead(models.Model):
         # Automático: CLASSIFICADO como Desqualificado/Desconfiado (nunca entram no Kanban
         # humano, então nunca receberiam desfecho e o número ficaria mudo pra sempre).
         ("desqualificado", "Desqualificado na triagem"),
+        # "Despachar e bloquear": concluído e número na BlackList (conta como concluído, não sucesso).
+        ("bloqueado", "Bloqueado"),
     ]
     # Desfechos que um atendente pode escolher no Despacho (o automático fica de fora).
     DESFECHO_DESPACHO = {"encerrado", "comprometido", "falha"}
+    # Conclusões feitas por atendente (dashboard): despacho normal ou "Despachar e bloquear".
+    DESFECHO_CONCLUIDO = DESFECHO_DESPACHO | {"bloqueado"}
 
     id =models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
@@ -285,6 +289,19 @@ class Lead(models.Model):
             models.UniqueConstraint(fields=["company", "contact"], condition=models.Q(desfecho=""), name="unique_company_contact_ativo"),
         ]
         ordering = ["-created_at"]
+
+class Blacklist(models.Model):
+    """Números que nunca entram no funil: o agente ignora (NO_REPLY sem lead nem evento).
+    Empresa e atendentes adicionam/removem pela tela BlackList; remover reverte na hora."""
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="blacklist")
+    contact = models.CharField(max_length=20, help_text="E.164 normalizado (+55...).")
+    motivo = models.CharField(max_length=200, blank=True)
+    adicionado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["company", "contact"], name="unique_company_blacklist_contact")]
+        ordering = ["-created_at"]
+    def __str__(self): return self.contact
 
 class Event(models.Model):
     lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name="events")

@@ -30,6 +30,7 @@ export type Lead = {
   interesse: 'sim' | 'nao' | 'depois' | '';
   /** Campo "temperatura" do protocolo Axioma. */
   temperature: 'Qualificado' | 'Quente' | 'Desconfiado' | 'Remarketing' | 'Desqualificado' | '';
+  urgencia_rank: number;
   last_contact: string | null;
   next_action: string;
   return_at: string | null;
@@ -45,7 +46,7 @@ export type Lead = {
   bot_closed: boolean;
   notes: string;
   /** 'desqualificado' é automático (classificado Desqualificado/Desconfiado), nunca escolhido no Despacho. */
-  desfecho: 'encerrado' | 'comprometido' | 'falha' | 'desqualificado' | '';
+  desfecho: 'encerrado' | 'comprometido' | 'falha' | 'desqualificado' | 'bloqueado' | '';
   concluido_em: string | null;
   /** Coluna do Kanban pós-classificação em que esse owner já está. Vazio = ainda em "Qualificados". */
   etapa_atendimento: 'espera' | 'negociacao' | 'despacho' | '';
@@ -53,6 +54,15 @@ export type Lead = {
   desfecho_pendente: 'encerrado' | 'comprometido' | 'falha' | '';
   /** Cadastrado manualmente pelo atendente (tela Atendimento Humano) -- não vem do agente, não aparece no Kanban. */
   origem_manual: boolean;
+};
+
+export type BlacklistEntry = {
+  id: number;
+  contact: string;
+  motivo: string;
+  adicionado_por: number | null;
+  adicionado_por_nome: string;
+  created_at: string;
 };
 
 export type LeadEvent = {

@@ -87,6 +87,30 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
     }
   }
 
+  async function despacharBloquear(lead: Lead) {
+    setActionBusy(lead.id);
+    setError('');
+    try {
+      await api(`/leads/${lead.id}/despachar-bloquear/?company=${company.id}`, { method: 'POST' });
+      setLeads((v) => v.filter((l) => l.id !== lead.id));
+      setDespachandoId(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  function botaoBloquear(lead: Lead) {
+    return (
+      <button type="button" className="block-button" onClick={() => despacharBloquear(lead)} disabled={actionBusy === lead.id || enviando}
+        title="Conclui o atendimento e bloqueia o número. Remova-o da BlackList para liberar uma nova triagem.">
+        {actionBusy === lead.id && <Spinner />}
+        Despachar e bloquear
+      </button>
+    );
+  }
+
   function abrirDespacho(l: Lead) {
     setAreaDespacho(l.especialidade || '');
     setDespachandoId((v) => (v === l.id ? null : l.id));
@@ -207,9 +231,10 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
                     </button>
                   </a>
                 )}
-                <button type="button" className="danger-outline" onClick={() => abrirDespacho(l)}>
+                <button type="button" className="danger-outline" onClick={() => abrirDespacho(l)} disabled={actionBusy === l.id}>
                   Despachar
                 </button>
+                {botaoBloquear(l)}
               </div>
             </div>
             {despachandoId === l.id && painelDespacho(l)}
@@ -244,9 +269,12 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
                     <strong style={{ color: 'var(--ink)' }}>{l.especialidade || '—'}</strong>
                   </p>
                 </div>
-                <button type="button" className="secondary" onClick={() => abrirDespacho(l)}>
-                  Alterar
-                </button>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <button type="button" className="secondary" onClick={() => abrirDespacho(l)} disabled={actionBusy === l.id || enviando}>
+                    Alterar
+                  </button>
+                  {botaoBloquear(l)}
+                </div>
               </div>
               {despachandoId === l.id && painelDespacho(l)}
             </article>

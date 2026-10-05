@@ -3,7 +3,7 @@ import { ProfileMenu } from './ProfileMenu';
 import type { Api } from '../api';
 import type { Company, Me } from '../types';
 
-export type View = 'dashboard' | 'leads' | 'pendencias' | 'humano' | 'roteiro' | 'dados-empresa' | 'equipe';
+export type View = 'dashboard' | 'leads' | 'pendencias' | 'humano' | 'blacklist' | 'roteiro' | 'dados-empresa' | 'equipe';
 
 export function Sidebar({
   role,
@@ -46,6 +46,7 @@ export function Sidebar({
     items.push({ key: 'pendencias', label: 'Pendências', count: pendingCount });
     items.push({ key: 'humano', label: 'Meus Atendimentos', count: humanCount });
   }
+  items.push({ key: 'blacklist', label: 'BlackList' });
   if (role === 'empresa') {
     items.push({ key: 'roteiro', label: 'Roteiro do agente' });
     items.push({ key: 'dados-empresa', label: 'Dados da empresa' });

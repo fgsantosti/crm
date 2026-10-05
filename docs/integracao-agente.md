@@ -120,7 +120,7 @@ Corpo da requisição — um por marcador emitido pelo agent:
   "marker": "Q",                     // "Q" | "REPETIR" | "ATUALIZAR" | "VALIDAR" | "CLASSIFICADO"
   "question_id": "apresentacao",     // obrigatório só quando marker="Q"
   "fields": {},                      // obrigatório (pode ser {}) para ATUALIZAR/VALIDAR/CLASSIFICADO
-  "human_required": false,           // true força transferência para humano, independente do marcador
+  "human_required": false,           // true trata reason antes do marcador (exceções abaixo)
   "reason": "pedido humano"          // só relevante quando human_required=true
 }
 ```
@@ -143,13 +143,17 @@ Resposta (sempre 200, mesmo em `NO_REPLY`):
 (`apresentacao`), o CRM ignora o marcador recebido e devolve o texto da
 apresentação. Isso cobre o agente que "lembra" de uma triagem cujo lead foi
 fechado/apagado no painel: o contato recomeça do zero, nunca no meio do
-roteiro. `human_required: true` continua valendo (transfere para humano).
+roteiro. `human_required: true` continua valendo: `fora de escopo` desqualifica
+com prioridade Baixa; `falha de integração` remove a triagem; os outros motivos
+transferem para humano. Números na BlackList sempre retornam `NO_REPLY`, sem lead/evento.
 
 - `action="NO_REPLY"` → **não envie nada ao contato**, nem literalmente a
   palavra NO_REPLY. Acontece em mensagem duplicada, lead já encerrado/em
   atendimento humano, entrega anterior ainda pendente, ou falta de
-  `question_id`/`Question` cadastrado (nesses casos o CRM já move o lead para
-  atendimento humano sozinho).
+  `question_id`/`Question` cadastrado. Erros de marcador e triagem travada removem
+  o lead (`lead_apagado=true`, sem `event_id`); falta de conteúdo aprovado no
+  Roteiro continua encaminhando para revisão humana. BlackList devolve
+  `{"action":"NO_REPLY","blacklist":true}` sem criar lead ou evento.
 - `action="TEXTO"` → envie `content` literalmente (texto já com os
   placeholders resolvidos — ver seção de placeholders abaixo).
 - `action="AUDIO"` → só com **Mensagens via áudio** ligado (ver seção 5).
@@ -226,20 +230,20 @@ mensagem real (não reaproveitável entre mensagens diferentes).
 | `[[AXIOMA:REPETIR]]` | nada | reenvia o conteúdo da pergunta atual do lead (sem avançar) |
 | `[[AXIOMA:ATUALIZAR:{...}]]` | os campos conhecidos + **`proxima`** (obrigatório, um `question_id` cadastrado pela empresa na tela Roteiro) | grava os campos, avança o lead para `proxima`, devolve o conteúdo dela |
 | `[[AXIOMA:VALIDAR:{...}]]` | os campos conhecidos (sem `proxima`) | grava os campos, devolve a pergunta de confirmação fixa (`question_id="validar"`) |
-| `[[AXIOMA:CLASSIFICADO:{...}]]` | **`notas`** (recomendado) **ou** `temperatura` + `prioridade` (sem `proxima`). Com `"encerramento_antecipado": true`, pode vir **antes** do `VALIDAR` (contato desistiu no meio: "não quero mais", "depois vejo") e com notas parciais ou nenhuma | grava os campos finais, **encerra o bot** (`bot_closed=true`), devolve a mensagem de encerramento (`question_id="encerramento"`). Sem `VALIDAR` anterior e sem a flag, transfere para humano. No encerramento antecipado, perguntas não respondidas ficam fora do cálculo; sem nenhuma nota válida vira `Desqualificado`/`Baixa` (nunca escala) e `urgencia_detalhe.motivo="encerramento_antecipado"` |
+| `[[AXIOMA:CLASSIFICADO:{...}]]` | **`notas`** (recomendado) **ou** `temperatura` + `prioridade` (sem `proxima`). Com `"encerramento_antecipado": true`, pode vir antes do `VALIDAR`, com notas parciais ou nenhuma | Após `VALIDAR`, grava os campos finais, encerra o bot e devolve `question_id="encerramento"`. Desqualificado/Desconfiado recebem desfecho automático, ficam fora do Kanban e liberam o número imediatamente. Encerramento antecipado ou ausência de `VALIDAR` remove a triagem e retorna `NO_REPLY` com `lead_apagado=true`, sem promover notas parciais a Qualificados. |
 
 Campos aceitos dentro de `fields` (nomes exatamente como o agent emite):
 
 | Campo em `fields` | Vai para o quê no Lead | Valores aceitos |
 | --- | --- | --- |
 | `nome` | Nome do lead | texto livre |
-| `especialidade` | Área/especialidade (isso é o que o dashboard chama de "área") | texto livre, mas precisa bater exatamente com uma área já cadastrada pela empresa na tela "Equipe" (`GET /api/areas/?company={id}`). Valor que não exista nas áreas da empresa transfere o lead para atendimento humano em vez de ser aceito — o agente nunca inventa área nova. |
+| `especialidade` | Área/especialidade (isso é o que o dashboard chama de "área") | Precisa bater exatamente com uma área cadastrada em Equipe. Área desconhecida remove a triagem. A exceção `Fora de escopo` desqualifica com prioridade Baixa, sem entrar no Kanban, inclusive antes de concluir o roteiro. |
 | `tema` | Resumo da demanda | texto livre |
 | `impacto` | Impacto relatado | texto livre |
 | `interesse` | Interesse em seguir | `sim` \| `nao` \| `depois` |
 | `temperatura` | Classificação comercial | `Qualificado` \| `Quente` \| `Desconfiado` \| `Remarketing` \| `Desqualificado` |
 | `prioridade` | Prioridade de atendimento | `Alta` \| `Média` \| `Baixa` |
-| `notas` | **não é campo do lead** — só em `CLASSIFICADO`: dict `{"<question_id>": nota}` com nota de 0 a 10 para cada pergunta respondida (quão urgente/relevante foi a resposta) | O CRM calcula `score = Σ(nota × peso) / Σ(peso)` com o peso da Variável de cada pergunta e converte em temperatura pelas `faixas_urgencia` (ver seção 2.1). Esse cálculo **prevalece** sobre uma `temperatura` enviada junto; `prioridade`, se não vier, sai da temperatura (Quente→Alta, Qualificado→Média, demais→Baixa). `question_id` desconhecido ou sem variável é ignorado; se nenhum sobrar, o lead vai para atendimento humano. O detalhe fica em `Lead.urgencia_detalhe` para auditoria. |
+| `notas` | **não é campo do lead** — só em `CLASSIFICADO`: dict `{"<question_id>": nota}` com nota de 0 a 10 para cada pergunta respondida (quão urgente/relevante foi a resposta) | O CRM calcula `score = Σ(nota × peso) / Σ(peso)` e converte pelas `faixas_urgencia`. Prevalece sobre a temperatura enviada junto; prioridade ausente sai da temperatura (Quente→Alta, Qualificado→Média, demais→Baixa). Pergunta desconhecida ou sem variável é ignorada; se nenhuma sobrar, a triagem é removida. O detalhe fica em `Lead.urgencia_detalhe`. |
 | `proxima` | **não é campo do lead** — só em `ATUALIZAR`, diz qual é o próximo `question_id` | **desde a tela Roteiro customizável**: qualquer `question_id` cadastrado pela empresa (3 sempre existem: `nome`, `situacao`, `demanda`; o resto é livre). Nunca `validar` nem `encerramento` — reservados. Um `question_id` que a empresa não cadastrou transfere o lead pra atendimento humano em vez de travar. |
 | `variaveis_roteiro` | **opcional**, dict `{"<slug>": "<texto>"}` — não é um campo fixo do lead, grava em `Lead.variaveis_roteiro` | só aceita slugs de Variáveis de roteiro **customizadas** já cadastradas pela empresa (tela Roteiro → aba Variáveis; `GET /api/variaveis-roteiro/?company={id}` lista as válidas, com `builtin=false`). Slug desconhecido, builtin ou valor não-texto é simplesmente ignorado (nunca trava o fluxo). Serve pra responder uma pergunta adicional do roteiro (fora das 3 obrigatórias) e reusar esse texto depois via `{slug}` em outra pergunta. |
 
@@ -366,8 +370,7 @@ chame `/incoming/`). É exatamente a regra que `/incoming/` usa para decidir
 `repeticoes` existe para o agente não ficar preso repetindo a mesma pergunta:
 com 2 ou mais, avance (ou encerre antecipadamente) em vez de mandar outro
 `REPETIR`. O CRM é o último recurso: o **4º `REPETIR` seguido** não é
-reenviado — o lead vai para atendimento humano com o motivo "Triagem travada:
-contato não respondeu a pergunta após 3 repetições".
+reenviado — o CRM remove a triagem travada e libera o número para recomeçar na próxima mensagem.
 
 | `motivo` | `aceita_agente` | Quando |
 | --- | --- | --- |
@@ -375,7 +378,7 @@ contato não respondeu a pergunta após 3 repetições".
 | `em_triagem` | `true` | Lead ativo ainda na triagem automática; `ultima_pergunta` = etapa atual |
 | `classificado` | `false` | Triagem concluída (`CLASSIFICADO`); o número fica com a equipe até o despacho registrar o desfecho |
 | `humano` | `false` | Lead transferido para atendimento humano |
-| `cooldown_desqualificado` | `false` | Desqualificado/Desconfiado encerrado há menos de 24h |
+| `blacklist` | `false` | Número bloqueado pela empresa ou por atendente; não criar lead nem processar mídia |
 | `proprio_numero` | `false` | `contact` é o próprio `numero_agente` da empresa |
 
 ## 3. Confirmação de entrega
@@ -389,8 +392,9 @@ Content-Type: application/json
 ```
 
 Chame isso **depois** de efetivamente enviar a mensagem/áudio ao WhatsApp.
-`"FAILED"` transfere o lead para atendimento humano automaticamente — não há
-retry automático. Enquanto uma entrega está `PENDING`:
+`"FAILED"` durante a triagem remove o lead e libera o número (`lead_apagado=true`).
+Após classificação, mantém o histórico e encaminha a falha para revisão humana.
+Não há retry automático. Enquanto uma entrega está `PENDING`:
 
 - **menos de 90s:** um marcador novo do mesmo lead volta `NO_REPLY` e é
   ignorado, **sem** transferir para humano (o contato mandou várias mensagens
@@ -401,11 +405,20 @@ retry automático. Enquanto uma entrega está `PENDING`:
 
 ### Triagem abandonada
 
-A cada 30 minutos o CRM classifica sozinho os leads em triagem automática sem
-mensagem do contato há mais de 24h: `temperatura=Remarketing`,
-`prioridade=Baixa`, bot encerrado e `next_action="Triagem abandonada pelo
-contato: retomar contato"` (`urgencia_detalhe.motivo="abandono"`). O lead
-entra no Kanban da equipe; nenhum lead fica parado na triagem.
+A cada 30 minutos o CRM remove leads em triagem automática sem mensagem do contato
+há mais de 24h. Leads manuais, classificados e em modo HUMANO são preservados.
+Triagens removidas não entram em Qualificados; a próxima mensagem cria um lead zerado.
+Desqualificado/Desconfiado permanecem só nas estatísticas e liberam o número sem quarentena.
+
+### BlackList no painel
+
+Empresa e atendentes usam `GET/POST /api/blacklist/?company={id}` e
+`DELETE /api/blacklist/{id}/?company={id}` para listar, adicionar e remover números.
+O contato é normalizado em E.164; a lista é isolada por empresa. A conta do agente
+não acessa essas rotas. O dono de um atendimento em Meus Atendimentos pode usar
+`POST /api/leads/{id}/despachar-bloquear/?company={id}`: conclui com desfecho
+`bloqueado` e adiciona o número à lista numa transação. Remover o bloqueio libera
+o bot, preservando o atendimento concluído no histórico.
 
 ## 4. Exemplo de conversa completa (testado de ponta a ponta)
 

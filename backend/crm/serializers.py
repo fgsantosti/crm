@@ -1,7 +1,7 @@
 import re
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, VariavelRoteiro, MANDATORY_OFFFLOW_QUESTION_IDS, MANDATORY_QUESTION_IDS
+from .models import Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, VariavelRoteiro, MANDATORY_OFFFLOW_QUESTION_IDS, MANDATORY_QUESTION_IDS
 
 # Obrigatórias que nunca entram numa lista SPIN (a área só é conhecida depois delas).
 FIXED_QUESTION_IDS = {"nome", "situacao"}
@@ -51,6 +51,12 @@ class AdminCompanySerializer(serializers.ModelSerializer):
 class LeadSerializer(serializers.ModelSerializer):
     # owner é o id do usuário (compare com /me/.id); owner_nome é só pra exibir.
     owner_nome = serializers.SerializerMethodField()
+    # Ordem única de urgência (services.URGENCIA_RANK): o Kanban ordena por isto, maior = mais urgente.
+    urgencia_rank = serializers.SerializerMethodField()
+
+    def get_urgencia_rank(self, obj):
+        from .services import URGENCIA_RANK
+        return URGENCIA_RANK.get(obj.temperature, -1)
 
     def get_owner_nome(self, obj):
         from .services import _nome_usuario
@@ -263,3 +269,24 @@ class AtendenteInviteSerializer(serializers.ModelSerializer):
         if obj.expires_at < timezone.now():
             return "expirado"
         return "pendente"
+
+
+class BlacklistSerializer(serializers.ModelSerializer):
+    adicionado_por_nome = serializers.SerializerMethodField()
+    contact = serializers.CharField(max_length=40)
+
+    def get_adicionado_por_nome(self, obj):
+        from .services import _nome_usuario
+        return _nome_usuario(obj.adicionado_por) if obj.adicionado_por else ""
+
+    def validate_contact(self, value):
+        from .services import normalizar_contato
+        e164 = normalizar_contato(value)
+        if not e164:
+            raise serializers.ValidationError("use um telefone válido com DDD (ex.: +55 85 99999-8888).")
+        return e164
+
+    class Meta:
+        model = Blacklist
+        fields = ["id", "contact", "motivo", "adicionado_por", "adicionado_por_nome", "created_at"]
+        read_only_fields = ["id", "adicionado_por", "adicionado_por_nome", "created_at"]

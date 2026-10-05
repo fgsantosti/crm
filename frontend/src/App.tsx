@@ -8,6 +8,7 @@ import { Dashboard } from './views/Dashboard';
 import { Leads } from './views/Leads';
 import { Pendencias } from './views/Pendencias';
 import { AtendimentoHumano } from './views/AtendimentoHumano';
+import { BlackList } from './views/BlackList';
 import { Roteiro } from './views/Roteiro';
 import { DadosEmpresa } from './views/DadosEmpresa';
 import { Equipe } from './views/Equipe';
@@ -233,6 +234,7 @@ export function App() {
           {view === 'leads' && <Leads api={api} company={company} role={role} me={me} />}
           {view === 'pendencias' && <Pendencias api={api} company={company} me={me} />}
           {view === 'humano' && <AtendimentoHumano api={api} company={company} me={me} />}
+          {view === 'blacklist' && <BlackList api={api} company={company} />}
           {view === 'roteiro' && <Roteiro api={api} company={company} canEdit={role !== 'atendente'} />}
           {view === 'dados-empresa' && <DadosEmpresa api={api} company={company} />}
           {view === 'equipe' && <Equipe api={api} company={company} />}

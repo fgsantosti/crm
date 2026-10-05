@@ -58,7 +58,7 @@ empresa alimenta os dois pelo painel do Conecta CRM:
 
 1. Leia `SOUL.md` e este arquivo.
 2. Consulte o CRM pelo identificador único do contato.
-3. Se não encontrar, crie um único registro inicial.
+3. Se o CRM devolver `motivo=blacklist`, retorne `NO_REPLY` sem criar lead nem processar mídia. Se não encontrar e o número estiver liberado, crie um único registro inicial.
 4. Verifique `Modo de atendimento`, `Bot encerrado`, `Estado do fluxo`, etapa atual e canal de saída.
 5. Atualize o CRM antes de enviar qualquer resposta externa.
 6. Envie no máximo uma saída permitida para aquela etapa.
@@ -184,11 +184,21 @@ Registre a ocorrência, atualize `Responsável`, `Prioridade` e `Próxima ação
 
 Se a conversa morrer no meio do roteiro (contato some, fica ambíguo demais pra sempre, ou
 qualquer outro motivo que impeça concluir a triagem), não deixe o lead parado indefinidamente
-em `Bot encerrado=NÃO`: classifique-o como `Desqualificado` (`CLASSIFICADO` com o que já foi
-coletado) assim que ficar claro que ele não vai avançar. Leads presos sem nunca encerrar
-atrapalham o Kanban — isso não deveria acontecer. Como último recurso, se mesmo assim um lead
-ficar preso, o admin da empresa pode excluí-lo manualmente no Kanban (ver "Depois do
-CLASSIFICADO" abaixo), mas isso é fallback, não o comportamento esperado.
+em `Bot encerrado=NÃO`: o CRM remove triagens travadas, encerradas antecipadamente ou
+inativas há mais de 24h, sem encaminhá-las para Qualificados. O número fica livre para
+recomeçar na próxima mensagem. Use os marcadores existentes, sem chamar a rota humana
+de exclusão. Desqualificado e Desconfiado após a triagem ficam só nas estatísticas,
+fora do Kanban, e também liberam o número imediatamente. `human_required=true` com
+`reason="fora de escopo"` resulta em Desqualificado/Baixa, fora do Kanban. Pedido
+explícito de humano continua sendo encaminhado para atendimento.
+
+### BlackList
+
+Empresa e atendentes podem adicionar e remover números na seção BlackList do painel.
+O CRM bloqueia esses contatos tanto na consulta `/agente/contato/` quanto no
+`/incoming/`, sem criar lead ou evento. O agente nunca altera a lista. O atendente
+pode concluir um atendimento seu com "Despachar e bloquear" (desfecho Bloqueado).
+Remover o número da BlackList libera o bot; o atendimento concluído permanece no histórico.
 
 ## Depois do `CLASSIFICADO`: Kanban humano (Qualificados → Despacho)
 

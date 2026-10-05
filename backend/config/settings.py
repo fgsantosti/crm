@@ -90,8 +90,8 @@ CELERY_TIMEZONE = "UTC"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 # Sincronizado no banco pelo DatabaseScheduler do django_celery_beat ao subir o beat.
 CELERY_BEAT_SCHEDULE = {
-    "classificar-triagens-abandonadas": {
-        "task": "crm.tasks.classificar_triagens_abandonadas_task",
+    "apagar-triagens-abandonadas": {
+        "task": "crm.tasks.apagar_triagens_abandonadas_task",
         "schedule": 30 * 60,
     },
 }

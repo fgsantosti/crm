@@ -331,3 +331,9 @@ button.secondary .spinner, button.danger-outline .spinner { border-color: rgba(9
   font-size: 13px;
   padding: 6px 12px;
 }
+/* Ação de bloqueio, compartilhada entre Meus Atendimentos e BlackList. */
+button.block-button {
+  background: #111111;
+  border-color: #111111;
+  color: #ffffff;
+}

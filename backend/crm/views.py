@@ -13,8 +13,8 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
-from .models import Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, VariavelRoteiro, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
-from .serializers import CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer, VariavelRoteiroSerializer
+from .models import Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, VariavelRoteiro, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
+from .serializers import BlacklistSerializer, CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer, VariavelRoteiroSerializer
 from .services import (
     aplicar_audio,
     receive, escalate, create_invite, contexto_agente, status_contato,
@@ -298,7 +298,13 @@ class CompanyViewSet(viewsets.ModelViewSet):
             if event.delivery == "PENDING":
                 event.delivery = value
                 event.save()
-                if value == "FAILED": escalate(event.lead, "Falha de envio: revisar entrega antes de qualquer retomada")
+                if value == "FAILED":
+                    if event.lead.bot_closed:
+                        escalate(event.lead, "Falha de envio: revisar entrega antes de qualquer retomada")
+                    else:
+                        # Falha no meio da triagem: o lead não vai pra equipe; o número recomeça do zero.
+                        event.lead.delete()
+                        return Response({"delivery": value, "lead_apagado": True})
             return Response({"delivery": event.delivery})
 
 def _get_atendente_or_404(request, company_id, user_id):
@@ -419,6 +425,16 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
             self.get_object().pk, request.data.get("desfecho"), request.user,
             auto_falha=auto_falha, especialidade=request.data.get("especialidade") or None,
         )
+        if erro:
+            return Response({"detail": erro}, status=400)
+        return Response(LeadSerializer(self.get_object()).data)
+    @action(detail=True, methods=["post"], url_path="despachar-bloquear")
+    def despachar_bloquear(self, request, pk=None):
+        """Meus Atendimentos: conclui o lead (desfecho "bloqueado") e põe o número na BlackList."""
+        from .services import despachar_e_bloquear
+        if self._bloqueia_staff(request):
+            return Response({"detail": "Esse perfil não despacha atendimentos."}, status=403)
+        erro = despachar_e_bloquear(self.get_object().pk, request.user, motivo=(request.data.get("motivo") or "")[:200])
         if erro:
             return Response({"detail": erro}, status=400)
         return Response(LeadSerializer(self.get_object()).data)
@@ -659,6 +675,26 @@ class AreaViewSet(TenantMixin, viewsets.ModelViewSet):
             area = self.get_object()
             return Response({"detail": f"A área '{area.name}' tem perguntas na lista {area.name}-SPIN do Roteiro -- "
                              "exclua ou mova essas perguntas antes de excluir a área."}, status=400)
+
+class BlacklistViewSet(TenantMixin, viewsets.ModelViewSet):
+    """BlackList da empresa: números que o agente ignora. Empresa e atendentes listam,
+    adicionam e removem (remover reverte na hora); a conta do agente nunca acessa."""
+    queryset = Blacklist.objects.select_related("adicionado_por__profile")
+    serializer_class = BlacklistSerializer
+    http_method_names = ["get", "post", "delete", "head", "options"]
+    def get_permissions(self):
+        return [permissions.IsAuthenticated(), NotAgentAccount()]
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        from django.db import transaction
+        with transaction.atomic():
+            company = Company.objects.select_for_update().get(pk=self.company().pk)
+            contact = serializer.validated_data["contact"]
+            if Blacklist.objects.filter(company=company, contact=contact).exists():
+                return Response({"detail": f"{contact} já está na BlackList."}, status=400)
+            serializer.save(company=company, adicionado_por=request.user)
+        return Response(serializer.data, status=201)
 
 class AtendenteInviteViewSet(TenantMixin, viewsets.ModelViewSet):
     """Convites de novo atendente (tela "Equipe"): só a empresa cria/cancela;
