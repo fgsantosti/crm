@@ -4,6 +4,7 @@ import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Company, Lead, LeadEvent, Me } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 import { AreaSelect } from '../components/AreaSelect';
+import { LeadNameField } from '../components/LeadNameField';
 
 // Mesma ordem de services.FAIXAS_URGENCIA no backend (menos urgente -> mais urgente).
 export const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Remarketing: 2, Qualificado: 3, Quente: 4 };
@@ -71,13 +72,13 @@ function Overlay({ onClose, children }: { onClose: () => void; children: React.R
   );
 }
 
-function TriagemResumo({ lead }: { lead: Lead }) {
+function TriagemResumo({ lead, api, onUpdated }: { lead: Lead; api?: Api; onUpdated?: (lead: Lead) => void }) {
   return (
     <div className="fields" style={{ marginBottom: 16 }}>
-      <label style={{ margin: 0 }}>
+      {api && onUpdated ? <LeadNameField key={lead.id} lead={lead} api={api} onUpdated={onUpdated} /> : <label style={{ margin: 0 }}>
         Nome
         <input readOnly value={lead.name || 'Sem nome informado'} />
-      </label>
+      </label>}
       <label style={{ margin: 0 }}>
         Contato
         <input readOnly value={lead.contact} />
@@ -208,6 +209,8 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
   function aplicarAtualizacao(updated: Lead) {
     setLeads((v) => v.map((l) => (l.id === updated.id ? updated : l)));
     setSelected((s) => (s && s.id === updated.id ? updated : s));
+    setNegociacaoModal((s) => (s?.id === updated.id ? updated : s));
+    setCadastroSemAtendimentoModal((s) => (s?.id === updated.id ? updated : s));
   }
 
   async function chamarAcao(path: string, lead: Lead, body?: Record<string, unknown>) {
@@ -273,15 +276,15 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
     if (!podeAtender) return false;
     const col = columnOf(l);
     if (col === 'novos') return false;
-    if (col === 'qualificados') return true;
+    if (col === 'qualificados' || col === 'espera') return true;
     return l.owner === me.id;
   }
 
-  // Card de outro atendente (já reivindicado/em negociação/despacho por alguém que não é você):
+  // Card em negociação/despacho por outro atendente:
   // fica cinza, não clicável e não arrastável -- só o owner mexe nele.
   function ehDeOutroOwner(l: Lead): boolean {
     const col = columnOf(l);
-    return (col === 'espera' || col === 'negociacao' || col === 'despacho') && l.owner !== null && l.owner !== me.id;
+    return (col === 'negociacao' || col === 'despacho') && l.owner !== null && l.owner !== me.id;
   }
 
   function onDropEm(target: ColumnKey, lead: Lead | null) {
@@ -437,8 +440,8 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
                           {(col.key === 'qualificados' || col.key === 'espera' || col.key === 'negociacao' || col.key === 'despacho') && l.temperature && (
                             <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>{l.temperature}</small>
                           )}
-                          {l.owner && col.key !== 'qualificados' && (
-                            <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>owner: {l.owner_nome}</small>
+                          {l.owner && (col.key === 'negociacao' || col.key === 'despacho') && (
+                            <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>Responsável: {l.owner_nome}</small>
                           )}
                         </div>
                       </article>
@@ -508,11 +511,11 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
             </div>
           )}
 
-          <TriagemResumo lead={selected} />
+          <TriagemResumo lead={selected} api={api} onUpdated={aplicarAtualizacao} />
           <UrgenciaDetalhe lead={selected} />
           <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 20 }}>
-            Esses dados vêm do agente durante a triagem — não são editáveis aqui. As transições de atendimento (reivindicar,
-            negociar, despachar) acontecem arrastando o card entre as colunas do Kanban.
+            O nome pode ser corrigido aqui. Os demais dados vêm do agente durante a triagem.
+            Arraste o card para colocar em espera, iniciar a negociação ou despachar.
           </p>
 
           <h3 style={{ margin: '26px 0 10px' }}>Histórico operacional</h3>
@@ -532,7 +535,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
         <Overlay onClose={() => setNegociacaoModal(null)}>
           <h2 style={{ marginTop: 0 }}>Cadastro do atendimento</h2>
           <p style={{ color: 'var(--muted)', marginBottom: 16 }}>Dados coletados pelo agente durante a triagem.</p>
-          <TriagemResumo lead={negociacaoModal} />
+          <TriagemResumo lead={negociacaoModal} api={api} onUpdated={aplicarAtualizacao} />
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button type="button" onClick={() => confirmarNegociacao(negociacaoModal)} disabled={actionBusy} style={{ background: '#2563EB', borderColor: '#2563EB' }}>
               {actionBusy && <Spinner />}
@@ -554,7 +557,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
         <Overlay onClose={() => setCadastroSemAtendimentoModal(null)}>
           <h2 style={{ marginTop: 0 }}>Cadastrar sem atendimento</h2>
           <p style={{ color: 'var(--muted)', marginBottom: 16 }}>Dados coletados pelo agente durante a triagem.</p>
-          <TriagemResumo lead={cadastroSemAtendimentoModal} />
+          <TriagemResumo lead={cadastroSemAtendimentoModal} api={api} onUpdated={aplicarAtualizacao} />
           <p style={{ fontSize: 13, color: 'var(--danger)', marginBottom: 16 }}>
             Este lead será marcado automaticamente como <strong>Falha durante o atendimento</strong> — ele vai para a coluna
             Despacho, pendente do botão "Enviar Despachos".

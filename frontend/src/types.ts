@@ -48,7 +48,7 @@ export type Lead = {
   /** 'desqualificado' é automático (classificado Desqualificado/Desconfiado), nunca escolhido no Despacho. */
   desfecho: 'encerrado' | 'comprometido' | 'falha' | 'desqualificado' | 'bloqueado' | '';
   concluido_em: string | null;
-  /** Coluna do Kanban pós-classificação em que esse owner já está. Vazio = ainda em "Qualificados". */
+  /** Coluna pós-classificação. Qualificados (vazio) e Em espera não têm responsável. */
   etapa_atendimento: 'espera' | 'negociacao' | 'despacho' | '';
   /** Desfecho escolhido ao entrar em "Despacho", ainda não definitivo até "Enviar Despachos". */
   desfecho_pendente: 'encerrado' | 'comprometido' | 'falha' | '';

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { fetchTodasAsPaginas, type Api } from '../api';
-import type { Company, Lead, Me } from '../types';
+import type { Company, Lead } from '../types';
 import { SkeletonRows } from '../components/Skeleton';
 
 // Pendências = Kanban "Qualificados" + "Atendimentos em espera" (backend: ?pending=1, já ordenado
@@ -10,7 +10,7 @@ function estagio(l: Lead): 'Em espera' | 'Classificado' {
   return l.etapa_atendimento === 'espera' ? 'Em espera' : 'Classificado';
 }
 
-export function Pendencias({ api, company, me }: { api: Api; company: Company; me: Me }) {
+export function Pendencias({ api, company }: { api: Api; company: Company }) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
@@ -86,7 +86,6 @@ export function Pendencias({ api, company, me }: { api: Api; company: Company; m
             <tbody>
               {busy && !visible.length && <SkeletonRows rows={4} cols={5} />}
               {visible.map((l) => {
-                const reservadoPorOutro = l.owner !== null && l.owner !== me.id;
                 return (
                   <tr key={l.id}>
                     <td>
@@ -105,10 +104,10 @@ export function Pendencias({ api, company, me }: { api: Api; company: Company; m
                       <button
                         type="button"
                         onClick={() => pegarLead(l)}
-                        disabled={reservadoPorOutro || pegandoId !== null}
-                        title={reservadoPorOutro ? 'Reservado por outro atendente' : 'Assumir e levar para Meus Atendimentos'}
+                        disabled={pegandoId !== null}
+                        title="Assumir e levar para Meus Atendimentos"
                       >
-                        {pegandoId === l.id ? 'Pegando…' : reservadoPorOutro ? 'Reservado' : 'Pegar Lead'}
+                        {pegandoId === l.id ? 'Pegando…' : 'Pegar Lead'}
                       </button>
                     </td>
                   </tr>

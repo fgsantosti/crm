@@ -209,9 +209,9 @@ participa dessas etapas, nunca chama API nenhuma pra isso, e nenhum marcador
 novo existe pra elas**:
 
 1. **Qualificados** — estado inicial pós-classificação, sem responsável ainda.
-2. **Atendimentos em espera** — um atendente reivindicou o lead (vira
-   `Responsável`), mas ainda não começou a negociar.
-3. **Em negociação** — o atendente confirmou que vai conduzir o contato
+2. **Atendimentos em espera** — qualquer atendente pode colocar um lead já
+   qualificado nessa fila compartilhada de pendências, sem `Responsável`.
+3. **Em negociação** — o atendente assume como `Responsável` e confirma que vai conduzir o contato
    humano (`Modo de atendimento` vira `HUMANO` só *aqui*, não antes).
 4. **Despacho** — o atendente já decidiu o desfecho (Encerrado/Comprometido/
    Falha), mas ainda não confirmou o envio final.

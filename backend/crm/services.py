@@ -662,29 +662,27 @@ def _validar_lead_classificavel(lead):
 
 @transaction.atomic
 def reivindicar_lead(lead_id, user):
-    """Qualificados -> Atendimentos em espera: atendente reserva um lead
-    classificado e ainda sem responsável (ainda não é negociação -- só
-    'pendências'). select_for_update garante atomicidade na disputa entre
-    atendentes clicando ao mesmo tempo."""
+    """Qualificados -> Atendimentos em espera: sinaliza a pendência para toda
+    a equipe, sem atribuir responsável. Só a negociação assume o atendimento.
+    select_for_update impede disputar com uma negociação simultânea."""
     lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
     if not lead:
         return "Lead não encontrado."
-    if lead.owner_id:
-        return "Este atendimento já foi assumido por outro atendente."
     erro = _validar_lead_classificavel(lead)
     if erro:
         return erro
-    lead.owner = user
+    if lead.owner_id or lead.etapa_atendimento:
+        return "Só é possível colocar em espera um lead em Qualificados."
+    lead.owner = None
     lead.etapa_atendimento = "espera"
     lead.save(update_fields=["owner", "etapa_atendimento"])
     return None
 
 @transaction.atomic
 def mover_para_negociacao(lead_id, user):
-    """Qualificados OU Atendimentos em espera -> Em negociação. Se o lead ainda
-    não tem owner (vindo direto de Qualificados), quem está movendo se torna
-    owner agora -- é o botão 'Acompanhar' na tela de cadastro. Se já tem owner
-    (vindo de Em espera), só esse mesmo owner pode mover."""
+    """Qualificados OU Atendimentos em espera -> Em negociação: quem inicia
+    se torna responsável. Um atendimento já assumido só pode ser movido por
+    seu responsável."""
     lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
     if not lead:
         return "Lead não encontrado."
@@ -732,9 +730,8 @@ def preparar_despacho(lead_id, desfecho, user, auto_falha=False, especialidade=N
 
 @transaction.atomic
 def liberar_lead(lead_id, user):
-    """Qualquer coluna já assumida -> de volta pra Qualificados: solta o owner
-    (que fica livre pra qualquer atendente reivindicar de novo). Só o próprio
-    owner pode se soltar -- mesma regra simétrica de mover."""
+    """Em espera ou atendimento assumido -> Qualificados. Em espera é uma fila
+    compartilhada; depois de assumir, só o responsável pode devolver."""
     lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
     if not lead:
         return "Lead não encontrado."

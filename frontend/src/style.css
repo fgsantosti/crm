@@ -164,7 +164,7 @@ nav button.nav-active .nav-count { background: rgba(36,26,18,.18); padding: 2px 
 .bar-track { height: 10px; border-radius: 999px; background: var(--panel-muted); overflow: hidden; }
 .bar-fill { height: 100%; border-radius: 999px; background: var(--accent); }
 
-.trend { display: flex; align-items: flex-end; gap: 22px; height: 140px; padding-bottom: 4px; border-bottom: 1px solid var(--line-soft); }
+.trend { display: flex; align-items: flex-end; gap: 22px; min-height: 180px; padding-bottom: 4px; border-bottom: 1px solid var(--line-soft); overflow-x: auto; }
 .trend-col { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .trend-bar { width: 22px; border-radius: 4px 4px 0 0; background: #E7C2A7; }
 .trend-bar.active { background: var(--accent); }

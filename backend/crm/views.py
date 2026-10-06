@@ -367,10 +367,22 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
             )
         return qs
     def perform_update(self, serializer):
-        # Atendente só edita lead que ele mesmo assumiu; Empresa (staff) pode editar qualquer um.
-        if not self.request.user.is_staff and serializer.instance.owner_id != self.request.user.id:
-            raise PermissionDenied("Só quem assumiu este atendimento pode editá-lo.")
-        serializer.save()
+        from django.db import transaction
+        with transaction.atomic():
+            # Releia sob lock: corrigir o nome não pode sobrescrever um owner
+            # atribuído por uma negociação entre a leitura e o PATCH.
+            serializer.instance = Lead.objects.select_for_update().get(pk=serializer.instance.pk)
+            # Nome pode ser corrigido antes de assumir. Os demais campos continuam
+            # restritos ao responsável ou à empresa; leads de outro atendente também.
+            corrigindo_nome_sem_dono = (
+                serializer.instance.owner_id is None
+                and set(serializer.validated_data) == {"name"}
+            )
+            if (not self.request.user.is_staff
+                    and serializer.instance.owner_id != self.request.user.id
+                    and not corrigindo_nome_sem_dono):
+                raise PermissionDenied("Só quem assumiu este atendimento pode editá-lo.")
+            serializer.save()
     def perform_destroy(self, instance):
         # "Fechar lead" (painel da Empresa): apaga o lead e os eventos dele de uma vez. Sem
         # lead ativo, a próxima mensagem desse número abre um lead novo e a triagem recomeça.

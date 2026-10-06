@@ -17,17 +17,29 @@ export async function fetchTodasAsPaginas<T>(api: Api, path: string): Promise<T[
 // httpOnly do refresh token, que o JavaScript nunca consegue ler (proteção
 // contra roubo de sessão via um eventual XSS no frontend).
 let accessToken = '';
+let refreshPromise: Promise<string | null> | null = null;
 
-async function refreshAccessToken(): Promise<string | null> {
-  try {
-    const response = await fetch(`${base}/login/refresh/`, { method: 'POST', credentials: 'include' });
-    if (!response.ok) return null;
-    const data = await response.json();
-    accessToken = data.access;
-    return accessToken;
-  } catch {
-    return null;
-  }
+function refreshAccessToken(): Promise<string | null> {
+  // A renovação invalida o cookie anterior: chamadas simultâneas precisam
+  // compartilhar o resultado, inclusive o login silencioso no StrictMode.
+  if (refreshPromise) return refreshPromise;
+  const renew = async (): Promise<string | null> => {
+    try {
+      const response = await fetch(`${base}/login/refresh/`, { method: 'POST', credentials: 'include' });
+      if (!response.ok) return null;
+      const data = await response.json();
+      accessToken = data.access;
+      return accessToken;
+    } catch {
+      return null;
+    }
+  };
+  // Abas compartilham o cookie. Em navegadores com Web Locks, uma aba
+  // aguarda a outra atualizar o cookie antes de iniciar sua renovação.
+  const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+  refreshPromise = (locks ? locks.request('conecta-crm-session-refresh', renew) : renew())
+    .finally(() => { refreshPromise = null; });
+  return refreshPromise;
 }
 
 /** Tenta restaurar a sessão a partir do cookie de refresh (ex.: ao abrir a página). */
@@ -50,9 +62,13 @@ export function apiFactory(onSessionExpired: () => void): Api {
         },
       });
     }
-    let response = await doFetch(accessToken);
+    const usedAccess = accessToken;
+    let response = await doFetch(usedAccess);
     if (response.status === 401) {
-      const newAccess = await refreshAccessToken();
+      // Um 401 atrasado pode chegar depois que outra chamada já renovou.
+      const newAccess = accessToken && accessToken !== usedAccess
+        ? accessToken
+        : await refreshAccessToken();
       if (!newAccess) {
         accessToken = '';
         onSessionExpired();

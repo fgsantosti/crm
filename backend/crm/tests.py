@@ -633,7 +633,7 @@ class QualificationTests(TestCase):
         ok = client.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(ok.status_code, 200)
         self.assertEqual(ok.json()["etapa_atendimento"], "espera")
-    def test_reivindicar_lead_claims_it_atomically_and_blocks_staff(self):
+    def test_colocar_em_espera_nao_atribui_dono_e_bloqueia_staff(self):
         self.delivered(self.send())
         self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": "nome"}))
         self.delivered(self.send("3", marker="VALIDAR"))
@@ -659,20 +659,23 @@ class QualificationTests(TestCase):
         ok = client_a.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(ok.status_code, 200)
         lead.refresh_from_db()
-        self.assertEqual(lead.owner, atendente_a)
+        self.assertIsNone(lead.owner)
         self.assertEqual(lead.etapa_atendimento, "espera")
         self.assertEqual(lead.mode, "AUTOMÁTICO")  # só vira HUMANO ao entrar em negociação
 
         ja_assumido = client_b.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(ja_assumido.status_code, 400)
         lead.refresh_from_db()
-        self.assertEqual(lead.owner, atendente_a)
+        self.assertIsNone(lead.owner)
+
+        # Outro atendente pode assumir a pendência; só agora recebe owner.
+        self.assertEqual(client_b.post(f"/api/leads/{lead.pk}/negociar/?company={self.company.pk}").status_code, 200)
 
         # owner/etapa_atendimento não podem mais ser trocados por PATCH livre
-        bypass = client_a.patch(f"/api/leads/{lead.pk}/?company={self.company.pk}", {"owner": atendente_b.pk}, format="json")
+        bypass = client_b.patch(f"/api/leads/{lead.pk}/?company={self.company.pk}", {"owner": atendente_a.pk}, format="json")
         self.assertEqual(bypass.status_code, 200)
         lead.refresh_from_db()
-        self.assertEqual(lead.owner, atendente_a)
+        self.assertEqual(lead.owner, atendente_b)
     def test_negociar_lead_from_qualificados_or_espera_and_blocks_other_owner(self):
         self.delivered(self.send())
         self.delivered(self.send("2", marker="ATUALIZAR", fields={"nome": "Carlos", "proxima": "nome"}))
@@ -760,7 +763,7 @@ class QualificationTests(TestCase):
         client_b = APIClient()
         client_b.force_authenticate(atendente_b)
 
-        client_a.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
+        client_a.post(f"/api/leads/{lead.pk}/negociar/?company={self.company.pk}")
 
         bloqueado = client_b.post(f"/api/leads/{lead.pk}/liberar/?company={self.company.pk}")
         self.assertEqual(bloqueado.status_code, 400)
@@ -1268,7 +1271,7 @@ class VarreduraFixesTests(TestCase):
         from .models import Profile
         lead = self.classificar()
         maria = self.cliente(self.maria)
-        self.assertEqual(maria.post(self.url(lead, "reivindicar")).status_code, 200)
+        self.assertEqual(maria.post(self.url(lead, "negociar")).status_code, 200)
         me = maria.get("/api/me/").json()
         detalhe = maria.get(f"/api/leads/{lead.pk}/?company={self.company.pk}").json()
         self.assertEqual(detalhe["owner"], me["id"])
@@ -1676,7 +1679,7 @@ class AgenteContextoEUrgenciaTests(TestCase):
 
 class ContatoFecharDonoPendenciasTests(TestCase):
     """GET /agente/contato/, lead_novo + apresentação forçada, fechar lead (apaga),
-    dono ao reservar/devolver e Pendências (Classificados + Em espera)."""
+    espera compartilhada, dono ao negociar/devolver e Pendências."""
     def setUp(self):
         from django.contrib.auth.models import Group
         from rest_framework.authtoken.models import Token
@@ -1768,19 +1771,22 @@ class ContatoFecharDonoPendenciasTests(TestCase):
         r = self.send("depois", marker="REPETIR")
         self.assertEqual((r["action"], r["question_id"], r["lead_novo"]), ("TEXTO", "apresentacao", True))
 
-    def test_reservar_grava_dono_e_devolver_solta(self):
+    def test_espera_sem_dono_pode_ser_devolvida_e_assumida_por_outro_atendente(self):
         lead = self.classificar()
         ana, bia = self.cliente(self.ana), self.cliente(self.bia)
         r = ana.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual((r.json()["owner"], r.json()["etapa_atendimento"]), (self.ana.pk, "espera"))
-        # Bia não move nem devolve o card da Ana.
+        self.assertEqual((r.json()["owner"], r.json()["etapa_atendimento"]), (None, "espera"))
+        # Em espera é compartilhado: Bia pode devolver um card movido pela Ana.
+        r = bia.post(f"/api/leads/{lead.pk}/liberar/?company={self.company.pk}")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual((r.json()["owner"], r.json()["etapa_atendimento"]), (None, ""))
+        self.assertEqual(bia.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}").json()["owner"], None)
+        # Ana assume a fila da Bia, e só então fica restrito à responsável.
+        r = ana.post(f"/api/leads/{lead.pk}/negociar/?company={self.company.pk}")
+        self.assertEqual((r.status_code, r.json()["owner"]), (200, self.ana.pk))
         self.assertEqual(bia.post(f"/api/leads/{lead.pk}/negociar/?company={self.company.pk}").status_code, 400)
         self.assertEqual(bia.post(f"/api/leads/{lead.pk}/liberar/?company={self.company.pk}").status_code, 400)
-        # Ana devolve pra Classificados: sem dono, livre de novo.
-        r = ana.post(f"/api/leads/{lead.pk}/liberar/?company={self.company.pk}")
-        self.assertEqual((r.json()["owner"], r.json()["etapa_atendimento"]), (None, ""))
-        self.assertEqual(bia.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}").json()["owner"], self.bia.pk)
 
     def test_pendencias_lista_classificados_e_em_espera_com_em_espera_primeiro(self):
         espera = self.classificar(contact="+5585900000011", temperatura="Qualificado")
@@ -1800,6 +1806,43 @@ class ContatoFecharDonoPendenciasTests(TestCase):
         pend = [l["id"] for l in ana.get(f"/api/leads/?company={self.company.pk}&pending=1").json()["results"]]
         self.assertEqual(pend, [str(espera.pk)])
 
+    def test_espera_nao_aparece_em_meus_atendimentos_nem_no_desempenho_do_atendente(self):
+        lead = self.classificar()
+        ana, bia = self.cliente(self.ana), self.cliente(self.bia)
+        r = ana.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
+        self.assertEqual(r.status_code, 200)
+        for client in [ana, bia]:
+            self.assertEqual(client.get(f"/api/leads/?company={self.company.pk}&meus=1").json()["count"], 0)
+            pendentes = client.get(f"/api/leads/?company={self.company.pk}&pending=1").json()["results"]
+            self.assertEqual([(p["id"], p["owner"]) for p in pendentes], [(str(lead.pk), None)])
+        self.assertEqual(ana.get(f"/api/leads/resumo/?company={self.company.pk}").json()["por_owner"], [])
+
+    def test_triagem_ainda_ativa_nao_pode_ir_para_espera(self):
+        self.send("triagem")
+        lead = Lead.objects.get()
+        r = self.cliente(self.ana).post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
+        self.assertEqual(r.status_code, 400)
+        lead.refresh_from_db()
+        self.assertEqual((lead.owner, lead.etapa_atendimento, lead.bot_closed), (None, "", False))
+
+    def test_migracao_retira_dono_apenas_dos_leads_ativos_em_espera(self):
+        from importlib import import_module
+        from types import SimpleNamespace
+        from django.apps import apps
+        from django.db import connection
+        espera = Lead.objects.create(company=self.company, contact="+5585900000101", owner=self.ana, bot_closed=True, etapa_atendimento="espera")
+        negociacao = Lead.objects.create(company=self.company, contact="+5585900000102", owner=self.ana, bot_closed=True, etapa_atendimento="negociacao")
+        concluido = Lead.objects.create(company=self.company, contact="+5585900000103", owner=self.bia, bot_closed=True, etapa_atendimento="espera", desfecho="encerrado")
+        migration = import_module("crm.migrations.0031_espera_sem_responsavel")
+        migration.liberar_espera(apps, SimpleNamespace(connection=connection))
+        espera.refresh_from_db()
+        negociacao.refresh_from_db()
+        concluido.refresh_from_db()
+        self.assertIsNone(espera.owner)
+        self.assertEqual(espera.etapa_atendimento, "espera")
+        self.assertEqual(negociacao.owner, self.ana)
+        self.assertEqual(concluido.owner, self.bia)
+
 class PermissoesValidacaoTests(TestCase):
     """Matriz de permissões validada no dev local: regressões encontradas na varredura por papel."""
     def setUp(self):
@@ -1812,7 +1855,7 @@ class PermissoesValidacaoTests(TestCase):
         self.agente = U.objects.create_user(username="agente-perm")
         self.agente.groups.add(Group.objects.get_or_create(name="agente")[0])
         self.company.members.add(self.empresa, self.ana, self.bia, self.agente)
-        self.lead = Lead.objects.create(company=self.company, contact="+5586900001111", owner=self.ana, bot_closed=True, etapa_atendimento="espera")
+        self.lead = Lead.objects.create(company=self.company, contact="+5586900001111", owner=self.ana, bot_closed=True, etapa_atendimento="negociacao")
     def client_for(self, user):
         c = APIClient(); c.force_authenticate(user); return c
     def test_agente_nao_lista_equipe(self):
@@ -1826,6 +1869,39 @@ class PermissoesValidacaoTests(TestCase):
         self.assertEqual(self.client_for(self.ana).patch(url, {"priority": "Baixa"}, format="json").status_code, 200)
         self.assertEqual(self.client_for(self.empresa).patch(url, {"priority": "Alta"}, format="json").status_code, 200)
         self.assertEqual(self.client_for(self.agente).patch(url, {"priority": "Alta"}, format="json").status_code, 403)
+    def test_atendente_edita_apenas_nome_de_lead_sem_dono_sem_assumi_lo(self):
+        self.lead.owner = None
+        self.lead.etapa_atendimento = "espera"
+        self.lead.save()
+        url = f"/api/leads/{self.lead.pk}/?company={self.company.pk}"
+        bia = self.client_for(self.bia)
+        r = bia.patch(url, {"name": "  Maria Silva  "}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.name, "Maria Silva")
+        self.assertIsNone(self.lead.owner)
+        self.assertEqual(self.lead.etapa_atendimento, "espera")
+        self.assertEqual(bia.patch(url, {"name": "Outro", "priority": "Baixa"}, format="json").status_code, 403)
+        self.assertEqual(bia.patch(url, {"name": "X" * 161}, format="json").status_code, 400)
+        self.assertEqual(self.client_for(self.agente).patch(url, {"name": "Outro"}, format="json").status_code, 403)
+        outra = Company.objects.create(name="Outra Perm")
+        self.assertEqual(bia.patch(f"/api/leads/{self.lead.pk}/?company={outra.pk}", {"name": "Outro"}, format="json").status_code, 404)
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.name, "Maria Silva")
+    def test_nome_editavel_durante_triagem_e_classificado_mas_nao_de_outro_responsavel(self):
+        url = f"/api/leads/{self.lead.pk}/?company={self.company.pk}"
+        bia = self.client_for(self.bia)
+        self.assertEqual(bia.patch(url, {"name": "Outro"}, format="json").status_code, 403)
+        for bot_closed in [False, True]:
+            self.lead.owner = None
+            self.lead.bot_closed = bot_closed
+            self.lead.etapa_atendimento = ""
+            self.lead.save()
+            with self.subTest(bot_closed=bot_closed):
+                self.assertEqual(bia.patch(url, {"name": "Nome corrigido"}, format="json").status_code, 200)
+                self.lead.refresh_from_db()
+                self.assertEqual(self.lead.name, "Nome corrigido")
+                self.assertIsNone(self.lead.owner)
     def test_convites_so_para_empresa(self):
         url = f"/api/convites/?company={self.company.pk}"
         self.assertEqual(self.client_for(self.ana).get(url).status_code, 403)

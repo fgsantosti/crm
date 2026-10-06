@@ -269,7 +269,7 @@ class Lead(models.Model):
     ]
     etapa_atendimento = models.CharField(
         max_length=20, choices=ETAPA_ATENDIMENTO_CHOICES, blank=True,
-        help_text="Coluna do Kanban pós-classificação em que um atendente já é owner. Vazio = ainda em 'Qualificados' (bot_closed, sem owner). Ver services.reivindicar_lead/mover_para_negociacao/preparar_despacho/liberar_lead.",
+        help_text="Coluna do Kanban pós-classificação. Qualificados (vazio) e Em espera não têm responsável; negociação e despacho atribuem o atendente. Ver services.reivindicar_lead/mover_para_negociacao/preparar_despacho/liberar_lead.",
     )
     desfecho_pendente = models.CharField(
         max_length=20, choices=DESFECHO_CHOICES, blank=True,
