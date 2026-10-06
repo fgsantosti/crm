@@ -217,6 +217,12 @@ novo existe pra elas**:
    Falha), mas ainda não confirmou o envio final.
 5. **Concluído** — desfecho definitivo; o lead sai do Kanban.
 
+O atendente também pode clicar em **"Acompanhar lead"** nos detalhes de um
+**Novo lead** para assumir antes de terminar a triagem: ele entra em negociação,
+com responsável e modo HUMANO, e o agente deixa de responder. Isso não classifica
+nem preenche dados que o contato ainda não informou. Um pedido explícito de humano
+é registrado em Demanda como **"Cliente pediu contato direto com atendente humano"**.
+
 Fallback de emergência: o admin da empresa pode excluir um lead direto do Kanban (botão "×" no
 canto do card) se ele ficar preso sem nunca encerrar — ver "Lead que nunca encerra" acima. Isso
 é exclusivo de conta humana admin; a conta de serviço do agente nunca tem permissão pra excluir

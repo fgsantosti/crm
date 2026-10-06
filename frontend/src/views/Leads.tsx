@@ -233,6 +233,10 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
     await chamarAcao('reivindicar', lead);
   }
 
+  async function acompanhar(lead: Lead) {
+    await chamarAcao('acompanhar', lead);
+  }
+
   async function confirmarNegociacao(lead: Lead) {
     const updated = await chamarAcao('negociar', lead);
     if (updated) setNegociacaoModal(null);
@@ -494,7 +498,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
             </button>
           </div>
           <p style={{ marginBottom: 16 }}>
-            Etapa: <strong style={{ color: 'var(--ink)' }}>{selected.state}</strong> · Bot {selected.bot_closed ? 'encerrado' : 'ativo'}
+            Etapa: <strong style={{ color: 'var(--ink)' }}>{selected.state}</strong> · Bot {selected.bot_closed ? 'encerrado' : selected.mode === 'HUMANO' ? 'pausado para atendimento humano' : 'ativo'}
             {selected.temperature && (
               <>
                 {' '}
@@ -510,12 +514,21 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
           </p>
 
           {selected.contact && (
-            <div style={{ marginBottom: 20 }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
               <a href={`https://wa.me/${selected.contact.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
                 <button type="button" style={{ background: '#25D366', borderColor: '#25D366' }}>
                   Conversar
                 </button>
               </a>
+              {podeAtender && columnOf(selected) === 'novos' && (
+                <button
+                  type="button" onClick={() => acompanhar(selected)} disabled={actionBusy}
+                  title="Assumir o atendimento e interromper a triagem automática"
+                >
+                  {actionBusy && <Spinner />}
+                  Acompanhar lead
+                </button>
+              )}
             </div>
           )}
 

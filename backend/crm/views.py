@@ -24,6 +24,7 @@ from .services import (
     redefinir_senha_atendente as redefinir_senha_atendente_service,
     agent_status, gerar_token_agente, revogar_token_agente, excluir_empresa,
     reivindicar_lead as reivindicar_lead_service,
+    acompanhar_lead as acompanhar_lead_service,
     mover_para_negociacao as mover_para_negociacao_service,
     preparar_despacho as preparar_despacho_service,
     liberar_lead as liberar_lead_service,
@@ -415,6 +416,15 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
         if self._bloqueia_staff(request):
             return Response({"detail": "Esse perfil não assume atendimentos."}, status=403)
         erro = reivindicar_lead_service(self.get_object().pk, request.user)
+        if erro:
+            return Response({"detail": erro}, status=400)
+        return Response(LeadSerializer(self.get_object()).data)
+    @action(detail=True, methods=["post"])
+    def acompanhar(self, request, pk=None):
+        """Novo lead -> Em negociação: assume e interrompe a triagem automática."""
+        if self._bloqueia_staff(request):
+            return Response({"detail": "Esse perfil não assume atendimentos."}, status=403)
+        erro = acompanhar_lead_service(self.get_object().pk, request.user)
         if erro:
             return Response({"detail": erro}, status=400)
         return Response(LeadSerializer(self.get_object()).data)

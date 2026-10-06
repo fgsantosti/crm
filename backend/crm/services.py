@@ -98,6 +98,11 @@ def escalate(lead, reason):
     lead.mode = "HUMANO"
     lead.priority = "Alta"
     lead.next_action = reason
+    if reason == "pedido humano":
+        motivo = "Cliente pediu contato direto com atendente humano"
+        if motivo not in lead.demand:
+            demanda = lead.demand.strip()
+            lead.demand = f"{demanda[:300 - len(motivo) - 3]} | {motivo}" if demanda else motivo
     lead.save()
 
 def apply_fields(lead, company, fields):
@@ -269,6 +274,7 @@ def receive(company, data):
         apagar_lead, motivo_apagar = True, "Agente sinalizou falha de integração"
     elif data["human_required"]:
         escalate(lead, data["reason"])
+        event.summary = f"Encaminhado para atendimento humano: {data['reason']}"
     elif pendentes.filter(created_at__gte=timezone.now() - JANELA_ENTREGA_PENDENTE).exists():
         # Contato mandou várias mensagens em sequência enquanto a resposta anterior ainda
         # está saindo: ignora esta sem escalar (escalar aqui travava o lead em HUMANO).
@@ -676,6 +682,34 @@ def reivindicar_lead(lead_id, user):
     lead.owner = None
     lead.etapa_atendimento = "espera"
     lead.save(update_fields=["owner", "etapa_atendimento"])
+    return None
+
+@transaction.atomic
+def acompanhar_lead(lead_id, user):
+    """Atendente assume um Novo lead durante a triagem e interrompe o agente.
+    Usa o mesmo lock da empresa que receive para não competir com a próxima mensagem."""
+    company_id = Lead.objects.filter(pk=lead_id).values_list("company_id", flat=True).first()
+    if company_id is None:
+        return "Lead não encontrado."
+    company = Company.objects.select_for_update().get(pk=company_id)
+    lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
+    if not lead or not company.members.filter(pk=user.pk).exists():
+        return "Lead não encontrado."
+    if lead.desfecho or lead.temperature in FORA_DO_KANBAN:
+        return "Este lead não está disponível para atendimento."
+    if lead.owner_id:
+        return "Este atendimento já foi assumido por um atendente."
+    if lead.bot_closed or lead.mode != "AUTOMÁTICO" or lead.etapa_atendimento or lead.origem_manual:
+        return "Só é possível acompanhar por esta ação um Novo lead ainda em triagem."
+    lead.owner = user
+    lead.mode = "HUMANO"
+    lead.etapa_atendimento = "negociacao"
+    lead.next_action = "Atendimento assumido durante a triagem"
+    lead.save(update_fields=["owner", "mode", "etapa_atendimento", "next_action"])
+    Event.objects.create(
+        lead=lead, message_id=f"acompanhar:{secrets.token_hex(16)}",
+        summary="Atendente assumiu atendimento durante a triagem",
+    )
     return None
 
 @transaction.atomic

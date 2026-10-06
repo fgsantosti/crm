@@ -1843,6 +1843,106 @@ class ContatoFecharDonoPendenciasTests(TestCase):
         self.assertEqual(negociacao.owner, self.ana)
         self.assertEqual(concluido.owner, self.bia)
 
+class AcompanharTriagemEPedidoHumanoTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        self.company = Company.objects.create(name="Acompanhar triagem")
+        self.other = Company.objects.create(name="Outra triagem")
+        self.ana = get_user_model().objects.create_user(username="ana-acompanhar")
+        self.bia = get_user_model().objects.create_user(username="bia-acompanhar")
+        self.empresa = get_user_model().objects.create_user(username="empresa-acompanhar", is_staff=True)
+        self.agente = get_user_model().objects.create_user(username="agente-acompanhar")
+        self.agente.groups.add(Group.objects.get_or_create(name="agente")[0])
+        self.company.members.add(self.ana, self.bia, self.empresa, self.agente)
+        self.lead = Lead.objects.create(company=self.company, contact="+5585900000201", state="nome")
+
+    def client_for(self, user):
+        c = APIClient()
+        c.force_authenticate(user)
+        return c
+
+    def url(self):
+        return f"/api/leads/{self.lead.pk}/acompanhar/?company={self.company.pk}"
+
+    def test_acompanhar_assume_novo_lead_sem_dados_e_para_o_agente(self):
+        ana = self.client_for(self.ana)
+        r = ana.post(self.url())
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual((r.json()["owner"], r.json()["mode"], r.json()["etapa_atendimento"]), (self.ana.pk, "HUMANO", "negociacao"))
+        self.lead.refresh_from_db()
+        self.assertFalse(self.lead.bot_closed)  # assumir não inventa uma classificação
+        self.assertEqual((self.lead.state, self.lead.name, self.lead.demand, self.lead.temperature), ("nome", "", "", ""))
+        self.assertTrue(self.lead.events.filter(summary="Atendente assumiu atendimento durante a triagem").exists())
+        meus = ana.get(f"/api/leads/?company={self.company.pk}&meus=1").json()["results"]
+        self.assertEqual([l["id"] for l in meus], [str(self.lead.pk)])
+        result = receive(self.company, {"contact": self.lead.contact, "message_id": "apos-acompanhar", "marker": "Q", "question_id": "nome", "kind": "text", "fields": {}, "human_required": False, "reason": "pedido humano"})
+        self.assertEqual(result["action"], "NO_REPLY")
+        self.assertEqual(self.client_for(self.bia).post(self.url()).status_code, 400)
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.owner, self.ana)
+
+    def test_acompanhar_respeita_perfis_e_empresa(self):
+        for user in [self.empresa, self.agente]:
+            with self.subTest(user=user.username):
+                self.assertEqual(self.client_for(user).post(self.url()).status_code, 403)
+        self.assertEqual(self.client_for(self.ana).post(f"/api/leads/{self.lead.pk}/acompanhar/?company={self.other.pk}").status_code, 404)
+        self.lead.refresh_from_db()
+        self.assertIsNone(self.lead.owner)
+        self.assertEqual(self.lead.mode, "AUTOMÁTICO")
+
+    def test_acompanhar_nao_reabre_classificados_desqualificados_ou_concluidos(self):
+        for changes in [{"bot_closed": True}, {"temperature": "Desqualificado"}, {"desfecho": "encerrado"}, {"mode": "HUMANO"}, {"etapa_atendimento": "espera"}, {"origem_manual": True}]:
+            with self.subTest(changes=changes):
+                Lead.objects.filter(pk=self.lead.pk).update(bot_closed=False, temperature="", desfecho="", mode="AUTOMÁTICO", etapa_atendimento="", origem_manual=False)
+                Lead.objects.filter(pk=self.lead.pk).update(**changes)
+                self.assertEqual(self.client_for(self.ana).post(self.url()).status_code, 400)
+                self.lead.refresh_from_db()
+                self.assertIsNone(self.lead.owner)
+
+    def test_pedido_humano_preenche_demanda_e_registra_motivo_sem_qualificar(self):
+        result = receive(self.company, {"contact": self.lead.contact, "message_id": "pedido-direto", "marker": "ATUALIZAR", "question_id": "", "kind": "text", "fields": {}, "human_required": True, "reason": "pedido humano"})
+        self.assertEqual(result["action"], "NO_REPLY")
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.demand, "Cliente pediu contato direto com atendente humano")
+        self.assertEqual((self.lead.name, self.lead.mode, self.lead.temperature, self.lead.owner), ("", "HUMANO", "", None))
+        self.assertEqual(self.lead.events.get().summary, "Encaminhado para atendimento humano: pedido humano")
+
+    def test_pedido_humano_preserva_demanda_e_nao_duplica_motivo(self):
+        from .services import escalate
+        self.lead.demand = "Revisar rescisão"
+        escalate(self.lead, "pedido humano")
+        self.assertEqual(self.lead.demand, "Revisar rescisão | Cliente pediu contato direto com atendente humano")
+        escalate(self.lead, "pedido humano")
+        self.assertEqual(self.lead.demand.count("Cliente pediu contato direto com atendente humano"), 1)
+        self.lead.demand = "X" * 300
+        escalate(self.lead, "pedido humano")
+        self.assertEqual(len(self.lead.demand), 300)
+        self.assertTrue(self.lead.demand.endswith("Cliente pediu contato direto com atendente humano"))
+
+    def test_decisao_profissional_nao_e_registrada_como_pedido_do_cliente(self):
+        from .services import escalate
+        escalate(self.lead, "decisão profissional")
+        self.lead.refresh_from_db()
+        self.assertEqual((self.lead.demand, self.lead.next_action), ("", "decisão profissional"))
+
+    def test_migracao_registra_motivo_em_pedidos_existentes_e_e_idempotente(self):
+        from importlib import import_module
+        from types import SimpleNamespace
+        from django.apps import apps
+        from django.db import connection
+        self.lead.mode = "HUMANO"
+        self.lead.next_action = "pedido humano"
+        self.lead.save()
+        profissional = Lead.objects.create(company=self.company, contact="+5585900000202", mode="HUMANO", next_action="decisão profissional")
+        migration = import_module("crm.migrations.0032_demanda_pedido_humano")
+        for _ in range(2):
+            migration.registrar_pedido_humano(apps, SimpleNamespace(connection=connection))
+        self.lead.refresh_from_db()
+        profissional.refresh_from_db()
+        self.assertEqual(self.lead.demand, "Cliente pediu contato direto com atendente humano")
+        self.assertEqual(profissional.demand, "")
+
+
 class PermissoesValidacaoTests(TestCase):
     """Matriz de permissões validada no dev local: regressões encontradas na varredura por papel."""
     def setUp(self):
