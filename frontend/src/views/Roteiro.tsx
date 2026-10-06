@@ -749,8 +749,8 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                   <fieldset disabled={!canEdit || savingQ === q.id} style={{ marginTop: 14, border: '1px solid var(--line)', borderRadius: 8 }}>
                     <legend>Variáveis mínimas obrigatórias</legend>
                     <small style={{ display: 'block', color: 'var(--muted)', marginBottom: 10 }}>
-                      Selecione as variáveis que precisam aparecer no texto. Ao selecionar, o marcador é inserido na mensagem.
-                      Ela só será enviada se todas as selecionadas tiverem valor; o pedido será encaminhado ao humano mesmo se faltar algum dado.
+                      Selecione os dados que o cliente precisa informar antes de ser encaminhado ao humano.
+                      O agente envia esta mensagem e coleta os dados faltantes. A transferência só acontece quando todos os selecionados estiverem preenchidos.
                     </small>
                     {variaveisRoteiro.map((v) => (
                       <label key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400 }}>
@@ -760,10 +760,8 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                           checked={q.variaveis_obrigatorias.includes(v.id)}
                           onChange={(e) => {
                             const selected = e.target.checked;
-                            const token = `{${v.slug}}`;
                             saveQuestion(q, {
                               variaveis_obrigatorias: selected ? [...q.variaveis_obrigatorias, v.id] : q.variaveis_obrigatorias.filter((value) => value !== v.id),
-                              ...(selected && !q.text.includes(token) ? { text: `${q.text.trim()} ${token}`.trim() } : {}),
                             });
                           }}
                         />

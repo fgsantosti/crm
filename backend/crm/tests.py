@@ -1731,7 +1731,7 @@ class ContatoFecharDonoPendenciasTests(TestCase):
 
     def test_contato_cobre_todos_os_motivos_com_a_mesma_regra_do_incoming(self):
         r = self.contato("+5585911114444").json()
-        self.assertEqual(r, {"contact": "+5585911114444", "lead_id": None, "aceita_agente": True, "motivo": "sem_lead", "ultima_pergunta": None, "repeticoes": 0, "especialidade": ""})
+        self.assertEqual(r, {"contact": "+5585911114444", "lead_id": None, "aceita_agente": True, "motivo": "sem_lead", "ultima_pergunta": None, "repeticoes": 0, "especialidade": "", "pedido_humano_pendente": False, "variaveis_humano_pendentes": []})
         self.send("a1")
         self.send("a2", marker="ATUALIZAR", fields={"proxima": "nome"})
         r = self.contato("+5585911114444").json()
@@ -2582,21 +2582,83 @@ class NecessidadeHumanaTests(TestCase):
         self.assertEqual(result["content"], "Ana, idade 40 anos: vou chamar um atendente.")
         self.assertEqual(Lead.objects.get().variaveis_roteiro, {"idade": "40 anos"})
 
-    def test_variavel_sem_valor_nao_envia_mensagem_mas_encaminha(self):
-        self.question.text = "{nome}: vou chamar um atendente."
+    def test_variavel_sem_valor_pergunta_e_mantem_automatico(self):
+        from .services import status_contato
+        self.question.text = "Antes de chamar um atendente, qual é o seu nome?"
         self.question.save()
         self.question.variaveis_obrigatorias.set([self.nome])
         result = self.send()
+        self.assertEqual((result["action"], result["question_id"], result["content"]), ("TEXTO", "necessidade_humana", self.question.text))
+        lead = Lead.objects.get()
+        self.assertEqual((lead.mode, lead.pedido_humano_pendente, lead.bot_closed), ("AUTOMÁTICO", True, False))
+        self.assertEqual(lead.demand, "")
+        status = status_contato(self.company, lead.contact)
+        self.assertTrue(status["aceita_agente"])
+        self.assertTrue(status["pedido_humano_pendente"])
+        self.assertEqual(status["variaveis_humano_pendentes"], ["nome"])
+        # A próxima mensagem não precisa repetir o sinalizador human_required.
+        result = self.send("resposta", human_required=False, fields={"nome": "Ana", "proxima": "situacao"})
         self.assertEqual(result["action"], "NO_REPLY")
-        self.assertEqual(Lead.objects.get().mode, "HUMANO")
-        event = Event.objects.get(pk=result["event_id"])
-        self.assertNotEqual(event.delivery, "PENDING")
-        self.assertIn("variável obrigatória ausente (nome)", event.summary)
+        lead.refresh_from_db()
+        self.assertEqual((lead.name, lead.mode, lead.pedido_humano_pendente), ("Ana", "HUMANO", False))
 
-    def test_texto_invalido_via_admin_nao_e_enviado(self):
-        self.question.variaveis_obrigatorias.set([self.nome])
-        self.assertEqual(self.send(fields={"nome": "Ana"})["action"], "NO_REPLY")
+    def test_coleta_parcial_pede_apenas_proxima_variavel_faltante(self):
+        demanda = self.company.variaveis_roteiro.get(slug="tema")
+        self.question.text = "Para falar com um atendente, informe seu nome e sua demanda."
+        self.question.save()
+        self.question.variaveis_obrigatorias.set([self.nome, demanda])
+        Question.objects.filter(company=self.company, question_id="demanda").update(text="Qual é a sua demanda?")
+        self.send()
+        partial = self.send("nome", fields={"nome": "Ana"})
+        self.assertEqual((partial["question_id"], partial["content"]), ("demanda", "Qual é a sua demanda?"))
+        lead = Lead.objects.get()
+        self.assertEqual((lead.mode, lead.demand), ("AUTOMÁTICO", ""))
+        final = self.send("demanda", fields={"tema": "Revisão de rescisão"})
+        self.assertEqual(final["action"], "NO_REPLY")
+        lead.refresh_from_db()
+        self.assertEqual(lead.mode, "HUMANO")
+        self.assertTrue(lead.demand.startswith("Revisão de rescisão"))
+
+    def test_nao_pula_variaveis_com_classificado_ou_repeticoes(self):
+        self.question.variaveis_obrigatorias.set([self.extra])
+        self.send()
+        for index in range(5):
+            result = self.send(str(index), marker="CLASSIFICADO", human_required=False, fields={"temperatura": "Quente", "encerramento_antecipado": True})
+            self.assertEqual(result["content"].count("Por favor, responda novamente."), 1)
+            lead = Lead.objects.get()
+            self.assertEqual((lead.mode, lead.temperature, lead.pedido_humano_pendente, lead.bot_closed), ("AUTOMÁTICO", "", True, False))
+        self.send("completo", fields={"variaveis_roteiro": {"idade": "40 anos"}})
         self.assertEqual(Lead.objects.get().mode, "HUMANO")
+
+    def test_nao_transfere_com_valor_em_branco_ou_slug_inventado(self):
+        self.question.variaveis_obrigatorias.set([self.extra])
+        self.send()
+        self.send("incompleto", fields={"variaveis_roteiro": {"idade": "   ", "inexistente": "40 anos"}})
+        self.assertEqual(Lead.objects.get().mode, "AUTOMÁTICO")
+
+    def test_api_mantem_pedido_pendente_e_transfere_depois_da_resposta(self):
+        self.question.text = "Informe seu nome e sua idade antes do atendimento humano."
+        self.question.save()
+        self.question.variaveis_obrigatorias.set([self.nome, self.extra])
+        url = f"/api/companies/{self.company.pk}/incoming/"
+        payload = {"contact": "+5585912345678", "message_id": "pedido", "marker": "ATUALIZAR", "human_required": True, "reason": "pedido humano"}
+        first = self.client.post(url, payload, format="json")
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json()["question_id"], "necessidade_humana")
+        status_url = f"/api/companies/{self.company.pk}/agente/contato/?contact=%2B5585912345678"
+        status = self.client.get(status_url).json()
+        self.assertTrue(status["aceita_agente"])
+        self.assertTrue(status["pedido_humano_pendente"])
+        self.assertEqual(set(status["variaveis_humano_pendentes"]), {"nome", "idade"})
+        response = self.client.post(url, {
+            "contact": payload["contact"], "message_id": "resposta", "marker": "ATUALIZAR",
+            "fields": {"nome": "Ana", "variaveis_roteiro": {"idade": "40 anos"}},
+        }, format="json")
+        self.assertEqual((response.status_code, response.json()["action"]), (200, "NO_REPLY"))
+        status = self.client.get(status_url).json()
+        self.assertFalse(status["aceita_agente"])
+        self.assertFalse(status["pedido_humano_pendente"])
+        self.assertEqual(status["motivo"], "humano")
 
     def test_outros_motivos_nao_disparam_mensagem(self):
         for index, reason in enumerate(["urgência ou risco", "fora de escopo", "falha de integração", "decisão profissional"]):
@@ -2604,16 +2666,12 @@ class NecessidadeHumanaTests(TestCase):
                 result = self.send(str(index), reason=reason, contact=f"+558591234568{index}")
                 self.assertEqual(result["action"], "NO_REPLY")
 
-    def test_api_valida_variaveis_no_texto_e_edicoes_parciais(self):
-        invalid = self.client.patch(self.url, {"variaveis_obrigatorias": [self.nome.pk]}, format="json")
-        self.assertEqual(invalid.status_code, 400)
-        self.assertIn("{nome}", invalid.json()["text"][0])
-        valid = self.client.patch(self.url, {"text": "{nome}, vou chamar um atendente.", "variaveis_obrigatorias": [self.nome.pk]}, format="json")
+    def test_api_seleciona_dados_sem_exigir_placeholder_na_mensagem(self):
+        valid = self.client.patch(self.url, {"text": "Antes de chamar um atendente, qual é o seu nome?", "variaveis_obrigatorias": [self.nome.pk]}, format="json")
         self.assertEqual(valid.status_code, 200)
         self.assertEqual(valid.json()["variaveis_obrigatorias"], [self.nome.pk])
-        for text in ["Sem o marcador", ""]:
-            with self.subTest(text=text):
-                self.assertEqual(self.client.patch(self.url, {"text": text}, format="json").status_code, 400)
+        self.assertEqual(self.client.patch(self.url, {"text": "Informe seu nome, por favor."}, format="json").status_code, 200)
+        self.assertEqual(self.client.patch(self.url, {"text": ""}, format="json").status_code, 400)
         self.assertEqual(self.client.patch(self.url, {"variaveis_obrigatorias": [], "text": "Vou chamar um atendente."}, format="json").status_code, 200)
 
     def test_variavel_de_outra_empresa_e_recusada(self):

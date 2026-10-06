@@ -98,6 +98,7 @@ def normalizar_contato(valor):
     return e164 if re.fullmatch(r"\+[1-9]\d{7,14}", e164) else None
 
 def escalate(lead, reason):
+    lead.pedido_humano_pendente = False
     lead.mode = "HUMANO"
     lead.priority = "Alta"
     lead.next_action = reason
@@ -205,17 +206,62 @@ MAX_REPETICOES = 3
 REPEAT_PREFIX = "Por favor, responda novamente. "
 JANELA_ENTREGA_PENDENTE = timedelta(seconds=90)
 
-def mensagem_necessidade_humana(company, lead, event):
+def variaveis_humano_pendentes(company, lead):
     question = Question.objects.filter(company=company, question_id="necessidade_humana").first()
+    if not question:
+        return []
+    missing = []
+    for variable in question.variaveis_obrigatorias.all():
+        if variable.builtin:
+            model_field = FIELD_MAP.get(variable.slug)
+            value = getattr(lead, model_field, "") if model_field else ""
+        else:
+            value = (lead.variaveis_roteiro or {}).get(variable.slug, "")
+        if not str(value or "").strip():
+            missing.append(variable)
+    return missing
+
+def mensagem_necessidade_humana(company, lead, event, question=None):
+    if question is None:
+        question = Question.objects.filter(company=company, question_id="necessidade_humana").first()
     if not question or not question.text.strip():
         return dict(NO_REPLY)
-    for variable in question.variaveis_obrigatorias.all():
-        token = "{" + variable.slug + "}"
-        if token not in question.text or not render_text(token, lead, company).strip():
-            event.summary += f"; mensagem não enviada: variável obrigatória ausente ({variable.slug})"
-            return dict(NO_REPLY)
+    content = render_text(question.text, lead, company)
+    anterior = Event.objects.filter(lead=lead, delivery__in=["SENT", "PENDING", "EXPIRADO"]).exclude(pk=event.pk).order_by("-created_at", "-pk").first()
+    if anterior and anterior.result.get("question_id") == question.question_id and anterior.result.get("content", "").removeprefix(REPEAT_PREFIX) == content:
+        content = REPEAT_PREFIX + content
+        event.marker = "REPETIR"
     event.delivery = "PENDING"
-    return {"action": "TEXTO", "content": render_text(question.text, lead, company), "question_id": question.question_id}
+    return {"action": "TEXTO", "content": content, "question_id": question.question_id}
+
+def processar_pedido_humano(company, lead, event, fields):
+    was_pending = lead.pedido_humano_pendente
+    collected = {key: value for key, value in fields.items() if key in {
+        "nome", "especialidade", "tema", "impacto", "interesse", "variaveis_roteiro",
+    }}
+    field_error = apply_fields(lead, company, collected)
+    missing = variaveis_humano_pendentes(company, lead)
+    if not missing:
+        lead.pedido_humano_pendente = False
+        escalate(lead, "pedido humano")
+        event.summary = "Encaminhado para atendimento humano: pedido humano"
+        # A mensagem que solicita os dados já foi enviada antes da coleta.
+        return dict(NO_REPLY) if was_pending else mensagem_necessidade_humana(company, lead, event)
+
+    lead.pedido_humano_pendente = True
+    lead.next_action = ("Coletar dados antes do atendimento humano: " + ", ".join(v.name for v in missing))[:250]
+    event.summary = "Pedido humano aguardando dados: " + ", ".join(v.slug for v in missing)
+    if field_error:
+        event.summary += "; " + field_error
+    question = None
+    if was_pending:
+        # Depois da mensagem fora do fluxo, pede apenas o próximo dado faltante.
+        question = Question.objects.filter(company=company, variavel_roteiro=missing[0]).filter(
+            Q(area__isnull=True) | Q(area__name=lead.especialidade)
+        ).exclude(question_id__in=MANDATORY_OFFFLOW_QUESTION_IDS).exclude(text="").order_by("ordem", "id").first()
+    lead.state = question.question_id if question else "necessidade_humana"
+    lead.save()
+    return mensagem_necessidade_humana(company, lead, event, question)
 
 def contar_repeticoes(lead, excluir_pk=None):
     """REPETIR consecutivos desde o último marcador que não foi REPETIR."""
@@ -251,6 +297,8 @@ def status_contato(company, contact):
         "repeticoes": contar_repeticoes(lead) if lead and motivo == "em_triagem" else 0,
         # Área já classificada no lead ativo: define qual lista SPIN o agente segue.
         "especialidade": (lead.especialidade or "") if lead and not lead.desfecho else "",
+        "pedido_humano_pendente": bool(lead and aceita and lead.pedido_humano_pendente),
+        "variaveis_humano_pendentes": [v.slug for v in variaveis_humano_pendentes(company, lead)] if lead and aceita and lead.pedido_humano_pendente else [],
     }
 
 @transaction.atomic
@@ -288,18 +336,11 @@ def receive(company, data):
         desqualificar_fora_de_escopo(lead)
     elif data["human_required"] and data["reason"] == "falha de integração":
         apagar_lead, motivo_apagar = True, "Agente sinalizou falha de integração"
-    elif data["human_required"]:
-        if data["reason"] == "pedido humano":
-            # Aproveita dados identificados nesta mesma mensagem, sem continuar o funil.
-            fields = data.get("fields") or {}
-            collected = {key: value for key, value in fields.items() if key in {
-                "nome", "especialidade", "tema", "impacto", "interesse", "variaveis_roteiro",
-            }}
-            apply_fields(lead, company, collected)
+    elif data["human_required"] and data["reason"] != "pedido humano":
         escalate(lead, data["reason"])
         event.summary = f"Encaminhado para atendimento humano: {data['reason']}"
-        if data["reason"] == "pedido humano":
-            result = mensagem_necessidade_humana(company, lead, event)
+    elif lead.pedido_humano_pendente or data["human_required"]:
+        result = processar_pedido_humano(company, lead, event, data.get("fields") or {})
     elif pendentes.filter(created_at__gte=timezone.now() - JANELA_ENTREGA_PENDENTE).exists():
         # Contato mandou várias mensagens em sequência enquanto a resposta anterior ainda
         # está saindo: ignora esta sem escalar (escalar aqui travava o lead em HUMANO).

@@ -181,12 +181,15 @@ Mude para `Modo de atendimento=HUMANO` e não responda automaticamente quando ho
 Registre a ocorrência, atualize `Responsável`, `Prioridade` e `Próxima ação`. Não retome a automação sem comando privado autorizado.
 
 No pedido explícito de humano, emita `ATUALIZAR` com `human_required=true` e
-`reason="pedido humano"`. O CRM muda o modo para HUMANO e devolve uma única
-mensagem aprovada de `necessidade_humana`, configurada na aba "Textos fora do
-fluxo". Envie essa saída e confirme a entrega normalmente. As variáveis
-selecionadas como obrigatórias precisam constar no texto e ter valor coletado;
-se faltar alguma, o CRM encaminha o contato e retorna `NO_REPLY`. Não colete
-novos dados para adiar o encaminhamento. Depois dessa saída, mantenha silêncio.
+`reason="pedido humano"`. Se faltarem dados selecionados como mínimos
+obrigatórios, o CRM mantém o modo AUTOMÁTICO, registra o pedido pendente e
+envia a mensagem aprovada de `necessidade_humana` da aba "Textos fora do fluxo".
+Colete somente esses dados, usando o estado atual e a lista de variáveis
+faltantes do CRM; não retome o funil nem pule variáveis após repetições.
+Envie os valores informados pelo cliente em `fields` de `ATUALIZAR` com
+`human_required=true`, `reason="pedido humano"`, sem `proxima`. O próprio
+pedido de humano não conta como demanda informada. O CRM só muda para HUMANO
+quando todas as variáveis selecionadas tiverem valor. Depois, mantenha silêncio.
 `necessidade_humana` não é uma etapa do funil nem um `proxima` válido.
 
 Ao repetir a pergunta atual, o CRM acrescenta ao conteúdo aprovado o prefixo

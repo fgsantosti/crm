@@ -148,16 +148,25 @@ com prioridade Baixa; `falha de integração` remove a triagem; os outros motivo
 transferem para humano. Números na BlackList sempre retornam `NO_REPLY`, sem lead/evento.
 
 **Pedido explícito de atendimento humano:** `human_required=true` com
-`reason="pedido humano"` transfere o lead e devolve uma única saída de
+`reason="pedido humano"` verifica os dados mínimos antes de transferir.
+Quando falta algum, mantém o lead em AUTOMÁTICO, marca
+`pedido_humano_pendente=true` e devolve a mensagem de
 `question_id="necessidade_humana"`. Essa mensagem obrigatória fica em
 Roteiro → Textos fora do fluxo e pode exigir variáveis de roteiro via o campo
 `variaveis_obrigatorias` de `/questions/` (lista de IDs da mesma empresa).
-O texto só é aceito se incluir os placeholders selecionados. No envio, todos
-eles precisam ter valor coletado; caso contrário, o CRM transfere o contato
-e retorna `NO_REPLY`, registrando o dado ausente no evento. Campos de dados
-coletados podem acompanhar o pedido em `fields`; isso não classifica o lead.
-Envie a saída e confirme a entrega normalmente; mensagens seguintes ficam
-bloqueadas pelo modo HUMANO. Não use `Q:necessidade_humana` nem essa ID como
+O seletor define os dados que o cliente precisa informar; não exige inserir
+placeholders no texto. `GET /agente/contato/` informa `pedido_humano_pendente`
+e `variaveis_humano_pendentes` (slugs). Enquanto houver pendência, envie apenas
+os dados informados pelo cliente em `fields` de ATUALIZAR, com
+`human_required=true`, `reason="pedido humano"`, sem `proxima`. O CRM coleta
+os valores, pede o próximo dado faltante pelo roteiro aprovado e só muda o
+modo para HUMANO quando todos estiverem preenchidos. Marcadores de avanço,
+validação ou classificação não permitem pular essa coleta. O próprio pedido
+de humano não preenche a demanda. Depois de completar a coleta, o CRM retorna
+`NO_REPLY` e bloqueia novas respostas. Se os dados já estavam completos no
+pedido inicial, transfere imediatamente e devolve a mensagem configurada.
+Envie as saídas e confirme as entregas normalmente.
+Não use `Q:necessidade_humana` nem essa ID como
 `proxima`: ela é exclusiva desse encaminhamento.
 
 - `action="NO_REPLY"` → **não envie nada ao contato**, nem literalmente a
@@ -383,7 +392,9 @@ chame `/incoming/`). É exatamente a regra que `/incoming/` usa para decidir
   "motivo": "em_triagem",       // ver tabela
   "ultima_pergunta": "nome",    // só em "em_triagem"; null nos demais
   "repeticoes": 2,              // REPETIR consecutivos na etapa atual; 0 sem lead/fora da triagem
-  "especialidade": "Trabalhista" // área já gravada no lead ativo ("" se ainda não classificada) — define a lista SPIN
+  "especialidade": "Trabalhista", // área já gravada no lead ativo ("" se ainda não classificada) — define a lista SPIN
+  "pedido_humano_pendente": true, // pedido de humano aguardando a coleta mínima, ainda em AUTOMÁTICO
+  "variaveis_humano_pendentes": ["tema", "idade"] // slugs ainda não preenchidos; [] fora dessa coleta
 }
 ```
 

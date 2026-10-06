@@ -68,7 +68,7 @@ class LeadSerializer(serializers.ModelSerializer):
         # owner/mode só mudam via as actions assumir/despachar (services.py) --
         # nunca mais um PATCH livre de texto, pra garantir atomicidade real
         # na disputa por um lead entre atendentes.
-        read_only_fields = ["id", "company", "contact", "created_at", "state", "last_audio_id", "bot_closed", "last_contact", "owner", "mode", "desfecho", "variaveis_roteiro", "urgencia_detalhe", "etapa_atendimento", "desfecho_pendente", "origem_manual"]
+        read_only_fields = ["id", "company", "contact", "created_at", "state", "last_audio_id", "bot_closed", "pedido_humano_pendente", "last_contact", "owner", "mode", "desfecho", "variaveis_roteiro", "urgencia_detalhe", "etapa_atendimento", "desfecho_pendente", "origem_manual"]
 
     def validate(self, attrs):
         if attrs.get("mode") == "AUTOMÁTICO" and self.instance and self.instance.mode == "HUMANO":
@@ -189,9 +189,6 @@ class QuestionSerializer(serializers.ModelSerializer):
             text = attrs.get("text", self.instance.text if self.instance else "")
             if not text.strip():
                 raise serializers.ValidationError({"text": "Cadastre a mensagem de Necessidade humana."})
-            missing = ["{" + v.slug + "}" for v in required if "{" + v.slug + "}" not in text]
-            if missing:
-                raise serializers.ValidationError({"text": "Inclua as variáveis obrigatórias: " + ", ".join(missing)})
         if question_id in MANDATORY_QUESTION_IDS + MANDATORY_OFFFLOW_QUESTION_IDS:
             attrs["obrigatoria"] = True
         self._validar_spin(attrs, question_id, question_id in MANDATORY_OFFFLOW_QUESTION_IDS)

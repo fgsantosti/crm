@@ -118,7 +118,7 @@ class Question(models.Model):
     )
     variaveis_obrigatorias = models.ManyToManyField(
         VariavelRoteiro, blank=True, related_name="mensagens_obrigatorias",
-        help_text="Variáveis que devem constar no texto de Necessidade humana e ter valor para a mensagem ser enviada.",
+        help_text="Dados que o cliente deve informar antes de o agente encaminhar o lead para atendimento humano.",
     )
     # SPIN por área: null = pergunta fixa (feita para todos antes de o agente definir a área);
     # com área = pergunta da lista "{Área}-SPIN", feita só depois que o lead é classificado nela.
@@ -263,6 +263,10 @@ class Lead(models.Model):
     mode =models.CharField(max_length=10, choices=[("AUTOMÁTICO", "Automático"), ("HUMANO", "Humano")], default="AUTOMÁTICO")
     last_audio_id = models.CharField(max_length=250, blank=True)
     bot_closed = models.BooleanField(default=False)
+    pedido_humano_pendente = models.BooleanField(
+        default=False,
+        help_text="Cliente pediu humano, mas o agente ainda está coletando as variáveis mínimas obrigatórias.",
+    )
     notes = models.TextField(blank=True)
     urgencia_detalhe = models.JSONField(default=dict, blank=True, help_text="Auditoria do CLASSIFICADO por notas: {notas, pesos, score, temperatura_calculada} (ver services.calcular_urgencia).")
     variaveis_roteiro = models.JSONField(default=dict, blank=True, help_text="slug->texto coletado nas perguntas com Variável de roteiro customizada (ver services.apply_fields/render_text). Os 3 builtin (nome/especialidade/tema) não usam isto -- já são campos próprios do Lead.")
