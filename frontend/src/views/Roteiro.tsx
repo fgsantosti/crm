@@ -24,8 +24,9 @@ const MANDATORY_LABELS: Record<string, string> = {
 // Fora do fluxo de triagem: o cliente vê "apresentacao" antes de entrar em qualquer
 // etapa, "empresa" é o fallback usado enquanto ele ainda não entrou no fluxo (só
 // vendo o que o agente responde sobre a empresa), e "validar"/"encerramento" fecham
-// a triagem. Nenhum dos 4 é classificável, então não tem Variável (ver backend).
-const OFFFLOW_IDS = ['apresentacao', 'empresa', 'validar', 'encerramento'] as const;
+// a triagem. "necessidade_humana" confirma o encaminhamento solicitado pelo cliente.
+// Esses textos não têm Variável de classificação (ver backend).
+const OFFFLOW_IDS = ['apresentacao', 'empresa', 'validar', 'encerramento', 'necessidade_humana'] as const;
 // Obrigatórias que ficam sempre nas perguntas fixas: a área só é conhecida depois delas.
 const SEMPRE_FIXAS = ['nome', 'situacao'];
 const ETAPAS_SPIN: { value: Question['etapa_spin']; label: string }[] = [
@@ -40,6 +41,7 @@ const OFFFLOW_LABELS: Record<string, { title: string; help: string }> = {
   empresa: { title: 'Resposta sobre a empresa', help: 'Usado enquanto o cliente ainda não entrou no fluxo de perguntas — só o que o agente responde sobre a empresa.' },
   validar: { title: 'Confirmação dos dados', help: 'Resumo enviado para o cliente confirmar antes de encerrar a triagem.' },
   encerramento: { title: 'Encerramento', help: 'Mensagem final, enviada quando a triagem é concluída e classificada.' },
+  necessidade_humana: { title: 'Necessidade humana', help: 'Mensagem enviada ao cliente caso ele peça atendimento humano' },
 };
 
 const TOKEN_RE = /(<br\s*\/?>)|(\{[a-zA-Z_]+\})/g;
@@ -150,6 +152,7 @@ function Legenda({ areas, variaveis, variaveisRoteiro }: { areas: Area[]; variav
 // {slug} destacado na cor da variável enquanto ainda está digitando, antes de salvar.
 function TextoComPreview({ value, rows, onSave, variaveisRoteiro, disabled }: { value: string; rows: number; onSave: (v: string) => void; variaveisRoteiro: VariavelRoteiro[]; disabled?: boolean }) {
   const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <textarea
@@ -275,7 +278,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
     }
   }
 
-  async function saveQuestion(q: Question, patch: Partial<Pick<Question, 'text' | 'variavel' | 'question_id' | 'ordem' | 'variavel_roteiro' | 'area' | 'etapa_spin'>>) {
+  async function saveQuestion(q: Question, patch: Partial<Pick<Question, 'text' | 'variavel' | 'question_id' | 'ordem' | 'variavel_roteiro' | 'variaveis_obrigatorias' | 'area' | 'etapa_spin'>>) {
     setSavingQ(q.id);
     setError('');
     try {
@@ -722,8 +725,8 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
       {tab === 'fora-do-fluxo' && (
         <section className="section">
           <p style={{ marginBottom: 16 }}>
-            Enquanto o cliente ainda não está no fluxo de perguntas, ele só vê o que o agente responde com base nestes
-            4 textos — nenhum deles entra na classificação de urgência, por isso não têm variável.
+            Mensagens usadas na apresentação, nas respostas sobre a empresa, na conclusão da triagem e nos pedidos de
+            atendimento humano. Elas não entram na classificação de urgência.
           </p>
           {OFFFLOW_IDS.map((id) => {
             const q = offflowQuestions.find((x) => x.question_id === id);
@@ -741,6 +744,33 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                   <TextoComPreview value={q.text} rows={2} disabled={savingQ === q.id} variaveisRoteiro={variaveisRoteiro} onSave={(text) => saveQuestion(q, { text })} />
                 ) : (
                   <p style={{ color: 'var(--ink)', fontSize: 15 }}>“{q.text ? destacarTexto(q.text, variaveisRoteiro) : 'Sem texto cadastrado'}”</p>
+                )}
+                {q && id === 'necessidade_humana' && (
+                  <fieldset disabled={!canEdit || savingQ === q.id} style={{ marginTop: 14, border: '1px solid var(--line)', borderRadius: 8 }}>
+                    <legend>Variáveis mínimas obrigatórias</legend>
+                    <small style={{ display: 'block', color: 'var(--muted)', marginBottom: 10 }}>
+                      Selecione as variáveis que precisam aparecer no texto. Ao selecionar, o marcador é inserido na mensagem.
+                      Ela só será enviada se todas as selecionadas tiverem valor; o pedido será encaminhado ao humano mesmo se faltar algum dado.
+                    </small>
+                    {variaveisRoteiro.map((v) => (
+                      <label key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400 }}>
+                        <input
+                          type="checkbox"
+                          style={{ width: 'auto' }}
+                          checked={q.variaveis_obrigatorias.includes(v.id)}
+                          onChange={(e) => {
+                            const selected = e.target.checked;
+                            const token = `{${v.slug}}`;
+                            saveQuestion(q, {
+                              variaveis_obrigatorias: selected ? [...q.variaveis_obrigatorias, v.id] : q.variaveis_obrigatorias.filter((value) => value !== v.id),
+                              ...(selected && !q.text.includes(token) ? { text: `${q.text.trim()} ${token}`.trim() } : {}),
+                            });
+                          }}
+                        />
+                        {v.name} · {'{'}{v.slug}{'}'}
+                      </label>
+                    ))}
+                  </fieldset>
                 )}
                 {q && company.allow_transcription && (
                   <AudioDaPergunta api={api} companyId={company.id} question={q} canEdit={canEdit} onChange={atualizarPergunta} />

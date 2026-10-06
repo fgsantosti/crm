@@ -574,6 +574,8 @@ class VariavelRoteiroViewSet(TenantMixin, viewsets.ModelViewSet):
         variavel = self.get_object()
         if variavel.builtin:
             return Response({"detail": f"'{variavel.name}' é uma Variável de roteiro obrigatória e não pode ser excluída."}, status=400)
+        if variavel.mensagens_obrigatorias.exists():
+            return Response({"detail": "Essa variável é obrigatória na mensagem de Necessidade humana — remova-a do seletor antes de excluir."}, status=400)
         try:
             return super().destroy(request, *args, **kwargs)
         except ProtectedError:

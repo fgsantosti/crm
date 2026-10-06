@@ -87,6 +87,8 @@ export type Question = {
   ordem: number;
   /** Opcional: guarda a resposta desta pergunta pra reusar como placeholder ({slug}) em outro texto. */
   variavel_roteiro: number | null;
+  /** Variáveis mínimas exigidas no texto de Necessidade humana. */
+  variaveis_obrigatorias: number[];
   /** null = pergunta fixa (antes de o agente definir a área); com área = lista "{Área}-SPIN". */
   area: number | null;
   etapa_spin: '' | 'situacao' | 'problema' | 'implicacao' | 'necessidade';

@@ -96,7 +96,12 @@ class QualificationTests(TestCase):
         self.delivered(self.send())
         result = self.send("2", marker="REPETIR")
         self.assertEqual(result["question_id"], "apresentacao")
+        self.assertEqual(result["content"], "Por favor, responda novamente. Olá! Como posso ajudar?")
         self.assertEqual(Lead.objects.get().state, "apresentacao")
+    def test_q_repetido_tambem_inclui_prefixo(self):
+        self.delivered(self.send())
+        result = self.send("2", marker="Q", question_id="apresentacao")
+        self.assertEqual(result["content"], "Por favor, responda novamente. Olá! Como posso ajudar?")
     def test_atualizar_requires_proxima(self):
         self.delivered(self.send())
         self.assertTriagemReiniciada(self.send("2", marker="ATUALIZAR", fields={"nome": "Maria"}))
@@ -130,6 +135,7 @@ class QualificationTests(TestCase):
         for i in range(3):
             r = self.send(f"r{i}", marker="REPETIR")
             self.assertEqual(r["action"], "TEXTO")
+            self.assertEqual(r["content"].count("Por favor, responda novamente."), 1)
             self.delivered(r)
         self.assertEqual(status_contato(self.company, "+5585999999999")["repeticoes"], 3)
         self.assertTriagemReiniciada(self.send("r3", marker="REPETIR"))
@@ -150,6 +156,7 @@ class QualificationTests(TestCase):
         for i in range(3):
             r = self.send(f"a{i + 1}", marker="ATUALIZAR", fields={"proxima": "nome"})
             self.assertEqual(r["question_id"], "nome")
+            self.assertEqual(r["content"], "Por favor, responda novamente. Qual é o seu nome?")
             self.delivered(r)
         self.assertEqual(status_contato(self.company, "+5585999999999")["repeticoes"], 3)
         self.assertTriagemReiniciada(self.send("a4", marker="ATUALIZAR", fields={"proxima": "nome"}))
@@ -159,6 +166,7 @@ class QualificationTests(TestCase):
         r = self.send("v2", marker="REPETIR")
         self.assertEqual(r["action"], "TEXTO")
         self.assertEqual(r["question_id"], "validar")
+        self.assertEqual(r["content"], "Por favor, responda novamente. Posso confirmar seus dados?")
         self.assertEqual(Lead.objects.get().mode, "AUTOMÁTICO")
     def _peso_em_nome(self, peso=9):
         v = Variavel.objects.create(company=self.company, name="Urgência", peso=peso)
@@ -529,7 +537,7 @@ class QualificationTests(TestCase):
         # seed_roteiro_padrao: empresa nova já nasce com o mínimo pro funil funcionar.
         nova = Company.objects.get(pk=company_id)
         ids = set(Question.objects.filter(company=nova).values_list("question_id", flat=True))
-        self.assertEqual(ids, {"nome", "situacao", "demanda", "apresentacao", "empresa", "validar", "encerramento"})
+        self.assertEqual(ids, {"nome", "situacao", "demanda", "apresentacao", "empresa", "validar", "encerramento", "necessidade_humana"})
         self.assertTrue(Question.objects.filter(company=nova, question_id="nome", obrigatoria=True, variavel__isnull=False).exists())
         self.assertTrue(Question.objects.filter(company=nova, question_id="apresentacao", obrigatoria=True, variavel__isnull=True).exists())
         self.assertEqual(CompanyInfo.objects.filter(company=nova, obrigatorio=True).count(), 3)
@@ -2080,6 +2088,30 @@ class MensagensAudioTests(TestCase):
         self.assertEqual(body["audio_origem"], "gravado")
         self.assertTrue(body["audio_url"].startswith("http://testserver/media/roteiro_audio/"))
 
+    def test_repeticao_de_pergunta_gravada_fala_prefixo_via_tts(self):
+        self.q.audio_gravado.save("x.ogg", ContentFile(b"OggS"), save=True)
+        first = self.incoming().json()
+        Event.objects.filter(pk=first["event_id"]).update(delivery="SENT")
+        client = APIClient()
+        client.force_authenticate(self.agente)
+        with mock.patch("crm.audio.gerar_tts", return_value="tts/repetida.ogg") as gerar:
+            body = client.post(f"/api/companies/{self.company.id}/incoming/", {**self.payload("2"), "marker": "REPETIR"}, format="json").json()
+        expected = "Por favor, responda novamente. Olá, aqui é a Empresa Áudio.<br>Vamos começar?"
+        gerar.assert_called_once_with(expected, self.company.voz_tts)
+        self.assertEqual((body["action"], body["audio_origem"], body["content"]), ("AUDIO", "tts", expected))
+
+    def test_mensagem_humana_personalizada_fala_dados_via_tts(self):
+        question = Question.objects.create(company=self.company, question_id="necessidade_humana", text="{nome}, vou chamar um atendente.")
+        question.audio_gravado.save("humano.ogg", ContentFile(b"OggS"), save=True)
+        client = APIClient()
+        client.force_authenticate(self.agente)
+        with mock.patch("crm.audio.gerar_tts", return_value="tts/humano.ogg") as gerar:
+            body = client.post(f"/api/companies/{self.company.id}/incoming/", {
+                **self.payload(), "marker": "ATUALIZAR", "human_required": True, "reason": "pedido humano", "fields": {"nome": "Ana"},
+            }, format="json").json()
+        gerar.assert_called_once_with("Ana, vou chamar um atendente.", self.company.voz_tts)
+        self.assertEqual((body["action"], body["audio_origem"]), ("AUDIO", "tts"))
+
     def test_falha_de_tts_mantem_texto(self):
         with mock.patch("crm.audio.gerar_tts", side_effect=TimeoutError("lento")):
             body = self.incoming().json()
@@ -2506,3 +2538,128 @@ class BlacklistEFiltragemTests(TestCase):
         self.assertTrue(Lead.objects.filter(pk=assumido.pk).exists())
         corrigir(apps, SimpleNamespace(connection=connection))
         self.assertEqual(Lead.objects.count(), 2)
+
+
+class NecessidadeHumanaTests(TestCase):
+    def setUp(self):
+        from .services import seed_roteiro_padrao
+        self.company = Company.objects.create(name="Empresa Humano")
+        self.other = Company.objects.create(name="Outra Humano")
+        seed_roteiro_padrao(self.company)
+        self.question = Question.objects.get(company=self.company, question_id="necessidade_humana")
+        self.nome = self.company.variaveis_roteiro.get(slug="nome")
+        self.extra = VariavelRoteiro.objects.create(company=self.company, name="Idade", slug="idade")
+        self.user = get_user_model().objects.create_user(username="editor-humano", is_staff=True)
+        self.company.members.add(self.user)
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.url = f"/api/questions/{self.question.pk}/?company={self.company.pk}"
+
+    def send(self, mid="humano-1", **kwargs):
+        return receive(self.company, {
+            "contact": "+5585912345678", "message_id": mid, "kind": "text", "marker": "ATUALIZAR",
+            "question_id": "", "fields": {}, "human_required": True, "reason": "pedido humano", **kwargs,
+        })
+
+    def test_envia_mensagem_uma_vez_e_bloqueia_proximas_respostas(self):
+        result = self.send()
+        self.assertEqual((result["action"], result["question_id"]), ("TEXTO", "necessidade_humana"))
+        self.assertEqual(result["content"], self.question.text)
+        lead = Lead.objects.get()
+        self.assertEqual((lead.mode, lead.priority), ("HUMANO", "Alta"))
+        self.assertFalse(lead.bot_closed)
+        self.assertEqual(Event.objects.get(pk=result["event_id"]).delivery, "PENDING")
+        self.assertEqual(self.send()["action"], "NO_REPLY")
+        self.assertTrue(self.send()["duplicate"])
+        self.assertEqual(self.send("humano-2")["action"], "NO_REPLY")
+        self.assertEqual(Lead.objects.count(), 1)
+
+    def test_renderiza_dados_recebidos_no_mesmo_pedido(self):
+        self.question.text = "{nome}, idade {idade}: vou chamar um atendente."
+        self.question.save()
+        self.question.variaveis_obrigatorias.set([self.nome, self.extra])
+        result = self.send(fields={"nome": "Ana", "variaveis_roteiro": {"idade": "40 anos"}})
+        self.assertEqual(result["content"], "Ana, idade 40 anos: vou chamar um atendente.")
+        self.assertEqual(Lead.objects.get().variaveis_roteiro, {"idade": "40 anos"})
+
+    def test_variavel_sem_valor_nao_envia_mensagem_mas_encaminha(self):
+        self.question.text = "{nome}: vou chamar um atendente."
+        self.question.save()
+        self.question.variaveis_obrigatorias.set([self.nome])
+        result = self.send()
+        self.assertEqual(result["action"], "NO_REPLY")
+        self.assertEqual(Lead.objects.get().mode, "HUMANO")
+        event = Event.objects.get(pk=result["event_id"])
+        self.assertNotEqual(event.delivery, "PENDING")
+        self.assertIn("variável obrigatória ausente (nome)", event.summary)
+
+    def test_texto_invalido_via_admin_nao_e_enviado(self):
+        self.question.variaveis_obrigatorias.set([self.nome])
+        self.assertEqual(self.send(fields={"nome": "Ana"})["action"], "NO_REPLY")
+        self.assertEqual(Lead.objects.get().mode, "HUMANO")
+
+    def test_outros_motivos_nao_disparam_mensagem(self):
+        for index, reason in enumerate(["urgência ou risco", "fora de escopo", "falha de integração", "decisão profissional"]):
+            with self.subTest(reason=reason):
+                result = self.send(str(index), reason=reason, contact=f"+558591234568{index}")
+                self.assertEqual(result["action"], "NO_REPLY")
+
+    def test_api_valida_variaveis_no_texto_e_edicoes_parciais(self):
+        invalid = self.client.patch(self.url, {"variaveis_obrigatorias": [self.nome.pk]}, format="json")
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn("{nome}", invalid.json()["text"][0])
+        valid = self.client.patch(self.url, {"text": "{nome}, vou chamar um atendente.", "variaveis_obrigatorias": [self.nome.pk]}, format="json")
+        self.assertEqual(valid.status_code, 200)
+        self.assertEqual(valid.json()["variaveis_obrigatorias"], [self.nome.pk])
+        for text in ["Sem o marcador", ""]:
+            with self.subTest(text=text):
+                self.assertEqual(self.client.patch(self.url, {"text": text}, format="json").status_code, 400)
+        self.assertEqual(self.client.patch(self.url, {"variaveis_obrigatorias": [], "text": "Vou chamar um atendente."}, format="json").status_code, 200)
+
+    def test_variavel_de_outra_empresa_e_recusada(self):
+        other_variable = VariavelRoteiro.objects.create(company=self.other, name="Segredo", slug="segredo")
+        result = self.client.patch(self.url, {"text": "{segredo}", "variaveis_obrigatorias": [other_variable.pk]}, format="json")
+        self.assertEqual(result.status_code, 400)
+        self.assertIn("variaveis_obrigatorias", result.json())
+
+    def test_nao_exclui_nem_renomeia_mensagem_obrigatoria(self):
+        self.assertTrue(self.question.obrigatoria)
+        self.assertEqual(self.client.delete(self.url).status_code, 400)
+        self.assertEqual(self.client.patch(self.url, {"question_id": "outro_texto"}, format="json").status_code, 400)
+
+    def test_nao_exclui_variavel_selecionada(self):
+        self.question.variaveis_obrigatorias.set([self.extra])
+        url = f"/api/variaveis-roteiro/{self.extra.pk}/?company={self.company.pk}"
+        self.assertEqual(self.client.delete(url).status_code, 400)
+        self.question.variaveis_obrigatorias.clear()
+        self.assertEqual(self.client.delete(url).status_code, 204)
+
+    def test_seletor_nao_e_aceito_em_outros_textos(self):
+        question = Question.objects.get(company=self.company, question_id="apresentacao")
+        result = self.client.patch(f"/api/questions/{question.pk}/?company={self.company.pk}", {"variaveis_obrigatorias": [self.nome.pk]}, format="json")
+        self.assertEqual(result.status_code, 400)
+
+    def test_contexto_inclui_mensagem_e_slugs_obrigatorios_fora_do_fluxo(self):
+        from .services import contexto_agente
+        self.question.variaveis_obrigatorias.set([self.nome])
+        context = contexto_agente(self.company)
+        human = next(q for q in context["fora_do_fluxo"] if q["question_id"] == "necessidade_humana")
+        self.assertEqual(human["variaveis_obrigatorias"], ["nome"])
+        self.assertNotIn("necessidade_humana", [q["question_id"] for q in context["perguntas"]])
+
+    def test_migracao_e_seed_preservam_texto_existente(self):
+        from importlib import import_module
+        from django.apps import apps
+        from django.db import connection
+        from types import SimpleNamespace
+        from .services import seed_roteiro_padrao
+        self.question.text = "Texto aprovado pela empresa"
+        self.question.save()
+        migration = import_module("crm.migrations.0033_necessidade_humana")
+        for _ in range(2):
+            migration.seed_necessidade_humana(apps, SimpleNamespace(connection=connection))
+            seed_roteiro_padrao(self.company)
+        self.question.refresh_from_db()
+        self.assertEqual(self.question.text, "Texto aprovado pela empresa")
+        self.assertEqual(Question.objects.filter(question_id="necessidade_humana").count(), 2)
+        self.assertTrue(Question.objects.get(company=self.other, question_id="necessidade_humana").obrigatoria)

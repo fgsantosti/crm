@@ -43,9 +43,11 @@ MANDATORY_QUESTION_IDS = ["nome", "situacao", "demanda"]
 
 # Textos fora do fluxo de triagem: apresentação (1ª mensagem, question_id = initial_state
 # padrão), fallback sobre a empresa (perguntas livres durante o fluxo), confirmação dos
-# dados coletados (VALIDAR) e encerramento (CLASSIFICADO). Não contam resposta do lead
+# dados coletados (VALIDAR), encerramento (CLASSIFICADO) e necessidade humana.
+# Não contam resposta do lead
 # pra classificação, então não ficam atreladas a uma Variavel (ver QuestionSerializer).
-MANDATORY_OFFFLOW_QUESTION_IDS = ["apresentacao", "empresa", "validar", "encerramento"]
+MANDATORY_OFFFLOW_QUESTION_IDS = ["apresentacao", "empresa", "validar", "encerramento", "necessidade_humana"]
+DEFAULT_HUMAN_MESSAGE = "Entendido. Vou encaminhar seu pedido para um atendente humano."
 
 class Variavel(models.Model):
     """Variável que a empresa define pra orientar a classificação de urgência
@@ -95,7 +97,7 @@ class Question(models.Model):
     situacao e demanda. Toda pergunta do FLUXO (obrigatória ou não) fica
     sempre atrelada a uma Variavel com peso, nunca null (on_delete=PROTECT:
     não dá pra apagar uma variável ainda em uso por uma pergunta) -- exceto
-    os 4 textos fora do fluxo (MANDATORY_OFFFLOW_QUESTION_IDS), que não
+    os textos fora do fluxo (MANDATORY_OFFFLOW_QUESTION_IDS), que não
     coletam resposta classificável e por isso não têm Variavel.
     """
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
@@ -113,6 +115,10 @@ class Question(models.Model):
     variavel_roteiro = models.ForeignKey(
         VariavelRoteiro, on_delete=models.PROTECT, related_name="perguntas", null=True, blank=True,
         help_text="Opcional: guarda a resposta desta pergunta pra reusar como placeholder em outro texto do roteiro. Fixo nas 3 obrigatórias, opcional (via checkbox) nas demais.",
+    )
+    variaveis_obrigatorias = models.ManyToManyField(
+        VariavelRoteiro, blank=True, related_name="mensagens_obrigatorias",
+        help_text="Variáveis que devem constar no texto de Necessidade humana e ter valor para a mensagem ser enviada.",
     )
     # SPIN por área: null = pergunta fixa (feita para todos antes de o agente definir a área);
     # com área = pergunta da lista "{Área}-SPIN", feita só depois que o lead é classificado nela.

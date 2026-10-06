@@ -147,6 +147,19 @@ roteiro. `human_required: true` continua valendo: `fora de escopo` desqualifica
 com prioridade Baixa; `falha de integração` remove a triagem; os outros motivos
 transferem para humano. Números na BlackList sempre retornam `NO_REPLY`, sem lead/evento.
 
+**Pedido explícito de atendimento humano:** `human_required=true` com
+`reason="pedido humano"` transfere o lead e devolve uma única saída de
+`question_id="necessidade_humana"`. Essa mensagem obrigatória fica em
+Roteiro → Textos fora do fluxo e pode exigir variáveis de roteiro via o campo
+`variaveis_obrigatorias` de `/questions/` (lista de IDs da mesma empresa).
+O texto só é aceito se incluir os placeholders selecionados. No envio, todos
+eles precisam ter valor coletado; caso contrário, o CRM transfere o contato
+e retorna `NO_REPLY`, registrando o dado ausente no evento. Campos de dados
+coletados podem acompanhar o pedido em `fields`; isso não classifica o lead.
+Envie a saída e confirme a entrega normalmente; mensagens seguintes ficam
+bloqueadas pelo modo HUMANO. Não use `Q:necessidade_humana` nem essa ID como
+`proxima`: ela é exclusiva desse encaminhamento.
+
 - `action="NO_REPLY"` → **não envie nada ao contato**, nem literalmente a
   palavra NO_REPLY. Acontece em mensagem duplicada, lead já encerrado/em
   atendimento humano, entrega anterior ainda pendente, ou falta de
@@ -227,7 +240,7 @@ mensagem real (não reaproveitável entre mensagens diferentes).
 | Marcador | O que mandar em `fields` | O que o CRM faz |
 | --- | --- | --- |
 | `[[AXIOMA:Q:<id>]]` | nada (`question_id` vai fora de `fields`) | marca o lead nesse `question_id` e devolve o conteúdo aprovado dele |
-| `[[AXIOMA:REPETIR]]` | nada | reenvia o conteúdo da pergunta atual do lead (sem avançar) |
+| `[[AXIOMA:REPETIR]]` | nada | reenvia o conteúdo da pergunta atual com o prefixo "Por favor, responda novamente. " (sem avançar) |
 | `[[AXIOMA:ATUALIZAR:{...}]]` | os campos conhecidos + **`proxima`** (obrigatório, um `question_id` cadastrado pela empresa na tela Roteiro) | grava os campos, avança o lead para `proxima`, devolve o conteúdo dela |
 | `[[AXIOMA:VALIDAR:{...}]]` | os campos conhecidos (sem `proxima`) | grava os campos, devolve a pergunta de confirmação fixa (`question_id="validar"`) |
 | `[[AXIOMA:CLASSIFICADO:{...}]]` | **`notas`** (recomendado) **ou** `temperatura` + `prioridade` (sem `proxima`). Com `"encerramento_antecipado": true`, pode vir antes do `VALIDAR`, com notas parciais ou nenhuma | Após `VALIDAR`, grava os campos finais, encerra o bot e devolve `question_id="encerramento"`. Desqualificado/Desconfiado recebem desfecho automático, ficam fora do Kanban e liberam o número imediatamente. Encerramento antecipado ou ausência de `VALIDAR` remove a triagem e retorna `NO_REPLY` com `lead_apagado=true`, sem promover notas parciais a Qualificados. |
@@ -288,7 +301,10 @@ Use para conduzir o roteiro **na ordem configurada pela empresa** na tela
     {"question_id": "nome", "ordem": 0, "texto": "Qual é o seu nome completo?", "obrigatoria": true,
      "variavel": {"nome": "Geral", "peso": 5}, "variavel_roteiro": "nome"}
   ],
-  "fora_do_fluxo": [{"question_id": "apresentacao", "texto": "Olá! ..."}],  // apresentacao, empresa, validar, encerramento
+  "fora_do_fluxo": [
+    {"question_id": "apresentacao", "texto": "Olá! ..."},
+    {"question_id": "necessidade_humana", "texto": "{nome}, vou chamar um atendente.", "variaveis_obrigatorias": ["nome"]}
+  ],  // apresentacao, empresa, validar, encerramento, necessidade_humana
   "faixas_urgencia": [
     {"min": 0, "max_exclusivo": 3, "temperatura": "Desqualificado"},
     {"min": 3, "max_exclusivo": 5, "temperatura": "Desconfiado"},
@@ -304,6 +320,10 @@ etapa pergunta — o que o contato recebe continua sendo sempre o `content`
 devolvido por `/incoming/`. Mensagem cujo `contact` é o próprio
 `numero_agente` volta `{"action": "NO_REPLY", "proprio_numero": true}` sem
 `lead_id`/`event_id` (não há entrega a confirmar).
+
+Perguntas repetidas usam o prefixo também em áudio. Quando há gravação própria,
+o CRM usa TTS do conteúdo completo na repetição. O mesmo vale para Necessidade
+humana com placeholders, para que a fala inclua os dados reais do contato.
 
 ### 2.1.1 Perguntas fixas e SPIN por área
 

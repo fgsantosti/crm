@@ -117,6 +117,7 @@ class QuestionSerializer(serializers.ModelSerializer):
     # null=True no modelo (ver validate() abaixo pra regra condicional real).
     variavel = serializers.PrimaryKeyRelatedField(queryset=Variavel.objects.all(), required=False, allow_null=True)
     variavel_roteiro = serializers.PrimaryKeyRelatedField(queryset=VariavelRoteiro.objects.all(), required=False, allow_null=True)
+    variaveis_obrigatorias = serializers.PrimaryKeyRelatedField(queryset=VariavelRoteiro.objects.all(), many=True, required=False)
     area = serializers.PrimaryKeyRelatedField(queryset=Area.objects.all(), required=False, allow_null=True)
     class Meta:
         model = Question
@@ -176,6 +177,23 @@ class QuestionSerializer(serializers.ModelSerializer):
             attrs["etapa_spin"] = ""
     def validate(self, attrs):
         question_id = attrs.get("question_id") or (self.instance.question_id if self.instance else "")
+        if self.instance and self.instance.question_id in MANDATORY_QUESTION_IDS + MANDATORY_OFFFLOW_QUESTION_IDS and question_id != self.instance.question_id:
+            raise serializers.ValidationError({"question_id": "O identificador de uma pergunta obrigatória não pode ser alterado."})
+        required = attrs.get("variaveis_obrigatorias", list(self.instance.variaveis_obrigatorias.all()) if self.instance else [])
+        if required and question_id != "necessidade_humana":
+            raise serializers.ValidationError({"variaveis_obrigatorias": "Este seletor é exclusivo da mensagem de Necessidade humana."})
+        company = self.context.get("company")
+        if company and any(v.company_id != company.pk for v in required):
+            raise serializers.ValidationError({"variaveis_obrigatorias": "Variável de roteiro não pertence a esta empresa."})
+        if question_id == "necessidade_humana":
+            text = attrs.get("text", self.instance.text if self.instance else "")
+            if not text.strip():
+                raise serializers.ValidationError({"text": "Cadastre a mensagem de Necessidade humana."})
+            missing = ["{" + v.slug + "}" for v in required if "{" + v.slug + "}" not in text]
+            if missing:
+                raise serializers.ValidationError({"text": "Inclua as variáveis obrigatórias: " + ", ".join(missing)})
+        if question_id in MANDATORY_QUESTION_IDS + MANDATORY_OFFFLOW_QUESTION_IDS:
+            attrs["obrigatoria"] = True
         self._validar_spin(attrs, question_id, question_id in MANDATORY_OFFFLOW_QUESTION_IDS)
         is_offflow = question_id in MANDATORY_OFFFLOW_QUESTION_IDS
         variavel = attrs.get("variavel", self.instance.variavel if self.instance else None)

@@ -180,6 +180,19 @@ Mude para `Modo de atendimento=HUMANO` e não responda automaticamente quando ho
 
 Registre a ocorrência, atualize `Responsável`, `Prioridade` e `Próxima ação`. Não retome a automação sem comando privado autorizado.
 
+No pedido explícito de humano, emita `ATUALIZAR` com `human_required=true` e
+`reason="pedido humano"`. O CRM muda o modo para HUMANO e devolve uma única
+mensagem aprovada de `necessidade_humana`, configurada na aba "Textos fora do
+fluxo". Envie essa saída e confirme a entrega normalmente. As variáveis
+selecionadas como obrigatórias precisam constar no texto e ter valor coletado;
+se faltar alguma, o CRM encaminha o contato e retorna `NO_REPLY`. Não colete
+novos dados para adiar o encaminhamento. Depois dessa saída, mantenha silêncio.
+`necessidade_humana` não é uma etapa do funil nem um `proxima` válido.
+
+Ao repetir a pergunta atual, o CRM acrescenta ao conteúdo aprovado o prefixo
+"Por favor, responda novamente. ". Envie a saída devolvida pelo CRM; quando o
+áudio estiver ativo, o CRM usa TTS para incluir o prefixo na fala.
+
 ### Lead que nunca encerra
 
 Se a conversa morrer no meio do roteiro (contato some, fica ambíguo demais pra sempre, ou

@@ -12,12 +12,12 @@ from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.authtoken.models import Token
 from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
-from .models import Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
+from .models import Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, DEFAULT_HUMAN_MESSAGE
 
 logger = logging.getLogger(__name__)
 
 NO_REPLY = {"action": "NO_REPLY"}
-RESERVED_QUESTION_IDS = {"validar", "encerramento"}
+RESERVED_QUESTION_IDS = {"validar", "encerramento", "necessidade_humana"}
 
 # question_id -> (nome de exibição, slug/placeholder fixo) das 3 Variáveis de roteiro
 # builtin: reaproveitam os placeholders já existentes (FIELD_MAP), sem precisar de
@@ -31,8 +31,8 @@ BUILTIN_VARIAVEL_ROTEIRO = {
 def seed_roteiro_padrao(company):
     """Garante o mínimo pra uma empresa nova conseguir operar o funil: a Variavel
     padrão, as 3 perguntas obrigatórias de triagem (nome/situacao/demanda) já
-    atreladas às suas Variáveis de roteiro builtin, os 4 textos fora do fluxo
-    (apresentacao/empresa/validar/encerramento) e os 3 campos obrigatórios de Dados
+    atreladas às suas Variáveis de roteiro builtin, os textos fora do fluxo
+    (apresentacao/empresa/validar/encerramento/necessidade_humana) e os 3 campos obrigatórios de Dados
     da empresa. Chamado na criação de empresa (AdminCompanyViewSet) e pela migração
     0012/0014 pras empresas que já existiam antes dessas features."""
     variavel, _ = Variavel.objects.get_or_create(company=company, name="Geral", defaults={"peso": 5})
@@ -41,7 +41,10 @@ def seed_roteiro_padrao(company):
         vr, _ = VariavelRoteiro.objects.get_or_create(company=company, slug=slug, defaults={"name": label, "builtin": True})
         Question.objects.get_or_create(company=company, question_id=question_id, defaults={"obrigatoria": True, "variavel": variavel, "ordem": ordem, "variavel_roteiro": vr})
     for question_id in MANDATORY_OFFFLOW_QUESTION_IDS:
-        Question.objects.get_or_create(company=company, question_id=question_id, defaults={"obrigatoria": True, "variavel": None})
+        Question.objects.get_or_create(company=company, question_id=question_id, defaults={
+            "obrigatoria": True, "variavel": None,
+            "text": DEFAULT_HUMAN_MESSAGE if question_id == "necessidade_humana" else "",
+        })
     for title in CompanyInfo.MANDATORY_TITLES:
         CompanyInfo.objects.get_or_create(company=company, title=title, defaults={"obrigatorio": True})
 
@@ -199,7 +202,20 @@ def _spin_fora_da_area(company, lead, question_id):
     return (lead.especialidade or "") != q.area.name
 
 MAX_REPETICOES = 3
+REPEAT_PREFIX = "Por favor, responda novamente. "
 JANELA_ENTREGA_PENDENTE = timedelta(seconds=90)
+
+def mensagem_necessidade_humana(company, lead, event):
+    question = Question.objects.filter(company=company, question_id="necessidade_humana").first()
+    if not question or not question.text.strip():
+        return dict(NO_REPLY)
+    for variable in question.variaveis_obrigatorias.all():
+        token = "{" + variable.slug + "}"
+        if token not in question.text or not render_text(token, lead, company).strip():
+            event.summary += f"; mensagem não enviada: variável obrigatória ausente ({variable.slug})"
+            return dict(NO_REPLY)
+    event.delivery = "PENDING"
+    return {"action": "TEXTO", "content": render_text(question.text, lead, company), "question_id": question.question_id}
 
 def contar_repeticoes(lead, excluir_pk=None):
     """REPETIR consecutivos desde o último marcador que não foi REPETIR."""
@@ -273,8 +289,17 @@ def receive(company, data):
     elif data["human_required"] and data["reason"] == "falha de integração":
         apagar_lead, motivo_apagar = True, "Agente sinalizou falha de integração"
     elif data["human_required"]:
+        if data["reason"] == "pedido humano":
+            # Aproveita dados identificados nesta mesma mensagem, sem continuar o funil.
+            fields = data.get("fields") or {}
+            collected = {key: value for key, value in fields.items() if key in {
+                "nome", "especialidade", "tema", "impacto", "interesse", "variaveis_roteiro",
+            }}
+            apply_fields(lead, company, collected)
         escalate(lead, data["reason"])
         event.summary = f"Encaminhado para atendimento humano: {data['reason']}"
+        if data["reason"] == "pedido humano":
+            result = mensagem_necessidade_humana(company, lead, event)
     elif pendentes.filter(created_at__gte=timezone.now() - JANELA_ENTREGA_PENDENTE).exists():
         # Contato mandou várias mensagens em sequência enquanto a resposta anterior ainda
         # está saindo: ignora esta sem escalar (escalar aqui travava o lead em HUMANO).
@@ -299,7 +324,10 @@ def receive(company, data):
             question_id = None
         elif marker == "Q":
             question_id = data["question_id"]
-            if not question_id:
+            if question_id == "necessidade_humana":
+                event.summary = "Necessidade humana só é enviada ao identificar pedido humano"
+                question_id = None
+            elif not question_id:
                 apagar_lead, motivo_apagar = True, "Marcador Q sem question_id: revisar integração do agente"
                 question_id = None
             elif _spin_fora_da_area(company, lead, question_id):
@@ -331,7 +359,7 @@ def receive(company, data):
                     apagar_lead, motivo_apagar = True, "ATUALIZAR sem 'proxima': configurar roteiro aprovado"
                     question_id = None
                 elif question_id in RESERVED_QUESTION_IDS:
-                    apagar_lead, motivo_apagar = True, f"'{question_id}' é reservado (validar/encerramento não são 'proxima' válidos): revisar fluxo do agente"
+                    apagar_lead, motivo_apagar = True, f"'{question_id}' é reservado e não é uma 'proxima' válida: revisar fluxo do agente"
                     question_id = None
                 elif _spin_fora_da_area(company, lead, question_id):
                     # apply_fields já rodou: uma especialidade enviada neste mesmo ATUALIZAR vale.
@@ -398,6 +426,10 @@ def receive(company, data):
                 if not asset:
                     escalate(lead, "Configurar texto aprovado (vazio) no Roteiro")
                 else:
+                    anterior = Event.objects.filter(lead=lead, delivery__in=["SENT", "PENDING", "EXPIRADO"]).exclude(pk=event.pk).order_by("-created_at", "-pk").first()
+                    mesma_mensagem = anterior and anterior.result.get("question_id") == question_id and anterior.result.get("content", "").removeprefix(REPEAT_PREFIX) == asset
+                    if event.marker == "REPETIR" or mesma_mensagem:
+                        asset = REPEAT_PREFIX + asset
                     result = {"action": "TEXTO", "content": asset, "question_id": question_id}
                     event.delivery = "PENDING"
         lead.save()
@@ -426,7 +458,11 @@ def aplicar_audio(company, result, url_absoluta):
         return result
     question = Question.objects.filter(company=company, question_id=result.get("question_id")).first()
     try:
-        if question and question.audio_gravado:
+        # A gravação fixa não contém o prefixo de repetição nem os valores dos placeholders.
+        # Nesses casos o TTS deve falar o conteúdo efetivamente renderizado pelo CRM.
+        repetida = result["content"].startswith(REPEAT_PREFIX)
+        personalizada_humana = question and question.question_id == "necessidade_humana" and bool(re.search(r"\{[a-zA-Z_][a-zA-Z_0-9]*\}", question.text))
+        if question and question.audio_gravado and not repetida and not personalizada_humana:
             caminho, origem = question.audio_gravado.name, "gravado"
         else:
             caminho, origem = audio.gerar_tts(result["content"], company.voz_tts), "tts"
@@ -987,7 +1023,10 @@ def contexto_agente(company):
         if not (q.text or "").strip():
             continue
         if q.question_id in MANDATORY_OFFFLOW_QUESTION_IDS:
-            fora_do_fluxo.append({"question_id": q.question_id, "texto": q.text})
+            item = {"question_id": q.question_id, "texto": q.text}
+            if q.question_id == "necessidade_humana":
+                item["variaveis_obrigatorias"] = list(q.variaveis_obrigatorias.values_list("slug", flat=True))
+            fora_do_fluxo.append(item)
             continue
         item = {
             "question_id": q.question_id,
