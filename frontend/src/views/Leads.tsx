@@ -135,6 +135,7 @@ function UrgenciaDetalhe({ lead }: { lead: Lead }) {
 export function Leads({ api, company, role, me }: { api: Api; company: Company; role: 'atendente' | 'empresa' | 'admin'; me: Me }) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [search, setSearch] = useState('');
+  const [mostrarNovasLeads, setMostrarNovasLeads] = useState(true);
   const [selected, setSelected] = useState<Lead | null>(null);
   const [events, setEvents] = useState<LeadEvent[]>([]);
   const [busy, setBusy] = useState(false);
@@ -267,6 +268,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
 
 
   const visible = leadsVisiveisNoKanban(leads).filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()));
+  const visibleColumns = COLUMNS.filter((col) => mostrarNovasLeads || col.key !== 'novos');
 
   function orderedItems(key: ColumnKey) {
     return ordenarColuna(key, visible.filter((l) => columnOf(l) === key));
@@ -360,15 +362,21 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
       <section className="panel" style={{ padding: 0 }}>
         <div className="panel-toolbar">
           <h2>Central de leads</h2>
-          <input placeholder="Buscar nome ou telefone" aria-label="Buscar leads" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <div className="leads-toolbar-controls">
+            <label className="leads-visibility-toggle">
+              <input type="checkbox" checked={mostrarNovasLeads} onChange={(e) => setMostrarNovasLeads(e.target.checked)} />
+              Mostrar novas leads
+            </label>
+            <input placeholder="Buscar nome ou telefone" aria-label="Buscar leads" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
         </div>
         {busy && !visible.length ? (
           <div style={{ padding: '18px 24px' }}>
-            <SkeletonCards count={5} height={90} />
+            <SkeletonCards count={visibleColumns.length} height={90} />
           </div>
         ) : (
           <div className="kanban">
-            {COLUMNS.map((col) => {
+            {visibleColumns.map((col) => {
               const items = orderedItems(col.key);
               return (
                 <div
