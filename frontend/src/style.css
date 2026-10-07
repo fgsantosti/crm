@@ -228,6 +228,12 @@ tr:hover td { background: #FBF1E7; }
 .step-list { display: flex; flex-direction: column; gap: 14px; border: 1px solid var(--line); border-radius: 16px; padding: 14px; background: var(--panel-muted); }
 .step-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px 24px; }
 .step-tag { font-family: 'DM Mono', monospace; font-size: 12.5px; background: var(--panel-muted); color: #5C4E3F; padding: 4px 10px; border-radius: 7px; }
+.step-tag { max-width: 100%; overflow-wrap: anywhere; }
+.roteiro-variable-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 20px; }
+.profile-field-actions input { min-width: 0; }
+.profile-summary, .profile-fields { overflow-wrap: anywhere; }
+.panel-toolbar > *, .section-head > *, .fields > *, .detail-head > * { min-width: 0; }
+.panel-toolbar { gap: 12px; }
 .step-handle {
   display: flex; align-items: center; gap: 8px; cursor: grab; user-select: none; touch-action: none;
   padding: 4px 10px 4px 6px; border-radius: 8px; background: var(--panel-muted); color: var(--muted);
@@ -269,8 +275,22 @@ tr:hover td { background: #FBF1E7; }
 .kv-row { display: flex; justify-content: space-between; font-size: 13px; }
 
 @media (max-width: 900px) {
+  .login-form-side, .login-illustration-side { min-width: 0; max-width: 100%; }
+  .login-form-side { min-height: 100dvh; padding: 24px; }
+  .login-illustration-side { min-height: 320px; padding: 32px 24px; }
+  .login-form-side h1 { font-size: 36px; }
   .shell { flex-direction: column; flex-wrap: nowrap; }
-  .sidebar { flex-basis: auto; padding: 18px; gap: 15px; }
+  .sidebar { flex-basis: auto; min-width: 0; width: 100%; padding: 16px; gap: 12px; display: grid; grid-template-columns: minmax(0,1fr) auto; }
+  .sidebar .brand { grid-column: 1; grid-row: 1; gap: 8px; font-size: 20px; }
+  .sidebar-actions { grid-column: 2; grid-row: 1; }
+  .sidebar-actions > .logout { flex: none !important; padding: 8px 10px; font-size: 12px; }
+  .sidebar .workspace, .sidebar nav { grid-column: 1 / -1; min-width: 0; }
+  .company-pill { min-width: 0; max-width: 100%; width: 100%; }
+  .sidebar .role-pill { justify-self: start; max-width: 100%; overflow-wrap: anywhere; }
+  .sidebar nav { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }
+  .sidebar nav button { min-width: 0; gap: 8px; padding: 10px; font-size: 13px; }
+  .sidebar nav button > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+  .nav-count { flex-shrink: 0; }
   .sidebar-note { display: none; }
   nav { flex-direction: row; flex-wrap: wrap; }
   .main { padding: 20px; }
@@ -279,6 +299,41 @@ tr:hover td { background: #FBF1E7; }
   .fields { grid-template-columns: 1fr; }
   .admin-body { flex-direction: column; }
   .admin-detail { border-left: 0; border-top: 1px solid var(--line); }
+  .admin-top { padding: 16px; }
+  .admin-top-left { flex-wrap: wrap; min-width: 0; }
+  .admin-main, .admin-detail { width: 100%; min-width: 0; padding: 20px; }
+  .roteiro-variable-grid { grid-template-columns: minmax(0,1fr); }
+  .roteiro-variable-row { flex-wrap: wrap; }
+  .roteiro-variable-row > input { flex: 1 1 100% !important; min-width: 0; }
+  .panel-toolbar > div { flex-wrap: wrap; }
+  .page-header > div { min-width: 0; max-width: 100%; flex-wrap: wrap; }
+  .page-header input { min-width: 0; max-width: 100%; }
+  .detail-head { flex-wrap: wrap; gap: 12px; }
+  .step-card, .step-list { padding: 16px; }
+  .step-card { overflow-wrap: anywhere; }
+  fieldset { min-width: 0; max-width: 100%; }
+  .token-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  label { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .legend { min-width: 0; }
+  .search-field { min-width: 0; max-width: 100%; }
+}
+
+@media (max-width: 600px) {
+  .profile-overlay { padding: 12px !important; }
+  .profile-panel { max-height: calc(100dvh - 24px) !important; flex-direction: column; flex-wrap: nowrap !important; }
+  .profile-close { position: sticky !important; top: 12px !important; right: auto !important; margin: 12px 12px -42px auto; align-self: flex-end; flex-shrink: 0; }
+  .profile-summary { width: 100% !important; padding: 32px 20px 16px !important; }
+  .profile-fields { flex: none !important; width: 100%; padding: 24px 18px !important; }
+  .profile-field-actions { flex-wrap: wrap; }
+  .profile-field-actions input { flex: 1 1 100% !important; }
+  .profile-field-actions button { flex: 1; }
+  .profile-panel > form { padding: 40px 18px 24px !important; }
+  .profile-panel form > div { flex-wrap: wrap; }
+  .filters-bar { padding: 12px; }
+  .select-field, .select-field select { max-width: 100%; min-width: 0; }
+  .tiles { gap: 10px; }
+  .tile { padding: 16px 12px; }
+  h1 { overflow-wrap: anywhere; }
 }
 
 /* TRANSIÇÕES, LOADING E SKELETONS (deslizam de baixo pra cima) */

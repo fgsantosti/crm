@@ -87,6 +87,8 @@ export type Question = {
   variavel: number;
   /** nome/situacao/demanda — fixas em todo roteiro, não podem ser excluídas. */
   obrigatoria: boolean;
+  /** Enviar a pergunta SPIN mesmo quando todos os dados de classificação já foram capturados. */
+  envio_obrigatorio: boolean;
   ordem: number;
   /** Opcional: guarda a resposta desta pergunta pra reusar como placeholder ({slug}) em outro texto. */
   variavel_roteiro: number | null;

@@ -58,7 +58,7 @@ export function AdminSidebar({
         ))}
       </nav>
       <p className="sidebar-note">Visão agregada de toda a plataforma — nenhum workspace de empresa específica.</p>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div className="sidebar-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <ProfileMenu
           api={api}
           me={me}

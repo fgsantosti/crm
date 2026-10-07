@@ -233,3 +233,75 @@ class AgentOptionsTests(TestCase):
         Lead.objects.filter(contact=self.contact).update(name="Joana Silva")
         status = self.client.get(url, {"contact": self.contact}).json()
         self.assertEqual(status["campos"]["nome"], "Joana Silva")
+
+    def test_checkbox_de_envio_obrigatorio_persiste_e_so_vale_na_spin(self):
+        question = self.spin[-1]
+        url = f"/api/questions/{question.pk}/?company={self.company.pk}"
+        response = self.client.patch(url, {"envio_obrigatorio": True}, format="json")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["envio_obrigatorio"])
+        item = contexto_agente(self.company)["spin"]["Consumidor"][-1]
+        self.assertTrue(item["envio_obrigatorio"])
+        self.assertEqual(self.client.patch(url, {"text": " "}, format="json").status_code, 400)
+        fixed = Question.objects.get(company=self.company, question_id="nome")
+        self.assertEqual(self.client.patch(f"/api/questions/{fixed.pk}/?company={self.company.pk}", {"envio_obrigatorio": True}, format="json").status_code, 400)
+        response = self.client.patch(url, {"envio_obrigatorio": False}, format="json")
+        self.assertFalse(response.json()["envio_obrigatorio"])
+
+    def test_dados_completos_enviam_obrigatoria_antes_de_classificar_e_preservam_notas(self):
+        Question.objects.filter(pk=self.spin[-1].pk).update(envio_obrigatorio=True)
+        result = self.send("CLASSIFICADO", contact_name="Joana Perfil", fields={"tema": "Desconto", "notas": {"spin_situacao": 8}})
+        self.assertEqual(result["question_id"], "spin_necessidade")
+        lead = Lead.objects.get(contact=self.contact)
+        self.assertFalse(lead.bot_closed)
+        self.assertEqual(lead.demand, "Desconto")
+        self.assertEqual(lead.urgencia_detalhe["notas"], {"spin_situacao": 8})
+        result = self.send("CLASSIFICADO", fields={"notas": {"spin_necessidade": 8}})
+        self.assertEqual(result["action"], "NO_REPLY")
+        lead.refresh_from_db()
+        self.assertTrue(lead.bot_closed)
+        self.assertEqual(lead.temperature, "Qualificado")
+        self.assertEqual(lead.urgencia_detalhe["score"], 8)
+        self.assertEqual(set(lead.urgencia_detalhe["notas"]), {"spin_situacao", "spin_necessidade"})
+
+    def test_todas_obrigatorias_sao_enviadas_em_ordem_sem_repetir_as_ja_enviadas(self):
+        Question.objects.filter(pk__in=[self.spin[1].pk, self.spin[3].pk]).update(envio_obrigatorio=True)
+        result = self.send("ATUALIZAR", contact_name="Joana", fields={"tema": "Desconto", "proxima": "spin_implicacao", "notas": {"spin_situacao": 8}})
+        self.assertEqual(result["question_id"], "spin_problema")
+        result = self.send("CLASSIFICADO", fields={"notas": {"spin_problema": 8}})
+        self.assertEqual(result["question_id"], "spin_necessidade")
+        self.assertFalse(Lead.objects.get(contact=self.contact).bot_closed)
+        result = self.send("CLASSIFICADO", fields={"notas": {"spin_necessidade": 8}})
+        self.assertEqual(result["action"], "NO_REPLY")
+        self.assertTrue(Lead.objects.get(contact=self.contact).bot_closed)
+
+    def test_status_bloqueia_classificacao_ate_entrega_da_obrigatoria(self):
+        Question.objects.filter(pk=self.spin[-1].pk).update(envio_obrigatorio=True)
+        result = self.send("ATUALIZAR", contact_name="Joana", fields={"tema": "Desconto", "proxima": "spin_situacao"})
+        self.assertEqual(result["question_id"], "spin_necessidade")
+        Event.objects.filter(pk=result["event_id"]).update(delivery="FAILED")
+        url = f"/api/companies/{self.company.pk}/agente/contato/"
+        status = self.client.get(url, {"contact": self.contact}).json()
+        self.assertFalse(status["pode_classificar"])
+        self.assertEqual(status["perguntas_obrigatorias_pendentes"], ["spin_necessidade"])
+        result = self.send("CLASSIFICADO", fields={"notas": {"spin_necessidade": 8}})
+        self.assertEqual(result["question_id"], "spin_necessidade")
+        status = self.client.get(url, {"contact": self.contact}).json()
+        self.assertEqual(status["perguntas_obrigatorias_pendentes"], [])
+        self.assertTrue(status["pode_classificar"])
+
+    def test_obrigatoria_de_outra_area_nao_bloqueia_classificacao(self):
+        Question.objects.filter(company=self.company, question_id="outro_spin").update(envio_obrigatorio=True)
+        result = self.send("CLASSIFICADO", contact_name="Joana", fields={"tema": "Desconto", "notas": {"spin_situacao": 8}})
+        self.assertEqual(result["action"], "NO_REPLY")
+        self.assertTrue(Lead.objects.get(contact=self.contact).bot_closed)
+
+    def test_spin_apos_perguntas_fixas_tambem_respeita_envio_obrigatorio(self):
+        self.company.etapa_inicial = False
+        self.company.save()
+        Question.objects.filter(pk=self.spin[-1].pk).update(envio_obrigatorio=True)
+        result = self.send("CLASSIFICADO", fields={"nome": "Joana", "tema": "Desconto", "especialidade": "Consumidor", "notas": {"spin_situacao": 8}})
+        self.assertEqual(result["question_id"], "spin_necessidade")
+        self.assertFalse(Lead.objects.get(contact=self.contact).bot_closed)
+        self.send("CLASSIFICADO", fields={"notas": {"spin_necessidade": 8}})
+        self.assertTrue(Lead.objects.get(contact=self.contact).bot_closed)

@@ -156,6 +156,7 @@ export function ProfileMenu({
       {open &&
         createPortal(
           <div
+            className="profile-overlay"
             onMouseDown={(e) => {
               if (e.target === e.currentTarget) close();
             }}
@@ -172,13 +173,17 @@ export function ProfileMenu({
             }}
           >
             <div
-              className="panel"
+              className="panel profile-panel"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Editar perfil"
               style={{
                 position: 'relative',
                 width: 680,
                 maxWidth: '100%',
                 padding: 0,
-                overflow: 'hidden',
+                overflow: 'auto',
+                maxHeight: 'calc(100dvh - 40px)',
                 borderRadius: 20,
                 boxShadow: '0 32px 70px rgba(0,0,0,0.4)',
                 display: 'flex',
@@ -189,6 +194,7 @@ export function ProfileMenu({
                 type="button"
                 onClick={close}
                 aria-label="Fechar"
+                className="profile-close"
                 style={{
                   position: 'absolute',
                   top: 14,
@@ -213,6 +219,7 @@ export function ProfileMenu({
                 <>
                   {/* Coluna esquerda: mesmo tratamento de fundo das telas comuns (ink + glow + pontilhado), não laranja chapado */}
                   <div
+                    className="profile-summary"
                     style={{
                       width: 240,
                       flex: 'none',
@@ -276,14 +283,14 @@ export function ProfileMenu({
                   </div>
 
                   {/* Coluna direita: campos */}
-                  <div style={{ flex: '1 1 360px', padding: '40px 34px', boxSizing: 'border-box', minWidth: 320 }}>
+                  <div className="profile-fields" style={{ flex: '1 1 360px', padding: '40px 34px', boxSizing: 'border-box', minWidth: 0 }}>
                     <h2 style={{ fontSize: 19, margin: '0 0 20px', fontFamily: "'Neuton',serif", fontWeight: 700 }}>Editar conta</h2>
                     {error && <p className="error">{error}</p>}
 
                     <form onSubmit={saveNome} className="field-card" style={fieldCardStyle}>
                       <div style={fieldLabelStyle}>Nome</div>
                       <div style={fieldHelpStyle}>Como você aparece para o resto da equipe.</div>
-                      <div style={{ display: 'flex', gap: 8 }}>
+                      <div className="profile-field-actions" style={{ display: 'flex', gap: 8 }}>
                         <input name="display_name" defaultValue={me.display_name} style={{ flex: 1 }} />
                         <button disabled={busy} style={{ whiteSpace: 'nowrap' }}>
                           {busy && <Spinner />}
@@ -295,7 +302,7 @@ export function ProfileMenu({
                     <div className="field-card" style={fieldCardStyle}>
                       <div style={fieldLabelStyle}>E-mail</div>
                       <div style={fieldHelpStyle}>Usado para entrar e para receber códigos de confirmação.</div>
-                      <div style={{ display: 'flex', gap: 8 }}>
+                      <div className="profile-field-actions" style={{ display: 'flex', gap: 8 }}>
                         <input value={me.email || me.username} disabled style={{ flex: 1 }} />
                         <button
                           type="button"
@@ -314,7 +321,7 @@ export function ProfileMenu({
                     <div className="field-card" style={{ ...fieldCardStyle, marginBottom: 22 }}>
                       <div style={fieldLabelStyle}>Senha</div>
                       <div style={fieldHelpStyle}>Por segurança, trocar e-mail ou senha pede login novamente.</div>
-                      <div style={{ display: 'flex', gap: 8 }}>
+                      <div className="profile-field-actions" style={{ display: 'flex', gap: 8 }}>
                         <input value="********" disabled style={{ flex: 1 }} />
                         <button
                           type="button"

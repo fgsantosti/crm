@@ -375,6 +375,28 @@ Marcadores antigos com esses pedidos seguem a SPIN; pendências antigas voltam
 à última pergunta permitida quando a próxima entrada é processada. Fora de
 escopo e falha técnica preservam suas regras próprias.
 
+#### Perguntas SPIN com envio obrigatório
+
+`PATCH /api/questions/{id}/?company={id}` aceita `envio_obrigatorio` (booleano,
+padrão `false`) somente em perguntas de uma área SPIN, com texto cadastrado.
+O campo `obrigatoria` continua protegendo as perguntas padrão do cadastro e
+não muda de significado. Ao mover uma pergunta para as fixas, o controle de
+envio obrigatório é desligado.
+
+O contexto inclui `envio_obrigatorio` em cada pergunta. O status inclui
+`perguntas_obrigatorias_pendentes` (question_ids ainda sem entrega `SENT`) e
+`notas_urgencia` coletadas. `pode_classificar` fica falso enquanto houver alguma
+obrigatória pendente na SPIN da lead. Isso vale tanto no início direto por SPIN
+quanto nas SPINs que vêm depois das perguntas fixas.
+
+Mesmo com nome, demanda e área completos, envie a próxima obrigatória e
+aguarde outra entrada antes de classificar. O CRM transforma tentativas de
+classificação antecipada numa saída da pergunta obrigatória e guarda os
+dados e notas recebidos. Perguntas opcionais podem ser puladas para chegar
+à próxima obrigatória; perguntas de outra SPIN não entram nessa exigência.
+Entregas pendentes ou com falha não satisfazem o envio obrigatório. Na
+classificação, etapas opcionais que não foram enviadas não recebem nota zero.
+
 `PATCH /api/questions/{id}/?company={id}` aceita `habilitada` para os textos
 fora do fluxo. O padrão é `true`. Desmarcada, a mensagem fica fora do contexto
 e nenhuma saída de texto ou áudio dela é gerada. Apresentação desabilitada

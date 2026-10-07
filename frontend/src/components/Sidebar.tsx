@@ -85,7 +85,7 @@ export function Sidebar({
           ? 'Você define o roteiro que o agente segue. Atendentes recebem a triagem já concluída e não configuram esse fluxo.'
           : 'O agente conduz a triagem automática e só chega até você quando precisa de uma decisão humana.'}
       </p>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div className="sidebar-actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <ProfileMenu
           api={api}
           me={me}

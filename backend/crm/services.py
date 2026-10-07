@@ -226,6 +226,8 @@ def pergunta_inicial(company):
     return company.initial_state
 
 def pode_classificar_sem_validar(company, lead):
+    if perguntas_obrigatorias_pendentes(company, lead):
+        return False
     if dados_para_classificar(company, lead):
         return True
     if company.etapa_inicial:
@@ -244,6 +246,30 @@ def dados_para_classificar(company, lead, fields=None):
     demanda = fields.get("tema") or lead.demand
     area = fields.get("especialidade") or lead.especialidade
     return bool(str(nome).strip() and str(demanda).strip() and area and company.areas.filter(name=area).exists() and not _eh_fora_de_escopo(area))
+
+def perguntas_obrigatorias_pendentes(company, lead=None, fields=None):
+    fields = fields or {}
+    if company.etapa_inicial:
+        perguntas = perguntas_spin_inicial(company)
+    else:
+        area = fields.get("especialidade") or (lead.especialidade if lead else "")
+        perguntas = Question.objects.filter(company=company, area__name=area).order_by("ordem", "id") if area else []
+    enviadas = {result.get("question_id") for result in lead.events.filter(delivery="SENT").values_list("result", flat=True)} if lead else set()
+    return [q for q in perguntas if q.envio_obrigatorio and q.question_id not in enviadas]
+
+def guardar_notas_coletadas(company, lead, fields):
+    notas = fields.get("notas") or {}
+    if not notas:
+        return
+    perguntas = Question.objects.filter(company=company, variavel__isnull=False).exclude(variavel_roteiro__slug="nome")
+    if company.etapa_inicial:
+        perguntas = perguntas.filter(area_id=company.spin_inicial_id)
+    else:
+        area = fields.get("especialidade") or lead.especialidade
+        perguntas = perguntas.filter(Q(area__isnull=True) | Q(area__name=area))
+    ids = set(perguntas.values_list("question_id", flat=True))
+    anteriores = (lead.urgencia_detalhe or {}).get("notas", {})
+    lead.urgencia_detalhe = {"notas": {qid: nota for qid, nota in {**anteriores, **notas}.items() if qid in ids}}
 
 def estado_spin_para_retomar(company, lead):
     ids = [q.question_id for q in perguntas_spin_inicial(company)]
@@ -360,7 +386,9 @@ def status_contato(company, contact):
         "pergunta_inicial": pergunta_inicial(company),
         "campos": {key: (lead.name or lead.contact_name) if key == "nome" else getattr(lead, model_field) for key, model_field in FIELD_MAP.items()} if lead and aceita else {},
         "variaveis_roteiro": (lead.variaveis_roteiro or {}) if lead and aceita else {},
-        "pode_classificar": bool(lead and aceita and dados_para_classificar(company, lead)),
+        "pode_classificar": bool(lead and aceita and dados_para_classificar(company, lead) and not perguntas_obrigatorias_pendentes(company, lead)),
+        "perguntas_obrigatorias_pendentes": [q.question_id for q in perguntas_obrigatorias_pendentes(company, lead)] if aceita else [],
+        "notas_urgencia": (lead.urgencia_detalhe or {}).get("notas", {}) if lead and aceita else {},
         "atendimento_humano_habilitado": not company.etapa_inicial,
         "pedido_humano_pendente": bool(lead and aceita and lead.pedido_humano_pendente and not company.etapa_inicial),
         "variaveis_humano_pendentes": [v.slug for v in variaveis_humano_pendentes(company, lead)] if lead and aceita and lead.pedido_humano_pendente and not company.etapa_inicial else [],
@@ -437,11 +465,27 @@ def receive(company, data):
             if field_error:
                 event.summary = field_error
         pronto = dados_para_classificar(company, lead, fields)
-        if marker in {"ATUALIZAR", "VALIDAR"} and pronto and fields.get("notas"):
+        obrigatorias_pendentes = perguntas_obrigatorias_pendentes(company, lead, fields)
+        pula_obrigatoria = False
+        if obrigatorias_pendentes and marker in {"Q", "ATUALIZAR"}:
+            alvo = data.get("question_id") if marker == "Q" else fields.get("proxima")
+            perguntas_area = perguntas_spin_inicial(company) if company.etapa_inicial else Question.objects.filter(company=company, area_id=obrigatorias_pendentes[0].area_id).order_by("ordem", "id")
+            ids_area = [q.question_id for q in perguntas_area]
+            pula_obrigatoria = alvo in ids_area and ids_area.index(alvo) > ids_area.index(obrigatorias_pendentes[0].question_id)
+        if obrigatorias_pendentes and not fields.get("encerramento_antecipado") and (marker in {"CLASSIFICADO", "VALIDAR"} or pula_obrigatoria or (pronto and marker == "ATUALIZAR")):
+            apply_fields(lead, company, fields)
+            guardar_notas_coletadas(company, lead, fields)
+            marker = "Q"
+            event.marker = marker
+            data = {**data, "question_id": obrigatorias_pendentes[0].question_id}
+            if pronto:
+                inicial = obrigatorias_pendentes[0].question_id
+            event.summary = "Enviando pergunta obrigatória antes de classificar"
+        elif marker in {"ATUALIZAR", "VALIDAR"} and pronto and fields.get("notas"):
             marker = "CLASSIFICADO"
             event.marker = marker
             event.summary = "Classificação antecipada: nome, demanda e área preenchidos"
-        if lead_novo and not (marker == "Q" and data["question_id"] == inicial) and not (marker == "CLASSIFICADO" and pronto):
+        if lead_novo and not (marker == "Q" and data["question_id"] == inicial) and not (marker == "CLASSIFICADO" and pronto and not obrigatorias_pendentes):
             # Lead novo sempre começa pela etapa inicial configurada, mesmo que o agente (ex.: sessão antiga
             # que "lembra" de uma triagem já apagada) mande outro marcador.
             event.summary = f"Lead novo: começando por {inicial} (marcador {marker} ignorado)"
@@ -561,7 +605,8 @@ def receive(company, data):
             question = Question.objects.filter(company=company, question_id=question_id).first()
             spin_ids = [q.question_id for q in perguntas_spin_inicial(company)] if company.etapa_inicial else []
             bloqueada = (question_id in MANDATORY_OFFFLOW_QUESTION_IDS and not texto_fora_habilitado(company, question_id)) or (company.etapa_inicial and question_id not in spin_ids)
-            fora_de_ordem = company.etapa_inicial and question_id in spin_ids and estado_anterior in spin_ids and spin_ids.index(question_id) not in {spin_ids.index(estado_anterior), spin_ids.index(estado_anterior) + 1}
+            obrigatoria_antecipada = obrigatorias_pendentes and question_id == obrigatorias_pendentes[0].question_id
+            fora_de_ordem = company.etapa_inicial and not obrigatoria_antecipada and question_id in spin_ids and estado_anterior in spin_ids and spin_ids.index(question_id) not in {spin_ids.index(estado_anterior), spin_ids.index(estado_anterior) + 1}
             if bloqueada or fora_de_ordem:
                 if not lead.bot_closed:
                     lead.state = estado_anterior
@@ -1064,7 +1109,7 @@ def _aplicar_notas_urgencia(lead, company, fields):
     """CLASSIFICADO com fields.notas: o CRM calcula temperatura (prevalece sobre a do
     agente) e, se não vier, a prioridade; grava o detalhe pra auditoria. Retorna
     (fields_atualizados, erro_ou_None)."""
-    notas = fields.get("notas") or {}
+    notas = {**(lead.urgencia_detalhe or {}).get("notas", {}), **(fields.get("notas") or {})}
     if company.etapa_inicial:
         perguntas = perguntas_spin_inicial(company)
         ids = {q.question_id for q in perguntas if not q.variavel_roteiro_id or q.variavel_roteiro.slug != "nome"}
@@ -1073,7 +1118,8 @@ def _aplicar_notas_urgencia(lead, company, fields):
             return fields, "Classificação SPIN exige notas das perguntas da SPIN selecionada"
         # Na classificação antecipada, perguntas ainda não feitas não são notas zero.
         if perguntas and lead.state == perguntas[-1].question_id:
-            notas = {qid: notas.get(qid, 0) for qid in ids}
+            enviadas = {result.get("question_id") for result in lead.events.filter(delivery="SENT").values_list("result", flat=True)}
+            notas = {qid: notas.get(qid, 0) for qid in ids if qid in enviadas or qid in notas}
     if not notas:
         return fields, None
     pesos = dict(
@@ -1193,6 +1239,7 @@ def contexto_agente(company):
             "ordem": q.ordem,
             "texto": q.text,
             "obrigatoria": q.obrigatoria,
+            "envio_obrigatorio": q.envio_obrigatorio,
             "variavel": {"nome": q.variavel.name, "peso": q.variavel.peso} if q.variavel else None,
             "variavel_roteiro": q.variavel_roteiro.slug if q.variavel_roteiro else None,
         }

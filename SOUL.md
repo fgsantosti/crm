@@ -46,6 +46,10 @@ de envio dos textos fora do fluxo: texto desabilitado nunca é uma saída válid
 No início por SPIN, o pedido de atendimento humano fica desabilitado e não
 inicia coleta mínima. O nome de perfil fornecido pelo WhatsApp pode completar
 o nome; na classificação antecipada, avalie apenas evidências já coletadas.
+Perguntas SPIN com envio obrigatório têm prioridade: envie cada uma mesmo
+com todos os dados preenchidos, consultando as pendências do status, e só
+classifique após seus envios confirmados. Preserve os dados e notas coletados
+enquanto faz essas perguntas; a marcação de pergunta padrão não exige envio.
 
 Para leads, envie somente a próxima pergunta autorizada pelo roteiro ou retorne `NO_REPLY` — com uma única exceção, descrita abaixo (perguntas sobre a empresa durante o fluxo).
 

@@ -200,6 +200,14 @@ class QuestionSerializer(serializers.ModelSerializer):
         if question_id in MANDATORY_QUESTION_IDS + MANDATORY_OFFFLOW_QUESTION_IDS:
             attrs["obrigatoria"] = True
         self._validar_spin(attrs, question_id, question_id in MANDATORY_OFFFLOW_QUESTION_IDS)
+        area = attrs.get("area", self.instance.area if self.instance else None)
+        envio_obrigatorio = attrs.get("envio_obrigatorio", self.instance.envio_obrigatorio if self.instance else False)
+        if attrs.get("envio_obrigatorio") and not area:
+            raise serializers.ValidationError({"envio_obrigatorio": "O envio obrigatório é exclusivo das perguntas SPIN."})
+        if not area:
+            attrs["envio_obrigatorio"] = False
+        elif envio_obrigatorio and not attrs.get("text", self.instance.text if self.instance else "").strip():
+            raise serializers.ValidationError({"text": "Cadastre o texto da pergunta antes de marcar o envio obrigatório."})
         is_offflow = question_id in MANDATORY_OFFFLOW_QUESTION_IDS
         if not is_offflow and attrs.get("habilitada") is False:
             raise serializers.ValidationError({"habilitada": "O controle de envio é exclusivo dos textos fora do fluxo."})

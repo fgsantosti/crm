@@ -114,6 +114,7 @@ class Question(models.Model):
     )
     variavel = models.ForeignKey(Variavel, on_delete=models.PROTECT, related_name="perguntas", null=True, blank=True)
     obrigatoria = models.BooleanField(default=False)
+    envio_obrigatorio = models.BooleanField(default=False, help_text="Pergunta SPIN que deve ser enviada mesmo quando os dados necessários à classificação já foram capturados.")
     ordem = models.PositiveIntegerField(default=0, help_text="Posição no fluxo de perguntas, definida por arrastar-e-soltar na tela Roteiro; sem efeito nos textos fora do fluxo.")
     variavel_roteiro = models.ForeignKey(
         VariavelRoteiro, on_delete=models.PROTECT, related_name="perguntas", null=True, blank=True,

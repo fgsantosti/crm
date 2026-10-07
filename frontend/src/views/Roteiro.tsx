@@ -301,7 +301,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
     }
   }
 
-  async function saveQuestion(q: Question, patch: Partial<Pick<Question, 'text' | 'habilitada' | 'variavel' | 'question_id' | 'ordem' | 'variavel_roteiro' | 'variaveis_obrigatorias' | 'area' | 'etapa_spin'>>) {
+  async function saveQuestion(q: Question, patch: Partial<Pick<Question, 'text' | 'habilitada' | 'envio_obrigatorio' | 'variavel' | 'question_id' | 'ordem' | 'variavel_roteiro' | 'variaveis_obrigatorias' | 'area' | 'etapa_spin'>>) {
     setSavingQ(q.id);
     setError('');
     try {
@@ -593,7 +593,8 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                 )}
                 <span className="step-tag">{MANDATORY_LABELS[q.question_id] || q.question_id}</span>
                 {q.etapa_spin && <span className="chip chip-neutral">{ETAPAS_SPIN.find((et) => et.value === q.etapa_spin)?.label}</span>}
-                {q.obrigatoria && <span className="chip chip-neutral">obrigatória</span>}
+                {q.obrigatoria && <span className="chip chip-neutral">padrão</span>}
+                {q.envio_obrigatorio && <span className="chip chip-neutral">envio obrigatório</span>}
                 {q.audio_gravado && <span className="chip chip-neutral">áudio gravado</span>}
               </div>
               {canEdit ? (
@@ -608,6 +609,15 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                       onSave={(text) => saveQuestion(q, { text })}
                     />
                   </label>
+                  {areaDaLista !== null && (
+                    <div>
+                      <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <input type="checkbox" style={{ width: 'auto' }} checked={q.envio_obrigatorio} disabled={savingQ === q.id || !q.text.trim()} onChange={(e) => saveQuestion(q, { envio_obrigatorio: e.target.checked })} />
+                        Pergunta obrigatória (sempre enviar)
+                      </label>
+                      <small style={{ color: 'var(--muted)' }}>{q.text.trim() ? 'O agente envia esta pergunta antes de classificar, mesmo com nome, demanda e área preenchidos.' : 'Cadastre o texto da pergunta para marcar o envio obrigatório.'}</small>
+                    </div>
+                  )}
                   {areaDaLista !== null && (
                     <label style={{ margin: 0 }}>
                       Etapa SPIN
@@ -810,7 +820,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
       )}
 
       {tab === 'variaveis' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 20 }}>
+        <div className="roteiro-variable-grid">
           <section className="section">
             <h3 style={{ marginTop: 0 }}>Variáveis do agente</h3>
             <p style={{ marginBottom: 16, fontSize: 13.5 }}>
@@ -818,7 +828,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
               dos pesos respondidos e sugere a urgência do lead a partir dela.
             </p>
             {variaveis.map((v) => (
-              <article key={v.id} className="step-card" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <article key={v.id} className="step-card roteiro-variable-row" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 {canEdit ? (
                   <>
                     <input
@@ -906,7 +916,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
             {!busy && !variaveisRoteiro.length && <div className="empty">Nenhuma variável de roteiro cadastrada ainda.</div>}
 
             {canEdit && (
-              <form onSubmit={createVariavelRoteiro} style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'flex-end' }}>
+              <form onSubmit={createVariavelRoteiro} style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, alignItems: 'flex-end' }}>
                 <label style={{ margin: 0, flex: 1 }}>
                   Nova variável de roteiro
                   <input placeholder="ex.: Idade" value={newVR} onChange={(e) => setNewVR(e.target.value)} required />

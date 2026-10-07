@@ -118,6 +118,15 @@ continue a SPIN e classifique após a última resposta; ao concluir todo o
 roteiro, perguntas sem resposta recebem nota zero.
 O CRM calcula a urgência pelos pesos e encerra em silêncio.
 
+Antes de classificar, consulte `perguntas_obrigatorias_pendentes` no status.
+Cada pergunta SPIN com `envio_obrigatorio=true` deve ser enviada, mesmo se
+o cliente já tiver fornecido espontaneamente os dados ou a resposta.
+Com dados completos, envie a próxima obrigatória na ordem da SPIN e aguarde
+a próxima entrada; só classifique depois de todas terem entrega confirmada.
+Perguntas opcionais podem ser puladas nesse caso. Preserve os valores e
+`notas_urgencia` já coletados. A marcação de envio é separada da indicação
+`obrigatoria`, que protege as perguntas padrão do cadastro.
+
 Neste modo, pedidos de atendimento humano, urgência ou decisão profissional
 não iniciam transferência nem coleta mínima: continue a SPIN ou classifique
 os dados disponíveis. Não emita `human_required` para esses pedidos e não
