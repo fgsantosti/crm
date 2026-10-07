@@ -182,6 +182,8 @@ const VOZES_TTS = [
 export function Roteiro({ api, company, canEdit }: { api: Api; company: Company; canEdit: boolean }) {
   const [tab, setTab] = useState<'perguntas' | 'fora-do-fluxo' | 'variaveis' | 'opcoes-agente'>('perguntas');
   const [conversacional, setConversacional] = useState(company.agente_conversacional);
+  const [etapaInicial, setEtapaInicial] = useState(company.etapa_inicial);
+  const [spinInicial, setSpinInicial] = useState<number | null>(company.spin_inicial);
   const [mensagensAudio, setMensagensAudio] = useState(company.mensagens_audio);
   const [voz, setVoz] = useState(company.voz_tts);
   const [erroOpcoes, setErroOpcoes] = useState('');
@@ -221,18 +223,25 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
       api(`/variaveis/?company=${company.id}`),
       api(`/variaveis-roteiro/?company=${company.id}`),
       api(`/areas/?company=${company.id}`),
+      api(`/companies/${company.id}/`),
     ])
       .then(
-        ([q, v, vr, a]: [
+        ([q, v, vr, a, c]: [
           Paginated<Question> | Question[],
           Paginated<Variavel> | Variavel[],
           Paginated<VariavelRoteiro> | VariavelRoteiro[],
           Paginated<Area> | Area[],
+          Company,
         ]) => {
           setQuestions(Array.isArray(q) ? q : q.results);
           setVariaveis(Array.isArray(v) ? v : v.results);
           setVariaveisRoteiro(Array.isArray(vr) ? vr : vr.results);
           setAreas(Array.isArray(a) ? a : a.results);
+          setConversacional(c.agente_conversacional);
+          setEtapaInicial(c.etapa_inicial);
+          setSpinInicial(c.spin_inicial);
+          setMensagensAudio(c.mensagens_audio);
+          setVoz(c.voz_tts);
         },
       )
       .catch((e) => setError(e.message))
@@ -278,7 +287,21 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
     }
   }
 
-  async function saveQuestion(q: Question, patch: Partial<Pick<Question, 'text' | 'variavel' | 'question_id' | 'ordem' | 'variavel_roteiro' | 'variaveis_obrigatorias' | 'area' | 'etapa_spin'>>) {
+  async function salvarInicioSpin(patch: { etapa_inicial?: boolean; spin_inicial?: number | null }) {
+    setSavingOpcoes(true);
+    setError('');
+    try {
+      const c: Company = await api(`/companies/${company.id}/`, { method: 'PATCH', body: JSON.stringify(patch) });
+      setEtapaInicial(c.etapa_inicial);
+      setSpinInicial(c.spin_inicial);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingOpcoes(false);
+    }
+  }
+
+  async function saveQuestion(q: Question, patch: Partial<Pick<Question, 'text' | 'habilitada' | 'variavel' | 'question_id' | 'ordem' | 'variavel_roteiro' | 'variaveis_obrigatorias' | 'area' | 'etapa_spin'>>) {
     setSavingQ(q.id);
     setError('');
     try {
@@ -728,6 +751,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
             Mensagens usadas na apresentação, nas respostas sobre a empresa, na conclusão da triagem e nos pedidos de
             atendimento humano. Elas não entram na classificação de urgência.
           </p>
+          {etapaInicial && <p style={{ color: 'var(--muted)' }}>Com “Etapa Inicial?” marcada, o agente envia somente as perguntas da SPIN selecionada.</p>}
           {OFFFLOW_IDS.map((id) => {
             const q = offflowQuestions.find((x) => x.question_id === id);
             const label = OFFFLOW_LABELS[id];
@@ -735,7 +759,12 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
               <article key={id} className="step-card">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 6 }}>
                   <span className="step-tag">{label.title}</span>
-                  <span className="chip chip-neutral">obrigatória</span>
+                  {q && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+                      <input type="checkbox" style={{ width: 'auto' }} checked={q.habilitada} disabled={!canEdit || savingQ === q.id} onChange={(e) => saveQuestion(q, { habilitada: e.target.checked })} />
+                      Permitir envio pelo agente
+                    </label>
+                  )}
                 </div>
                 <small style={{ display: 'block', color: 'var(--muted)', marginBottom: 10 }}>{label.help}</small>
                 {!q ? (
@@ -894,11 +923,30 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
         <section className="section">
           <article className="step-card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}>
+              <input type="checkbox" style={{ width: 'auto' }} checked={etapaInicial} disabled={!canEdit || savingOpcoes || busy} onChange={(e) => salvarInicioSpin({ etapa_inicial: e.target.checked })} />
+              Etapa Inicial?
+            </label>
+            <label style={{ margin: 0 }}>
+              SPIN inicial
+              <select value={spinInicial ?? ''} disabled={!canEdit || savingOpcoes || busy} onChange={(e) => salvarInicioSpin({ spin_inicial: e.target.value ? Number(e.target.value) : null })}>
+                <option value="">Selecione uma SPIN</option>
+                {areas.map((area) => <option key={area.id} value={area.id}>{area.name}-SPIN</option>)}
+              </select>
+            </label>
+            <p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>
+              Marcada: o atendimento começa diretamente na SPIN selecionada. O agente envia somente suas perguntas,
+              segue as etapas Situação, Problema, Implicação e Necessidade e classifica com as variáveis e pesos definidos.
+              Dados reconhecidos nas mensagens do cliente preenchem as variáveis, sem perguntas extras de identificação,
+              apresentação, validação ou encerramento.
+            </p>
+          </article>
+          <article className="step-card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600 }}>
               <input
                 type="checkbox"
                 style={{ width: 'auto' }}
                 checked={conversacional}
-                disabled={!canEdit || savingOpcoes}
+                disabled={!canEdit || savingOpcoes || etapaInicial}
                 onChange={(e) => salvarConversacional(e.target.checked)}
               />
               Agente conversacional?

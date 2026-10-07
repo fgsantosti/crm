@@ -33,6 +33,8 @@ class Company(models.Model):
         "triagem com um texto inicial próprio, só esperando qualquer resposta do lead para avançar -- sem conversa "
         "livre sobre a empresa nesse meio-tempo. Configurado na tela Roteiro, aba 'Opções do Agente'.",
     )
+    etapa_inicial = models.BooleanField(default=False, help_text="Iniciar diretamente na SPIN selecionada e enviar somente suas perguntas.")
+    spin_inicial = models.ForeignKey("Area", on_delete=models.SET_NULL, null=True, blank=True, related_name="empresas_inicio_spin")
     def __str__(self): return self.name
     @property
     def audio_ativo(self):
@@ -103,6 +105,7 @@ class Question(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     question_id = models.CharField(max_length=80, help_text="Ex.: apresentacao, empresa, nome, situacao, ainda_na_empresa, tipo_de_situacao, afetou_renda, equipe_avaliar_situacao, demanda, validar, encerramento, repetir.")
     text = models.TextField(blank=True)
+    habilitada = models.BooleanField(default=True, help_text="Permite ao agente enviar este texto fora do fluxo.")
     audio_asset = models.CharField(max_length=250, blank=True, help_text="Obsoleto (não usado): substituído por audio_gravado.")
     audio_gravado = models.FileField(
         upload_to="roteiro_audio/", blank=True,
@@ -243,6 +246,7 @@ class Lead(models.Model):
     id =models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE)
     name = models.CharField(max_length=160, blank=True)
+    contact_name = models.CharField(max_length=160, blank=True, help_text="Nome definido pelo contato no WhatsApp; fallback ao concluir a qualificação.")
     contact = models.CharField(max_length=20)
     created_at = models.DateTimeField(auto_now_add=True)
     funnel_stage = models.CharField(max_length=40, default="Novo lead")

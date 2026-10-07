@@ -9,10 +9,18 @@ FIXED_QUESTION_IDS = {"nome", "situacao"}
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = Company
-        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional", "mensagens_audio", "voz_tts"]
+        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional", "mensagens_audio", "voz_tts", "etapa_inicial", "spin_inicial"]
         # Só as opções do agente (tela Roteiro, aba "Opções do Agente") são editáveis
         # por aqui -- os demais campos de Company continuam no Painel Admin.
         read_only_fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente"]
+    def validate(self, attrs):
+        area = attrs.get("spin_inicial", self.instance.spin_inicial if self.instance else None)
+        ativa = attrs.get("etapa_inicial", self.instance.etapa_inicial if self.instance else False)
+        if area and (not self.instance or area.company_id != self.instance.pk):
+            raise serializers.ValidationError({"spin_inicial": "Selecione uma SPIN desta empresa."})
+        if ativa and (not area or not Question.objects.filter(company=self.instance, area=area).exclude(text__regex=r"^\s*$").exists()):
+            raise serializers.ValidationError({"spin_inicial": "Selecione uma SPIN com perguntas e texto cadastrado."})
+        return attrs
     def validate_mensagens_audio(self, value):
         if value and self.instance is not None and not self.instance.allow_transcription:
             raise serializers.ValidationError("Habilite o áudio no painel Admin.")
@@ -68,7 +76,7 @@ class LeadSerializer(serializers.ModelSerializer):
         # owner/mode só mudam via as actions assumir/despachar (services.py) --
         # nunca mais um PATCH livre de texto, pra garantir atomicidade real
         # na disputa por um lead entre atendentes.
-        read_only_fields = ["id", "company", "contact", "created_at", "state", "last_audio_id", "bot_closed", "pedido_humano_pendente", "last_contact", "owner", "mode", "desfecho", "variaveis_roteiro", "urgencia_detalhe", "etapa_atendimento", "desfecho_pendente", "origem_manual"]
+        read_only_fields = ["id", "company", "contact", "contact_name", "created_at", "state", "last_audio_id", "bot_closed", "pedido_humano_pendente", "last_contact", "owner", "mode", "desfecho", "variaveis_roteiro", "urgencia_detalhe", "etapa_atendimento", "desfecho_pendente", "origem_manual"]
 
     def validate(self, attrs):
         if attrs.get("mode") == "AUTOMÁTICO" and self.instance and self.instance.mode == "HUMANO":
@@ -193,6 +201,8 @@ class QuestionSerializer(serializers.ModelSerializer):
             attrs["obrigatoria"] = True
         self._validar_spin(attrs, question_id, question_id in MANDATORY_OFFFLOW_QUESTION_IDS)
         is_offflow = question_id in MANDATORY_OFFFLOW_QUESTION_IDS
+        if not is_offflow and attrs.get("habilitada") is False:
+            raise serializers.ValidationError({"habilitada": "O controle de envio é exclusivo dos textos fora do fluxo."})
         variavel = attrs.get("variavel", self.instance.variavel if self.instance else None)
         if not is_offflow and not variavel:
             raise serializers.ValidationError({"variavel": "Toda pergunta do fluxo precisa de uma variável vinculada."})
@@ -245,6 +255,7 @@ class AgentFieldsSerializer(serializers.Serializer):
 
 class IncomingSerializer(serializers.Serializer):
     contact = serializers.RegexField(r"^\+[1-9]\d{7,14}$")
+    contact_name = serializers.CharField(max_length=160, required=False, allow_blank=True, default="")
     message_id = serializers.CharField(max_length=160)
     kind = serializers.ChoiceField(choices=["text", "audio"], default="text")
     marker = serializers.ChoiceField(choices=["Q", "REPETIR", "ATUALIZAR", "VALIDAR", "CLASSIFICADO"])

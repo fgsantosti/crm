@@ -336,6 +336,47 @@ humana com placeholders, para que a fala inclua os dados reais do contato.
 
 ### 2.1.1 Perguntas fixas e SPIN por área
 
+#### Início direto na SPIN e controle de envio
+
+`PATCH /api/companies/{id}/` aceita `etapa_inicial` (booleano) e
+`spin_inicial` (ID de uma área desta empresa). Para ativar o início direto,
+selecione uma SPIN que tenha perguntas com texto cadastrado. A opção começa
+desligada nas empresas existentes.
+
+Com `etapa_inicial=true`, `/agente/contexto/` retorna `perguntas=[]`,
+`fora_do_fluxo=[]` e somente a lista SPIN selecionada em `spin`, ordenada pelas
+etapas Situação, Problema, Implicação e Necessidade e por `ordem` dentro de
+cada etapa (perguntas sem etapa ficam ao final). `spin_inicial` no contexto
+contém o nome da área, e `pergunta_inicial` o question_id inicial efetivo.
+O CRM define a área da lead a partir da SPIN selecionada e bloqueia perguntas
+fixas, outras SPINs, saltos de perguntas, retrocessos e todos os textos fora do
+fluxo. As repetições usam somente o texto literal da pergunta, sem prefixo.
+
+O agente deve reconhecer dados em todas as mensagens, inclusive na primeira,
+e enviá-los nos campos existentes (`nome`, `tema`, `variaveis_roteiro` etc.).
+O catálogo `variaveis_roteiro` do contexto lista nomes, slugs e indicação
+`builtin`; o status do contato inclui `campos` e `variaveis_roteiro` com os
+valores já coletados. Depois da resposta à última pergunta SPIN, emita
+`CLASSIFICADO` diretamente com os dados e `notas`, sem `VALIDAR` nem aguardar
+confirmação. O CRM calcula a média ponderada somente com as perguntas da SPIN
+escolhida; notas omitidas recebem zero. A saída final é `NO_REPLY`.
+
+`PATCH /api/questions/{id}/?company={id}` aceita `habilitada` para os textos
+fora do fluxo. O padrão é `true`. Desmarcada, a mensagem fica fora do contexto
+e nenhuma saída de texto ou áudio dela é gerada. Apresentação desabilitada
+inicia na primeira pergunta fixa. Validação desabilitada retorna
+`validar_habilitado=false`: emita `CLASSIFICADO` direto após a última resposta.
+Desabilitar necessidade humana não remove as variáveis mínimas obrigatórias:
+o CRM solicita o próximo dado faltante pelas perguntas permitidas do roteiro.
+
+Envie `contact_name` (string opcional, até 160 caracteres) no nível superior
+de `/incoming/`, obtido do nome de perfil que o remetente definiu no WhatsApp
+(`senderName` dos metadados de entrada). Esse metadado é separado de
+`fields.nome`; persiste durante a triagem e só preenche `Lead.name` ao encaminhar
+para a fila humana, caso o cliente não tenha informado seu nome.
+
+As regras das duas camadas abaixo se aplicam quando `etapa_inicial=false`.
+
 O roteiro tem duas camadas:
 
 - **Perguntas fixas** (`perguntas`): feitas para todo contato, na ordem, antes

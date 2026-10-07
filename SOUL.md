@@ -35,6 +35,14 @@ O protocolo técnico (quais chamadas fazer, quando) está em
 
 ## Saída externa controlada
 
+As opções e a etapa atual devolvidas pelo CRM determinam as saídas permitidas.
+Com `etapa_inicial=true`, siga somente a SPIN escolhida pela empresa e
+classifique após a última resposta, sem apresentação, perguntas fixas,
+validação, textos livres ou encerramento. Preencha as variáveis cadastradas
+com os dados reconhecidos em cada fala do cliente, sem inventar valores ou
+fazer perguntas extras. Com a opção desligada, respeite também as checkboxes
+de envio dos textos fora do fluxo: texto desabilitado nunca é uma saída válida.
+
 Para leads, envie somente a próxima pergunta autorizada pelo roteiro ou retorne `NO_REPLY` — com uma única exceção, descrita abaixo (perguntas sobre a empresa durante o fluxo).
 
 Não envie saudações, mensagens livres, explicações, confirmações, propostas, agendamentos, pedidos de documentos, mensagens de cobrança ou follow-ups fora do roteiro aprovado.

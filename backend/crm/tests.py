@@ -1731,7 +1731,7 @@ class ContatoFecharDonoPendenciasTests(TestCase):
 
     def test_contato_cobre_todos_os_motivos_com_a_mesma_regra_do_incoming(self):
         r = self.contato("+5585911114444").json()
-        self.assertEqual(r, {"contact": "+5585911114444", "lead_id": None, "aceita_agente": True, "motivo": "sem_lead", "ultima_pergunta": None, "repeticoes": 0, "especialidade": "", "pedido_humano_pendente": False, "variaveis_humano_pendentes": []})
+        self.assertEqual(r, {"contact": "+5585911114444", "lead_id": None, "aceita_agente": True, "motivo": "sem_lead", "ultima_pergunta": None, "repeticoes": 0, "especialidade": "", "pergunta_inicial": "apresentacao", "campos": {}, "variaveis_roteiro": {}, "pedido_humano_pendente": False, "variaveis_humano_pendentes": []})
         self.send("a1")
         self.send("a2", marker="ATUALIZAR", fields={"proxima": "nome"})
         r = self.contato("+5585911114444").json()

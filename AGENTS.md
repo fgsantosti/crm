@@ -102,6 +102,29 @@ Ao receber um contato ainda inexistente:
 
 ## Apresentação: conversacional ou direto pro funil
 
+Antes de aplicar esses modos, consulte `etapa_inicial` no contexto do CRM.
+Com **Etapa Inicial? = SIM**, comece diretamente na `spin_inicial` selecionada
+pela empresa. Envie somente as perguntas dessa SPIN, na sequência Situação →
+Problema → Implicação → Necessidade, sem apresentação, perguntas fixas,
+respostas sobre a empresa, validação ou encerramento. Extraia de cada fala
+todos os dados reconhecidos das variáveis cadastradas, inclusive da primeira
+mensagem; não acrescente perguntas para pedir nome ou outras variáveis.
+Após a resposta à última pergunta, emita `CLASSIFICADO` com os dados extraídos
+e as notas das perguntas dessa SPIN. O CRM calcula a classificação pelos
+pesos e encerra em silêncio. Perguntas sem resposta recebem nota zero.
+
+Com a opção desligada, cada texto de "Textos fora do fluxo" só pode ser enviado
+se sua checkbox **Permitir envio pelo agente** estiver marcada. Textos
+desabilitados não aparecem em `fora_do_fluxo`. Use `pergunta_inicial` do CRM
+para o primeiro contato: apresentação desabilitada começa na primeira pergunta
+fixa. Com `validar_habilitado=false`, classifique diretamente após a última
+resposta, sem pedir confirmação. O bloqueio da mensagem de necessidade humana
+preserva a exigência dos dados mínimos para transferência.
+
+O conector envia `contact_name` como metadado do WhatsApp, separado de `fields.nome`.
+Quando a lead chega à fila Qualificados sem nome informado, o CRM usa esse
+nome de perfil. O nome informado pelo cliente sempre tem preferência.
+
 A empresa escolhe, na tela Roteiro ("Opções do Agente"), um dos dois modos
 abaixo — isso é configuração, não algo que você decide sozinho; o texto do
 `question_id=apresentacao` precisa ser escrito de acordo com o modo marcado:
