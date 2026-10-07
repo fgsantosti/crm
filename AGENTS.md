@@ -109,9 +109,21 @@ Problema → Implicação → Necessidade, sem apresentação, perguntas fixas,
 respostas sobre a empresa, validação ou encerramento. Extraia de cada fala
 todos os dados reconhecidos das variáveis cadastradas, inclusive da primeira
 mensagem; não acrescente perguntas para pedir nome ou outras variáveis.
-Após a resposta à última pergunta, emita `CLASSIFICADO` com os dados extraídos
-e as notas das perguntas dessa SPIN. O CRM calcula a classificação pelos
-pesos e encerra em silêncio. Perguntas sem resposta recebem nota zero.
+Quando nome, demanda e área estiverem preenchidos, emita `CLASSIFICADO`
+com os dados e notas apoiadas no relato já conhecido, mesmo na primeira
+mensagem ou antes da última pergunta. O nome de perfil do WhatsApp também
+pode preencher o nome. Na classificação antecipada, não atribua zero a
+perguntas ainda não feitas. Caso os dados ainda não estejam completos,
+continue a SPIN e classifique após a última resposta; ao concluir todo o
+roteiro, perguntas sem resposta recebem nota zero.
+O CRM calcula a urgência pelos pesos e encerra em silêncio.
+
+Neste modo, pedidos de atendimento humano, urgência ou decisão profissional
+não iniciam transferência nem coleta mínima: continue a SPIN ou classifique
+os dados disponíveis. Não emita `human_required` para esses pedidos e não
+preencha demanda com o próprio pedido de humano. Pendências antigas dessa
+coleta voltam à última pergunta SPIN permitida. Fora de escopo e falha técnica
+continuam seguindo suas regras próprias.
 
 Com a opção desligada, cada texto de "Textos fora do fluxo" só pode ser enviado
 se sua checkbox **Permitir envio pelo agente** estiver marcada. Textos

@@ -356,10 +356,24 @@ O agente deve reconhecer dados em todas as mensagens, inclusive na primeira,
 e enviá-los nos campos existentes (`nome`, `tema`, `variaveis_roteiro` etc.).
 O catálogo `variaveis_roteiro` do contexto lista nomes, slugs e indicação
 `builtin`; o status do contato inclui `campos` e `variaveis_roteiro` com os
-valores já coletados. Depois da resposta à última pergunta SPIN, emita
-`CLASSIFICADO` diretamente com os dados e `notas`, sem `VALIDAR` nem aguardar
-confirmação. O CRM calcula a média ponderada somente com as perguntas da SPIN
-escolhida; notas omitidas recebem zero. A saída final é `NO_REPLY`.
+valores já coletados. O status também informa `pode_classificar` e
+`atendimento_humano_habilitado`. O contexto inclui `classificacao_antecipada`
+com os campos exigidos: `nome`, `tema` e `especialidade`. Quando todos estão
+preenchidos, emita `CLASSIFICADO` com os dados e `notas` imediatamente, mesmo
+no primeiro contato; nome de perfil em `contact_name` também satisfaz nome.
+`ATUALIZAR`/`VALIDAR` com esses dados e notas também concluem a classificação.
+Avalie somente as evidências coletadas; perguntas ainda não feitas não entram
+como zero na classificação antecipada. Se a triagem continuar até a última
+pergunta, emita `CLASSIFICADO` diretamente, sem `VALIDAR` ou confirmação. Ao
+concluir todo o roteiro, notas omitidas recebem zero. No modo SPIN, o CRM
+pondera somente perguntas da SPIN escolhida e a saída final é `NO_REPLY`.
+
+Com `etapa_inicial=true`, atendimento humano está desabilitado: pedidos de
+humano, urgência ou decisão profissional não acionam transferência nem coleta
+mínima. A opção e seu seletor de dados mínimos ficam desabilitados na tela.
+Marcadores antigos com esses pedidos seguem a SPIN; pendências antigas voltam
+à última pergunta permitida quando a próxima entrada é processada. Fora de
+escopo e falha técnica preservam suas regras próprias.
 
 `PATCH /api/questions/{id}/?company={id}` aceita `habilitada` para os textos
 fora do fluxo. O padrão é `true`. Desmarcada, a mensagem fica fora do contexto
@@ -374,6 +388,10 @@ de `/incoming/`, obtido do nome de perfil que o remetente definiu no WhatsApp
 (`senderName` dos metadados de entrada). Esse metadado é separado de
 `fields.nome`; persiste durante a triagem e só preenche `Lead.name` ao encaminhar
 para a fila humana, caso o cliente não tenha informado seu nome.
+Na instalação do WhatsApp, habilite
+`channels.whatsapp.pluginHooks.messageReceived=true`. Sem essa opção, o evento
+de entrada que fornece `senderName` à ponte não é emitido. A ponte também
+inclui o nome da entrada atual no contexto do agente antes do `/incoming/`.
 
 As regras das duas camadas abaixo se aplicam quando `etapa_inicial=false`.
 

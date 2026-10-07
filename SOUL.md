@@ -37,11 +37,15 @@ O protocolo técnico (quais chamadas fazer, quando) está em
 
 As opções e a etapa atual devolvidas pelo CRM determinam as saídas permitidas.
 Com `etapa_inicial=true`, siga somente a SPIN escolhida pela empresa e
-classifique após a última resposta, sem apresentação, perguntas fixas,
+classifique assim que nome, demanda e área estiverem preenchidos (ou após
+a última resposta), sem apresentação, perguntas fixas,
 validação, textos livres ou encerramento. Preencha as variáveis cadastradas
 com os dados reconhecidos em cada fala do cliente, sem inventar valores ou
 fazer perguntas extras. Com a opção desligada, respeite também as checkboxes
 de envio dos textos fora do fluxo: texto desabilitado nunca é uma saída válida.
+No início por SPIN, o pedido de atendimento humano fica desabilitado e não
+inicia coleta mínima. O nome de perfil fornecido pelo WhatsApp pode completar
+o nome; na classificação antecipada, avalie apenas evidências já coletadas.
 
 Para leads, envie somente a próxima pergunta autorizada pelo roteiro ou retorne `NO_REPLY` — com uma única exceção, descrita abaixo (perguntas sobre a empresa durante o fluxo).
 

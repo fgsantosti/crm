@@ -162,3 +162,74 @@ class AgentOptionsTests(TestCase):
         self.send("VALIDAR")
         self.send("CLASSIFICADO", fields={"temperatura": "Qualificado", "prioridade": "Média"})
         self.assertEqual(Lead.objects.get(contact=self.contact).name, "Joana WhatsApp")
+
+    def test_classifica_na_primeira_mensagem_com_perfil_demanda_area_e_notas(self):
+        result = self.send("CLASSIFICADO", contact_name="Joana WhatsApp", fields={"tema": "Desconto indevido", "notas": {"spin_situacao": 8}})
+        self.assertEqual(result["action"], "NO_REPLY")
+        lead = Lead.objects.get(contact=self.contact)
+        self.assertEqual((lead.name, lead.demand, lead.especialidade), ("Joana WhatsApp", "Desconto indevido", "Consumidor"))
+        self.assertTrue(lead.bot_closed)
+        self.assertEqual(lead.temperature, "Qualificado")
+        self.assertEqual(lead.urgencia_detalhe["score"], 8)
+        self.assertEqual(lead.urgencia_detalhe["notas"], {"spin_situacao": 8})
+
+    def test_classifica_no_meio_da_spin_quando_ultima_variavel_e_capturada(self):
+        self.send(question_id="apresentacao", contact_name="Joana WhatsApp")
+        result = self.send("ATUALIZAR", fields={"tema": "Desconto indevido", "proxima": "spin_problema", "notas": {"spin_situacao": 9}})
+        self.assertEqual(result["action"], "NO_REPLY")
+        lead = Lead.objects.get(contact=self.contact)
+        self.assertTrue(lead.bot_closed)
+        self.assertEqual(lead.temperature, "Quente")
+        self.assertEqual(lead.events.latest("created_at").marker, "CLASSIFICADO")
+
+    def test_classificacao_antecipada_sem_spin_tambem_aceita_dados_completos(self):
+        self.company.etapa_inicial = False
+        self.company.save()
+        result = self.send("CLASSIFICADO", fields={"nome": "Joana", "tema": "Desconto", "especialidade": "Consumidor", "notas": {"spin_situacao": 8}})
+        self.assertEqual(result["question_id"], "encerramento")
+        self.assertTrue(Lead.objects.get(contact=self.contact).bot_closed)
+
+    def test_pedido_humano_na_spin_nao_cria_coleta_paralela(self):
+        human = Question.objects.get(company=self.company, question_id="necessidade_humana")
+        human.variaveis_obrigatorias.add(VariavelRoteiro.objects.get(company=self.company, slug="nome"))
+        result = self.send("ATUALIZAR", human_required=True, reason="pedido humano")
+        self.assertEqual(result["question_id"], "spin_situacao")
+        lead = Lead.objects.get(contact=self.contact)
+        self.assertEqual(lead.mode, "AUTOMÁTICO")
+        self.assertFalse(lead.pedido_humano_pendente)
+        self.assertEqual(lead.demand, "")
+        self.assertFalse(contexto_agente(self.company)["atendimento_humano_habilitado"])
+
+    def test_pedidos_de_transferencia_no_meio_da_spin_preservam_triagem(self):
+        self.send(question_id="apresentacao")
+        for reason in ["pedido humano", "urgência ou risco", "decisão profissional"]:
+            result = self.send("ATUALIZAR", human_required=True, reason=reason, fields={"proxima": "spin_problema", "tema": "Desconto"})
+            lead = Lead.objects.get(contact=self.contact)
+            self.assertEqual(lead.mode, "AUTOMÁTICO")
+            self.assertFalse(lead.pedido_humano_pendente)
+            self.assertEqual(result["question_id"], "spin_problema")
+
+    def test_pendencia_humana_antiga_retorna_a_ultima_pergunta_spin(self):
+        self.send(question_id="apresentacao")
+        self.send("ATUALIZAR", fields={"proxima": "spin_problema"})
+        Lead.objects.filter(contact=self.contact).update(state="necessidade_humana", pedido_humano_pendente=True, next_action="Coletar nome")
+        status = self.client.get(f"/api/companies/{self.company.pk}/agente/contato/", {"contact": self.contact}).json()
+        self.assertFalse(status["pedido_humano_pendente"])
+        self.assertFalse(status["atendimento_humano_habilitado"])
+        self.assertEqual(status["ultima_pergunta"], "spin_problema")
+        self.send("ATUALIZAR", fields={"proxima": "spin_implicacao"})
+        lead = Lead.objects.get(contact=self.contact)
+        self.assertFalse(lead.pedido_humano_pendente)
+        self.assertEqual(lead.state, "spin_implicacao")
+        self.assertEqual(lead.next_action, "")
+
+    def test_perfil_no_status_completa_nome_sem_sobrescrever_nome_informado(self):
+        self.send(question_id="apresentacao", contact_name="Joana WhatsApp")
+        Lead.objects.filter(contact=self.contact).update(demand="Desconto")
+        url = f"/api/companies/{self.company.pk}/agente/contato/"
+        status = self.client.get(url, {"contact": self.contact}).json()
+        self.assertTrue(status["pode_classificar"])
+        self.assertEqual(status["campos"]["nome"], "Joana WhatsApp")
+        Lead.objects.filter(contact=self.contact).update(name="Joana Silva")
+        status = self.client.get(url, {"contact": self.contact}).json()
+        self.assertEqual(status["campos"]["nome"], "Joana Silva")

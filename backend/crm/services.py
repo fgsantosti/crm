@@ -226,6 +226,8 @@ def pergunta_inicial(company):
     return company.initial_state
 
 def pode_classificar_sem_validar(company, lead):
+    if dados_para_classificar(company, lead):
+        return True
     if company.etapa_inicial:
         perguntas = perguntas_spin_inicial(company)
     elif not texto_fora_habilitado(company, "validar"):
@@ -235,6 +237,22 @@ def pode_classificar_sem_validar(company, lead):
     else:
         return False
     return bool(perguntas and lead.state == perguntas[-1].question_id)
+
+def dados_para_classificar(company, lead, fields=None):
+    fields = fields or {}
+    nome = fields.get("nome") or lead.name or lead.contact_name
+    demanda = fields.get("tema") or lead.demand
+    area = fields.get("especialidade") or lead.especialidade
+    return bool(str(nome).strip() and str(demanda).strip() and area and company.areas.filter(name=area).exists() and not _eh_fora_de_escopo(area))
+
+def estado_spin_para_retomar(company, lead):
+    ids = [q.question_id for q in perguntas_spin_inicial(company)]
+    if lead.state in ids:
+        return lead.state
+    for result in lead.events.filter(delivery__in=["SENT", "EXPIRADO"]).order_by("-created_at", "-pk").values_list("result", flat=True):
+        if result.get("question_id") in ids:
+            return result["question_id"]
+    return ids[0] if ids else ""
 
 MAX_REPETICOES = 3
 REPEAT_PREFIX = "Por favor, responda novamente. "
@@ -335,15 +353,17 @@ def status_contato(company, contact):
         "lead_id": str(lead.pk) if lead else None,
         "aceita_agente": aceita,
         "motivo": motivo,
-        "ultima_pergunta": ultima_pergunta(lead) if lead and motivo == "em_triagem" else None,
+        "ultima_pergunta": (estado_spin_para_retomar(company, lead) if company.etapa_inicial and lead.pedido_humano_pendente else ultima_pergunta(lead)) if lead and motivo == "em_triagem" else None,
         "repeticoes": contar_repeticoes(lead) if lead and motivo == "em_triagem" else 0,
         # Área já classificada no lead ativo: define qual lista SPIN o agente segue.
         "especialidade": (lead.especialidade or "") if lead and not lead.desfecho else "",
         "pergunta_inicial": pergunta_inicial(company),
-        "campos": {key: getattr(lead, model_field) for key, model_field in FIELD_MAP.items()} if lead and aceita else {},
+        "campos": {key: (lead.name or lead.contact_name) if key == "nome" else getattr(lead, model_field) for key, model_field in FIELD_MAP.items()} if lead and aceita else {},
         "variaveis_roteiro": (lead.variaveis_roteiro or {}) if lead and aceita else {},
-        "pedido_humano_pendente": bool(lead and aceita and lead.pedido_humano_pendente),
-        "variaveis_humano_pendentes": [v.slug for v in variaveis_humano_pendentes(company, lead)] if lead and aceita and lead.pedido_humano_pendente else [],
+        "pode_classificar": bool(lead and aceita and dados_para_classificar(company, lead)),
+        "atendimento_humano_habilitado": not company.etapa_inicial,
+        "pedido_humano_pendente": bool(lead and aceita and lead.pedido_humano_pendente and not company.etapa_inicial),
+        "variaveis_humano_pendentes": [v.slug for v in variaveis_humano_pendentes(company, lead)] if lead and aceita and lead.pedido_humano_pendente and not company.etapa_inicial else [],
     }
 
 @transaction.atomic
@@ -365,6 +385,15 @@ def receive(company, data):
         return {**NO_REPLY, "duplicate": True, "lead_id": str(lead.pk), "lead_novo": False}
     if aceita and data.get("contact_name"):
         lead.contact_name = data["contact_name"]
+    if aceita and company.etapa_inicial:
+        if lead.pedido_humano_pendente:
+            lead.state = estado_spin_para_retomar(company, lead)
+            lead.pedido_humano_pendente = False
+            lead.next_action = ""
+        if data["human_required"] and data["reason"] in {"pedido humano", "urgência ou risco", "decisão profissional"}:
+            # O pedido não cria uma coleta paralela nem substitui a demanda.
+            fields = data.get("fields") or {}
+            data = {**data, "human_required": False, "marker": "ATUALIZAR", "fields": {**fields, "proxima": fields.get("proxima") or estado_spin_para_retomar(company, lead)}}
     lead.last_contact = timezone.now()
     lead.save()
     event = Event.objects.create(
@@ -407,7 +436,12 @@ def receive(company, data):
             field_error = apply_fields(lead, company, fields)
             if field_error:
                 event.summary = field_error
-        if lead_novo and not (marker == "Q" and data["question_id"] == inicial):
+        pronto = dados_para_classificar(company, lead, fields)
+        if marker in {"ATUALIZAR", "VALIDAR"} and pronto and fields.get("notas"):
+            marker = "CLASSIFICADO"
+            event.marker = marker
+            event.summary = "Classificação antecipada: nome, demanda e área preenchidos"
+        if lead_novo and not (marker == "Q" and data["question_id"] == inicial) and not (marker == "CLASSIFICADO" and pronto):
             # Lead novo sempre começa pela etapa inicial configurada, mesmo que o agente (ex.: sessão antiga
             # que "lembra" de uma triagem já apagada) mande outro marcador.
             event.summary = f"Lead novo: começando por {inicial} (marcador {marker} ignorado)"
@@ -491,10 +525,10 @@ def receive(company, data):
             if antecipado:
                 apagar_lead, motivo_apagar = True, "Triagem abandonada antes de concluir o roteiro"
                 question_id = None
-            elif company.etapa_inicial and not pode_classificar_sem_validar(company, lead):
-                event.summary = "Classificação aguardando a última pergunta da SPIN selecionada"
+            elif company.etapa_inicial and not pronto and not pode_classificar_sem_validar(company, lead):
+                event.summary = "Classificação aguardando nome, demanda e área ou a última pergunta da SPIN"
                 question_id = None
-            elif lead.state != "VALIDANDO" and not pode_classificar_sem_validar(company, lead):
+            elif lead.state != "VALIDANDO" and not pronto and not pode_classificar_sem_validar(company, lead):
                 apagar_lead, motivo_apagar = True, "CLASSIFICADO recebido sem VALIDAR anterior: revisar fluxo do agente"
                 question_id = None
             else:
@@ -511,7 +545,8 @@ def receive(company, data):
                     lead.state = "ENCERRADO_CLASSIFICADO"
                     lead.funnel_stage = "Triagem concluída"
                     lead.next_action = "Revisar classificação e dar continuidade humana"
-                    question_id = "encerramento"
+                    question_id = "encerramento" if texto_fora_habilitado(company, "encerramento") else None
+                    event.summary = "Lead classificada: " + lead.temperature
                     if lead.temperature in FORA_DO_KANBAN:
                         # Nunca entra no Kanban humano, então nunca seria despachado: fecha
                         # aqui, senão o número ficaria preso como "lead ativo" pra sempre.
@@ -1031,11 +1066,14 @@ def _aplicar_notas_urgencia(lead, company, fields):
     (fields_atualizados, erro_ou_None)."""
     notas = fields.get("notas") or {}
     if company.etapa_inicial:
-        ids = {q.question_id for q in perguntas_spin_inicial(company) if not q.variavel_roteiro_id or q.variavel_roteiro.slug != "nome"}
+        perguntas = perguntas_spin_inicial(company)
+        ids = {q.question_id for q in perguntas if not q.variavel_roteiro_id or q.variavel_roteiro.slug != "nome"}
         notas = {qid: nota for qid, nota in notas.items() if qid in ids}
         if not notas:
             return fields, "Classificação SPIN exige notas das perguntas da SPIN selecionada"
-        notas = {qid: notas.get(qid, 0) for qid in ids}
+        # Na classificação antecipada, perguntas ainda não feitas não são notas zero.
+        if perguntas and lead.state == perguntas[-1].question_id:
+            notas = {qid: notas.get(qid, 0) for qid in ids}
     if not notas:
         return fields, None
     pesos = dict(
@@ -1171,6 +1209,8 @@ def contexto_agente(company):
         "empresa": company.name,
         "agente_conversacional": company.agente_conversacional,
         "etapa_inicial": company.etapa_inicial,
+        "atendimento_humano_habilitado": not company.etapa_inicial,
+        "classificacao_antecipada": {"campos": ["nome", "tema", "especialidade"], "nome_perfil_permitido": True},
         "spin_inicial": company.spin_inicial.name if company.spin_inicial_id else None,
         "pergunta_inicial": pergunta_inicial(company),
         "validar_habilitado": texto_fora_habilitado(company, "validar"),

@@ -761,12 +761,13 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                   <span className="step-tag">{label.title}</span>
                   {q && (
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
-                      <input type="checkbox" style={{ width: 'auto' }} checked={q.habilitada} disabled={!canEdit || savingQ === q.id} onChange={(e) => saveQuestion(q, { habilitada: e.target.checked })} />
+                      <input type="checkbox" style={{ width: 'auto' }} checked={q.habilitada && !(etapaInicial && id === 'necessidade_humana')} disabled={!canEdit || savingQ === q.id || (etapaInicial && id === 'necessidade_humana')} onChange={(e) => saveQuestion(q, { habilitada: e.target.checked })} />
                       Permitir envio pelo agente
                     </label>
                   )}
                 </div>
                 <small style={{ display: 'block', color: 'var(--muted)', marginBottom: 10 }}>{label.help}</small>
+                {etapaInicial && id === 'necessidade_humana' && <p style={{ color: 'var(--muted)', fontSize: 13 }}>Pedido de atendimento humano desabilitado durante o início por SPIN. O agente segue a triagem e encaminha a lead após classificá-la.</p>}
                 {!q ? (
                   <p style={{ fontSize: 13, color: 'var(--warn)' }}>Carregando…</p>
                 ) : canEdit ? (
@@ -775,7 +776,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                   <p style={{ color: 'var(--ink)', fontSize: 15 }}>“{q.text ? destacarTexto(q.text, variaveisRoteiro) : 'Sem texto cadastrado'}”</p>
                 )}
                 {q && id === 'necessidade_humana' && (
-                  <fieldset disabled={!canEdit || savingQ === q.id} style={{ marginTop: 14, border: '1px solid var(--line)', borderRadius: 8 }}>
+                  <fieldset disabled={!canEdit || savingQ === q.id || etapaInicial} style={{ marginTop: 14, border: '1px solid var(--line)', borderRadius: 8 }}>
                     <legend>Variáveis mínimas obrigatórias</legend>
                     <small style={{ display: 'block', color: 'var(--muted)', marginBottom: 10 }}>
                       Selecione os dados que o cliente precisa informar antes de ser encaminhado ao humano.
@@ -938,6 +939,9 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
               segue as etapas Situação, Problema, Implicação e Necessidade e classifica com as variáveis e pesos definidos.
               Dados reconhecidos nas mensagens do cliente preenchem as variáveis, sem perguntas extras de identificação,
               apresentação, validação ou encerramento.
+              O pedido de atendimento humano fica desabilitado. Com nome, demanda e área preenchidos, o agente já pode
+              classificar a urgência e encaminhar a lead, mesmo antes da última pergunta. O nome do perfil do WhatsApp
+              pode preencher o nome quando o cliente não o informa.
             </p>
           </article>
           <article className="step-card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
