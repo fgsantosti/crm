@@ -33,6 +33,7 @@ from .services import (
     seed_roteiro_padrao,
     resumo_dashboard, FORA_DO_KANBAN,
 )
+from .serializers import DashboardPeriodSerializer
 
 def _avatar_url(request, profile):
     return request.build_absolute_uri(profile.avatar.url) if profile.avatar else None
@@ -399,10 +400,13 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
             dias = int(raw) if raw not in ("", "all") else None
         except ValueError:
             return Response({"detail": "dias precisa ser um número inteiro ou 'all'."}, status=400)
+        periodo = DashboardPeriodSerializer(data=request.query_params)
+        periodo.is_valid(raise_exception=True)
         return Response(resumo_dashboard(
             self.company(), dias=dias,
             area=request.query_params.get("area", ""),
             busca=request.query_params.get("q", "").strip(),
+            **periodo.validated_data,
         ))
     @action(detail=True)
     def events(self, request, pk=None):

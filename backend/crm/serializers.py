@@ -228,6 +228,18 @@ class EventSerializer(serializers.ModelSerializer):
         model = Event
         fields = ["id", "message_id", "created_at", "summary", "delivery"]
 
+class DashboardPeriodSerializer(serializers.Serializer):
+    data_inicio = serializers.DateField(required=False, input_formats=["%Y-%m-%d"])
+    data_fim = serializers.DateField(required=False, input_formats=["%Y-%m-%d"])
+
+    def validate(self, attrs):
+        inicio, fim = attrs.get("data_inicio"), attrs.get("data_fim")
+        if bool(inicio) != bool(fim):
+            raise serializers.ValidationError("Informe as datas de início e fim do período.")
+        if inicio and inicio > fim:
+            raise serializers.ValidationError("A data de início deve ser anterior ou igual à data de fim.")
+        return attrs
+
 class AgentFieldsSerializer(serializers.Serializer):
     nome = serializers.CharField(max_length=160, required=False, allow_blank=True)
     # Antes era um ChoiceField fixo e global. Agora cada empresa cadastra suas

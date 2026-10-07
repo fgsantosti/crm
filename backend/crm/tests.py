@@ -1189,6 +1189,7 @@ class DashboardResumoTests(TestCase):
         self.assertEqual(data["desfechos"]["encerrado"], 105)
         self.assertEqual(data["status"]["despachado"], 105)
         self.assertEqual(data["status"]["automatico"], 1)
+        self.assertEqual(len(data["atendimentos"]), 106)
 
     def test_resumo_status_e_exclusivo_e_soma_o_total(self):
         self.lead("+5585000000001")  # automático
@@ -1234,6 +1235,52 @@ class DashboardResumoTests(TestCase):
         Lead.objects.filter(pk=b.pk).update(created_at=timezone.now().replace(year=2026, month=3, day=10))
         meses = [m for m, _ in self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()["por_mes"]]
         self.assertEqual(meses, ["2025-03", "2026-03"])
+
+    def test_periodo_especifico_inclui_dias_inteiros_no_fuso_da_empresa(self):
+        from datetime import datetime
+        timestamps = ["2026-10-07T02:59:59.999999+00:00", "2026-10-07T03:00:00+00:00", "2026-10-08T02:59:59.999999+00:00", "2026-10-08T03:00:00+00:00"]
+        leads = []
+        for index, timestamp in enumerate(timestamps):
+            lead = self.lead(f"+55850000900{index}", name=f"Lead {index}", especialidade="Consumidor" if index == 1 else "Trabalhista")
+            Lead.objects.filter(pk=lead.pk).update(created_at=datetime.fromisoformat(timestamp))
+            leads.append(lead)
+        self.lead("+558500009009", company=self.other)
+        base = f"/api/leads/resumo/?company={self.company.pk}&data_inicio=2026-10-07&data_fim=2026-10-07"
+        data = self.client.get(base).json()
+        self.assertEqual(data["total"], 2)
+        self.assertEqual({row["id"] for row in data["atendimentos"]}, {str(leads[1].pk), str(leads[2].pk)})
+        filtrado = self.client.get(base + "&area=Consumidor&q=Lead 1").json()
+        self.assertEqual(filtrado["total"], 1)
+        self.assertEqual(filtrado["atendimentos"][0]["id"], str(leads[1].pk))
+
+    def test_periodo_especifico_substitui_filtro_de_dias_e_valida_intervalo(self):
+        from datetime import datetime
+        lead = self.lead("+558500009010")
+        Lead.objects.filter(pk=lead.pk).update(created_at=datetime.fromisoformat("2020-01-02T12:00:00+00:00"))
+        base = f"/api/leads/resumo/?company={self.company.pk}"
+        data = self.client.get(base + "&dias=1&data_inicio=2020-01-02&data_fim=2020-01-02").json()
+        self.assertEqual(data["total"], 1)
+        for query in ["data_inicio=2026-10-07", "data_fim=2026-10-07", "data_inicio=2026-10-08&data_fim=2026-10-07", "data_inicio=abc&data_fim=2026-10-07", "data_inicio=2026-02-30&data_fim=2026-03-01"]:
+            self.assertEqual(self.client.get(base + "&" + query).status_code, 400, query)
+
+    def test_listas_dos_cards_correspondem_a_contagem_e_sucesso_da_triagem(self):
+        self.lead("+558500009021")
+        qualified = self.lead("+558500009022", bot_closed=True, temperature="Qualificado", demand="Desconto indevido")
+        self.lead("+558500009023", bot_closed=True, temperature="Desqualificado", desfecho="desqualificado")
+        self.lead("+558500009024", bot_closed=True, temperature="Desconfiado")
+        self.lead("+558500009025", bot_closed=True, origem_manual=True, mode="HUMANO")
+        self.lead("+558500009026", mode="HUMANO")
+        self.lead("+558500009027", bot_closed=True, temperature="Quente", desfecho="encerrado")
+        self.lead("+558500009028", bot_closed=True, temperature="", desfecho="bloqueado")
+        data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
+        rows = data["atendimentos"]
+        self.assertEqual(len(rows), data["total"])
+        self.assertEqual(data["triagem_concluida"], 2)
+        self.assertEqual(sum(row["triagem_concluida"] for row in rows), data["triagem_concluida"])
+        for category, count in data["status"].items():
+            self.assertEqual(sum(row["categoria_status"] == category for row in rows), count)
+        self.assertEqual(sum(row["categoria_status"] == "desqualificado" for row in rows), data["desqualificados"])
+        self.assertEqual(next(row for row in rows if row["id"] == str(qualified.pk))["demand"], "Desconto indevido")
 
     def test_lista_ativos_exclui_despachados_manuais_e_desqualificados(self):
         ativo = self.lead("+5585000000051", bot_closed=True, temperature="Quente")

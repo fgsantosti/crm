@@ -153,6 +153,19 @@ nav button.nav-active .nav-count { background: rgba(36,26,18,.18); padding: 2px 
 .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; }
 .tile small { font-weight: 600; font-size: 12.5px; }
 .tile strong { display: block; margin-top: 12px; font-family: 'DM Mono', monospace; font-size: 32px; font-weight: 500; }
+.tile.tile-button { text-align: left; color: var(--ink); width: 100%; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.tile.tile-button:hover { background: var(--surface); border-color: var(--accent); box-shadow: 0 4px 14px rgba(36,26,18,.08); }
+.tile.tile-button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.dashboard-date { display: flex; flex-direction: column; gap: 4px; margin: 0; font-size: 12px; }
+.dashboard-date input { width: 170px; }
+.dashboard-dialog { width: min(1120px, calc(100vw - 32px)); max-width: none; max-height: 85vh; padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--ink); box-shadow: 0 32px 70px rgba(0,0,0,.35); }
+.dashboard-dialog[open] { display: flex; flex-direction: column; }
+.dashboard-dialog::backdrop { background: rgba(20,14,9,.6); backdrop-filter: blur(2px); }
+.dashboard-dialog .panel-toolbar { flex-shrink: 0; }
+.dashboard-dialog-content { overflow: auto; }
+.dashboard-dialog th { position: sticky; top: 0; z-index: 1; }
+.dashboard-dialog th, .dashboard-dialog td { padding: 14px 12px; }
+.dashboard-demand { min-width: 200px; max-width: 360px; overflow-wrap: anywhere; }
 
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 26px 28px; display: flex; flex-direction: column; gap: 20px; }
 .card-grid2 { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; }
@@ -256,8 +269,8 @@ tr:hover td { background: #FBF1E7; }
 .kv-row { display: flex; justify-content: space-between; font-size: 13px; }
 
 @media (max-width: 900px) {
-  .shell { flex-direction: column; }
-  .sidebar { padding: 18px; gap: 15px; }
+  .shell { flex-direction: column; flex-wrap: nowrap; }
+  .sidebar { flex-basis: auto; padding: 18px; gap: 15px; }
   .sidebar-note { display: none; }
   nav { flex-direction: row; flex-wrap: wrap; }
   .main { padding: 20px; }

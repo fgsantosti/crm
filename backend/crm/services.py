@@ -1,7 +1,7 @@
 import logging
 import re
 import secrets
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password, check_password
@@ -1241,13 +1241,22 @@ def _categoria_status(lead):
         return "desqualificado"
     return "equipe"
 
-def resumo_dashboard(company, dias=None, area="", busca=""):
+def _triagem_concluida_dashboard(lead):
+    return lead["bot_closed"] and not lead["origem_manual"] and lead["temperature"] in {"Remarketing", "Qualificado", "Quente"} and lead["desfecho"] != "desqualificado"
+
+def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, data_fim=None):
     """Agregados do Dashboard calculados no servidor sobre TODOS os leads da
     empresa (o frontend antes contava só a 1ª página paginada de /leads/, então
     leads antigos -- justamente os já despachados -- sumiam das contas)."""
     from django.db.models import Q
     qs = Lead.objects.filter(company=company)
-    if dias:
+    if data_inicio and data_fim:
+        tz = timezone.get_current_timezone()
+        qs = qs.filter(
+            created_at__gte=timezone.make_aware(datetime.combine(data_inicio, time.min), tz),
+            created_at__lte=timezone.make_aware(datetime.combine(data_fim, time.max), tz),
+        )
+    elif dias:
         qs = qs.filter(created_at__gte=timezone.now() - timedelta(days=dias))
     if area:
         qs = qs.filter(especialidade=area)
@@ -1258,7 +1267,7 @@ def resumo_dashboard(company, dias=None, area="", busca=""):
         )
     rows = list(qs.values(
         "id", "name", "contact", "created_at", "concluido_em", "desfecho", "bot_closed", "mode",
-        "temperature", "priority", "especialidade", "owner", "origem_manual",
+        "temperature", "priority", "especialidade", "owner", "origem_manual", "demand", "etapa_atendimento",
     ))
     User = get_user_model()
     nomes = {u.pk: _nome_usuario(u) for u in User.objects.filter(pk__in={r["owner"] for r in rows if r["owner"]}).select_related("profile")}
@@ -1292,12 +1301,24 @@ def resumo_dashboard(company, dias=None, area="", busca=""):
     return {
         "total": len(rows),
         # Cadastro manual nunca passou por triagem (bot_closed=True só pra silenciar o agente).
-        "triagem_concluida": sum(1 for r in rows if r["bot_closed"] and not r["origem_manual"]),
+        "triagem_concluida": sum(1 for r in rows if _triagem_concluida_dashboard(r)),
         # Mesmo critério da fatia "desqualificado" do status -- o tile e o donut sempre batem.
         "desqualificados": status["desqualificado"],
         "status": status,
         "desfechos": desfechos,
         "sucesso": desfechos[DESFECHO_SUCESSO],
+        "atendimentos": [
+            {
+                "id": str(r["id"]), "name": r["name"], "contact": r["contact"],
+                "demand": r["demand"], "especialidade": r["especialidade"],
+                "temperature": r["temperature"], "priority": r["priority"],
+                "owner": nomes.get(r["owner"], ""), "created_at": r["created_at"],
+                "desfecho": r["desfecho"], "origem_manual": r["origem_manual"],
+                "categoria_status": _categoria_status(r),
+                "triagem_concluida": _triagem_concluida_dashboard(r),
+            }
+            for r in sorted(rows, key=lambda r: (r["created_at"], str(r["id"])), reverse=True)
+        ],
         "concluidos": [
             {
                 "id": str(r["id"]), "name": r["name"], "contact": r["contact"],

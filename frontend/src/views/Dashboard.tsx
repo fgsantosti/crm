@@ -4,6 +4,7 @@ import type { Area, Company, Lead, Paginated } from '../types';
 import { DonutChart } from '../components/DonutChart';
 import { SkeletonTiles } from '../components/Skeleton';
 import { COLUMNS, URGENCIA_COR, columnOf, leadsVisiveisNoKanban, ordenarColuna } from './Leads';
+import { DashboardAtendimentosDialog, type AtendimentoResumo } from '../components/DashboardAtendimentosDialog';
 
 type Resumo = {
   total: number;
@@ -16,6 +17,7 @@ type Resumo = {
   por_owner: { owner_id: number; owner: string; atendimentos: number; concluidos: number; sucesso: number }[];
   sucesso: number;
   concluidos: LeadConcluido[];
+  atendimentos: AtendimentoResumo[];
 };
 
 type LeadConcluido = {
@@ -36,7 +38,7 @@ const RESUMO_VAZIO: Resumo = {
   total: 0, triagem_concluida: 0, desqualificados: 0,
   status: { despachado: 0, automatico: 0, equipe: 0, desqualificado: 0 },
   desfechos: { encerrado: 0, comprometido: 0, falha: 0, bloqueado: 0 },
-  por_area: [], por_mes: [], por_owner: [], sucesso: 0, concluidos: [],
+  por_area: [], por_mes: [], por_owner: [], sucesso: 0, concluidos: [], atendimentos: [],
 };
 
 function rotuloMes(chave: string) {
@@ -46,8 +48,8 @@ function rotuloMes(chave: string) {
 
 const STATUS_DONUT: { key: keyof Resumo['status']; label: string; color: string }[] = [
   { key: 'despachado', label: 'Despachado', color: 'var(--success)' },
-  { key: 'automatico', label: 'Em triagem automática', color: 'var(--accent)' },
-  { key: 'equipe', label: 'Com a equipe', color: 'var(--danger)' },
+  { key: 'automatico', label: 'Em triagem', color: '#2563EB' },
+  { key: 'equipe', label: 'Com a equipe', color: 'var(--accent)' },
   { key: 'desqualificado', label: 'Desqualificado/desconfiado', color: 'var(--muted)' },
 ];
 
@@ -65,7 +67,11 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   const [search, setSearch] = useState('');
   const [buscaAtendente, setBuscaAtendente] = useState('');
   const [area, setArea] = useState('');
-  const [periodo, setPeriodo] = useState<'30' | 'all'>('30');
+  const [periodo, setPeriodo] = useState<'30' | 'all' | 'custom'>('30');
+  const [dataInicio, setDataInicio] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' }));
+  const [dataFim, setDataFim] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' }));
+  const [popup, setPopup] = useState<{ title: string; description: string; atendimentos: AtendimentoResumo[] } | null>(null);
+  const erroPeriodo = periodo === 'custom' ? (!dataInicio || !dataFim ? 'Selecione as datas de início e fim.' : dataInicio > dataFim ? 'A data de início deve ser anterior ou igual à data de fim.' : '') : '';
   const [busy, setBusy] = useState(false);
   const [carregou, setCarregou] = useState(false);
   const [excluindoId, setExcluindoId] = useState<string | null>(null);
@@ -91,15 +97,25 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
 
   useEffect(() => {
     let active = true;
+    setPopup(null);
+    if (erroPeriodo) {
+      setResumo(RESUMO_VAZIO);
+      setBusy(false);
+      return;
+    }
     setBusy(true);
     setError('');
     const params = new URLSearchParams({ company: String(company.id), dias: periodo === '30' ? '30' : 'all' });
+    if (periodo === 'custom') {
+      params.set('data_inicio', dataInicio);
+      params.set('data_fim', dataFim);
+    }
     if (area) params.set('area', area);
     if (search.trim()) params.set('q', search.trim());
     const timer = setTimeout(() => {
       api(`/leads/resumo/?${params.toString()}`)
         .then((d: Resumo) => {
-          if (active) setResumo(d);
+          if (active) setResumo({ ...RESUMO_VAZIO, ...d });
         })
         .catch((e) => {
           if (active) setError(e.message);
@@ -115,7 +131,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
       active = false;
       clearTimeout(timer);
     };
-  }, [company.id, area, periodo, search, recarregar]);
+  }, [company.id, area, periodo, dataInicio, dataFim, erroPeriodo, search, recarregar]);
 
   const total = resumo.total;
   const desqualificados = resumo.desqualificados;
@@ -134,7 +150,22 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
 
   const pct = (n: number) => (total ? ` · ${Math.round((n / total) * 100)}%` : '');
 
-  const kanbanLeads = useMemo(() => leadsVisiveisNoKanban(leads), [leads]);
+  const kanbanLeads = useMemo(() => {
+    const ids = new Set(resumo.atendimentos.map((lead) => lead.id));
+    return leadsVisiveisNoKanban(leads).filter((lead) => ids.has(lead.id));
+  }, [leads, resumo.atendimentos]);
+
+  function abrirPopup(title: string, description: string, matches: (lead: AtendimentoResumo) => boolean) {
+    setPopup({ title, description, atendimentos: resumo.atendimentos.filter(matches) });
+  }
+
+  const cardsResumo = [
+    { title: 'Total de atendimentos', count: total, color: 'var(--ink)', description: 'Todos os atendimentos recebidos no período selecionado.', matches: (_lead: AtendimentoResumo) => true },
+    { title: 'Triagem concluída', count: concluidos, color: 'var(--success)', description: 'Leads que concluíram a triagem e seguiram para os classificados.', matches: (lead: AtendimentoResumo) => lead.triagem_concluida },
+    { title: 'Em triagem', count: automatico, color: '#2563EB', description: 'Atendimentos aguardando a conclusão da triagem automática.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'automatico' },
+    { title: 'Com a equipe', count: humano, color: 'var(--accent)', description: 'Atendimentos disponíveis para a equipe ou em atendimento humano.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'equipe' },
+    { title: 'Desqualificados', count: desqualificados, color: 'var(--muted)', description: 'Leads classificados como desqualificados ou desconfiados.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'desqualificado' },
+  ];
 
   // "Fechar lead": apaga o lead (e o histórico dele) no CRM. A próxima mensagem desse número
   // abre um lead novo e o agente recomeça a triagem do zero.
@@ -201,14 +232,21 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
             </svg>
           </label>
           <label className="select-field">
-            <select value={periodo} onChange={(e) => setPeriodo(e.target.value as '30' | 'all')}>
+            <select aria-label="Período" value={periodo} onChange={(e) => setPeriodo(e.target.value as '30' | 'all' | 'custom')}>
               <option value="30">Últimos 30 dias</option>
               <option value="all">Todo o período</option>
+              <option value="custom">Período específico</option>
             </select>
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
               <path d="M4 6l4 4 4-4" stroke="#8A7A68" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </label>
+          {periodo === 'custom' && (
+            <>
+              <label className="dashboard-date">Data de início<input type="date" value={dataInicio} max={dataFim || undefined} onChange={(e) => setDataInicio(e.target.value)} /></label>
+              <label className="dashboard-date">Data de fim<input type="date" value={dataFim} min={dataInicio || undefined} onChange={(e) => setDataFim(e.target.value)} /></label>
+            </>
+          )}
           <button
             type="button"
             className="secondary"
@@ -217,11 +255,15 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
               setSearch('');
               setArea('');
               setPeriodo('30');
+              const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' });
+              setDataInicio(hoje);
+              setDataFim(hoje);
             }}
           >
             Limpar
           </button>
         </div>
+        {erroPeriodo && <p role="alert" className="error" style={{ marginTop: 12 }}>{erroPeriodo}</p>}
       </section>
 
       <section className="section">
@@ -230,26 +272,12 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
           <SkeletonTiles />
         ) : (
           <div className="tiles">
-            <article className="tile">
-              <small>Total de atendimentos</small>
-              <strong style={{ color: 'var(--ink)' }}>{total}</strong>
-            </article>
-            <article className="tile">
-              <small>Triagem concluída</small>
-              <strong style={{ color: 'var(--success)' }}>{concluidos}</strong>
-            </article>
-            <article className="tile">
-              <small>Em automação</small>
-              <strong style={{ color: 'var(--accent)' }}>{automatico}</strong>
-            </article>
-            <article className="tile">
-              <small>Com a equipe</small>
-              <strong style={{ color: 'var(--danger)' }}>{humano}</strong>
-            </article>
-            <article className="tile">
-              <small>Desqualificados</small>
-              <strong style={{ color: 'var(--muted)' }}>{desqualificados}</strong>
-            </article>
+            {cardsResumo.map((card) => (
+              <button key={card.title} type="button" className="tile tile-button" disabled={busy || !!erroPeriodo} aria-haspopup="dialog" onClick={() => abrirPopup(card.title, card.description, card.matches)}>
+                <small>{card.title}</small>
+                <strong style={{ color: card.color }}>{card.count}</strong>
+              </button>
+            ))}
           </div>
         )}
         {!busy && desqualificados > 0 && (
@@ -342,10 +370,10 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
         ) : (
           <div className="tiles">
             {concluidosPorDesfecho.map((d) => (
-              <article key={d.value} className="tile">
+              <button key={d.value} type="button" className="tile tile-button" disabled={busy || !!erroPeriodo} aria-haspopup="dialog" onClick={() => abrirPopup(d.label, 'Atendimentos com este desfecho no período selecionado.', (lead) => lead.desfecho === d.value)}>
                 <small>{d.label}</small>
                 <strong style={{ color: d.color }}>{d.count}</strong>
-              </article>
+              </button>
             ))}
           </div>
         )}
@@ -523,6 +551,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
           </section>
         </>
       )}
+      {popup && <DashboardAtendimentosDialog {...popup} onClose={() => setPopup(null)} />}
     </>
   );
 }
