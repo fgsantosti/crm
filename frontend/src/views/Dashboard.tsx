@@ -8,6 +8,11 @@ import { DashboardAtendimentosDialog, type AtendimentoResumo } from '../componen
 
 type Resumo = {
   total: number;
+  /** Novas leads criadas pelo agente no período (inclui as apagadas); null com filtro de área/busca. */
+  novas_leads: number | null;
+  /** Triagens abandonadas apagadas pelo Celery no período; null com filtro de área/busca. */
+  nao_prosseguiram: number | null;
+  novas_hoje: number;
   triagem_concluida: number;
   desqualificados: number;
   status: { despachado: number; automatico: number; equipe: number; desqualificado: number; especial: number };
@@ -35,7 +40,7 @@ type LeadConcluido = {
 };
 
 const RESUMO_VAZIO: Resumo = {
-  total: 0, triagem_concluida: 0, desqualificados: 0,
+  total: 0, novas_leads: 0, nao_prosseguiram: 0, novas_hoje: 0, triagem_concluida: 0, desqualificados: 0,
   status: { despachado: 0, automatico: 0, equipe: 0, desqualificado: 0, especial: 0 },
   desfechos: { encerrado: 0, comprometido: 0, falha: 0, bloqueado: 0 },
   por_area: [], por_mes: [], por_owner: [], sucesso: 0, concluidos: [], atendimentos: [],
@@ -161,12 +166,13 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   }
 
   const cardsResumo = [
-    { title: 'Total de atendimentos', count: total, color: 'var(--ink)', description: 'Todos os atendimentos recebidos no período selecionado.', matches: (_lead: AtendimentoResumo) => true },
+    { title: 'Total de atendimentos', count: total, color: 'var(--ink)', description: 'Todos os atendimentos recebidos no período selecionado.', matches: (_lead: AtendimentoResumo) => true, detalhe: resumo.novas_leads === null ? undefined : `${resumo.novas_leads} novas leads no período · ${resumo.novas_hoje} hoje` },
     { title: 'Triagem concluída', count: concluidos, color: 'var(--success)', description: 'Leads que concluíram a triagem e seguiram para os classificados.', matches: (lead: AtendimentoResumo) => lead.triagem_concluida },
     { title: 'Em triagem', count: automatico, color: '#2563EB', description: 'Atendimentos aguardando a conclusão da triagem automática.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'automatico' },
     { title: 'Com a equipe', count: humano, color: 'var(--accent)', description: 'Atendimentos disponíveis para a equipe ou em atendimento humano.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'equipe' },
-    { title: 'Outras situações', count: resumo.status.especial, color: '#7C3AED', description: 'Clientes que já têm processo e querem acompanhá-lo (não são leads novos).', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'especial' },
     { title: 'Desqualificados', count: desqualificados, color: 'var(--muted)', description: 'Leads classificados como desqualificados ou desconfiados.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'desqualificado' },
+    { title: 'Outras situações', count: resumo.status.especial, color: '#7C3AED', description: 'Clientes que já têm processo e querem acompanhá-lo (não são leads novos).', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'especial' },
+    { title: 'Não prosseguiram', count: resumo.nao_prosseguiram, color: 'var(--muted)', description: 'Triagens abandonadas que o sistema apagou automaticamente (sem resposta por 24h).', matches: (_lead: AtendimentoResumo) => false, semLista: true, detalhe: resumo.nao_prosseguiram === null ? 'indisponível com filtro de área/busca' : 'apagadas automaticamente' },
   ];
 
   // "Fechar lead": apaga o lead (e o histórico dele) no CRM. A próxima mensagem desse número
@@ -274,12 +280,21 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
           <SkeletonTiles />
         ) : (
           <div className="tiles">
-            {cardsResumo.map((card) => (
-              <button key={card.title} type="button" className="tile tile-button" disabled={busy || !!erroPeriodo} aria-haspopup="dialog" onClick={() => abrirPopup(card.title, card.description, card.matches)}>
-                <small>{card.title}</small>
-                <strong style={{ color: card.color }}>{card.count}</strong>
-              </button>
-            ))}
+            {cardsResumo.map((card) =>
+              card.semLista ? (
+                <div key={card.title} className="tile" title={card.description}>
+                  <small>{card.title}</small>
+                  <strong style={{ color: card.color }}>{card.count ?? '—'}</strong>
+                  {card.detalhe && <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>{card.detalhe}</small>}
+                </div>
+              ) : (
+                <button key={card.title} type="button" className="tile tile-button" disabled={busy || !!erroPeriodo} aria-haspopup="dialog" onClick={() => abrirPopup(card.title, card.description, card.matches)}>
+                  <small>{card.title}</small>
+                  <strong style={{ color: card.color }}>{card.count}</strong>
+                  {card.detalhe && <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>{card.detalhe}</small>}
+                </button>
+              ),
+            )}
           </div>
         )}
         {!busy && desqualificados > 0 && (

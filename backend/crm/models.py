@@ -238,6 +238,20 @@ class EmailChangeRequest(models.Model):
     class Meta:
         ordering = ["-created_at"]
 
+class ContagemDiaria(models.Model):
+    """Contadores por empresa e dia (fuso do projeto) que sobrevivem à exclusão dos leads.
+
+    novas: leads criados pelo agente no dia (cadastro manual não conta).
+    nao_prosseguiram: desses, os que o Celery apagou por triagem abandonada (data = dia em que o
+    lead nasceu, para o Dashboard alinhar com o período em que a pessoa chegou)."""
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="contagens_diarias")
+    data = models.DateField()
+    novas = models.PositiveIntegerField(default=0)
+    nao_prosseguiram = models.PositiveIntegerField(default=0)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["company", "data"], name="unique_contagem_company_data")]
+        ordering = ["-data"]
+
 class Lead(models.Model):
     ESPECIALIDADE_CHOICES = [("Previdenciário", "Previdenciário"), ("Consumidor", "Consumidor"), ("Trabalhista", "Trabalhista"), ("Fora de escopo", "Fora de escopo")]
     TEMPERATURA_CHOICES = [("Qualificado", "Qualificado"), ("Quente", "Quente"), ("Desconfiado", "Desconfiado"), ("Remarketing", "Remarketing"), ("Desqualificado", "Desqualificado")]

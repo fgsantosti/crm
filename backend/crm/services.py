@@ -1,3 +1,4 @@
+from collections import Counter
 import logging
 import re
 import secrets
@@ -7,12 +8,12 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password, check_password
 from django.contrib.auth.models import Group
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import F, Q, Sum
 from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.authtoken.models import Token
 from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
-from .models import Profile, Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, DEFAULT_HUMAN_MESSAGE, SITUACOES_ESPECIAIS, ESPECIAL_QUESTION_IDS
+from .models import Profile, Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, DEFAULT_HUMAN_MESSAGE, SITUACOES_ESPECIAIS, ESPECIAL_QUESTION_IDS, ContagemDiaria
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,15 @@ def render_text(text, lead, company):
 
     placeholder_re = re.compile(r"\{(" + "|".join(re.escape(k) for k in values.keys()) + r")\}")
     return placeholder_re.sub(substitute, text)
+
+def _somar_contagem(company_id, dia, campo, quantidade=1):
+    """Soma no contador diário da empresa (cria a linha do dia se preciso)."""
+    contagem, _ = ContagemDiaria.objects.get_or_create(company_id=company_id, data=dia)
+    ContagemDiaria.objects.filter(pk=contagem.pk).update(**{campo: F(campo) + quantidade})
+
+def registrar_novo_lead(company):
+    """Conta uma nova lead (criada pelo agente) no dia de hoje, que não se perde se o lead for apagado."""
+    _somar_contagem(company.pk, timezone.localdate(), "novas")
 
 def avaliar_contato(company, contact):
     """Única regra de "o agente pode atender este número agora?" -- usada por receive()
@@ -453,6 +463,7 @@ def receive(company, data):
     if lead_novo:
         # O lock da empresa acima garante que nunca nascem dois leads ativos pro mesmo contato.
         lead = Lead.objects.create(company=company, contact=data["contact"], state=pergunta_inicial(company) or "", especialidade=company.spin_inicial.name if company.etapa_inicial and company.spin_inicial_id else "")
+        registrar_novo_lead(company)
     previous = Event.objects.filter(lead=lead, message_id=data["message_id"]).first()
     if previous:
         return {**NO_REPLY, "duplicate": True, "lead_id": str(lead.pk), "lead_novo": False}
@@ -1354,7 +1365,12 @@ def apagar_triagens_abandonadas(agora=None):
             # receive usa o mesmo lock: reavalia a inatividade após qualquer entrada concorrente.
             if not Company.objects.select_for_update().filter(pk=company_id).first():
                 continue
-            _, por_modelo = leads.filter(company_id=company_id).delete()
+            da_empresa = leads.filter(company_id=company_id)
+            # "Não prosseguiram": guarda quantos leads vão embora, no dia em que nasceram.
+            por_dia = Counter(timezone.localtime(c).date() for c in da_empresa.values_list("created_at", flat=True))
+            _, por_modelo = da_empresa.delete()
+            for dia, quantidade in por_dia.items():
+                _somar_contagem(company_id, dia, "nao_prosseguiram", quantidade)
             total += por_modelo.get("crm.Lead", 0)
     return total
 
@@ -1586,6 +1602,17 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
             Q(name__icontains=busca) | Q(contact__icontains=busca) | Q(owner__username__icontains=busca)
             | Q(owner__first_name__icontains=busca) | Q(owner__profile__display_name__icontains=busca)
         )
+    # Contadores que sobrevivem à exclusão dos leads (novas leads e "não prosseguiram", do Celery).
+    # Não dá para filtrar por área/busca (o lead apagado não existe mais): nesses casos ficam nulos.
+    contagens = ContagemDiaria.objects.filter(company=company)
+    hoje = timezone.localdate()
+    if data_inicio and data_fim:
+        contagens = contagens.filter(data__gte=data_inicio, data__lte=data_fim)
+    elif dias:
+        contagens = contagens.filter(data__gte=timezone.localdate(timezone.now() - timedelta(days=dias)))
+    totais = contagens.aggregate(novas=Sum("novas"), nao=Sum("nao_prosseguiram"))
+    novas_hoje = ContagemDiaria.objects.filter(company=company, data=hoje).aggregate(n=Sum("novas"))["n"] or 0
+    sem_contagem = bool(area or busca)
     rows = list(qs.values(
         "id", "name", "contact", "created_at", "concluido_em", "desfecho", "bot_closed", "mode",
         "temperature", "priority", "especialidade", "owner", "origem_manual", "demand", "etapa_atendimento", "situacao_especial",
@@ -1623,6 +1650,9 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
     )
     return {
         "total": len(rows),
+        "novas_leads": None if sem_contagem else (totais["novas"] or 0),
+        "nao_prosseguiram": None if sem_contagem else (totais["nao"] or 0),
+        "novas_hoje": novas_hoje,
         # Cadastro manual nunca passou por triagem (bot_closed=True só pra silenciar o agente).
         "triagem_concluida": sum(1 for r in rows if _triagem_concluida_dashboard(r)),
         # Mesmo critério da fatia "desqualificado" do status -- o tile e o donut sempre batem.

@@ -3309,3 +3309,61 @@ class SituacaoEspecialTests(TestCase):
         ruim = IncomingSerializer(data={"contact": self.contact, "message_id": "x", "marker": "ATUALIZAR", "fields": {"situacao_especial": "outra"}})
         self.assertTrue(ok.is_valid(), ok.errors)
         self.assertFalse(ruim.is_valid())
+
+
+class ContagemDiariaTests(TestCase):
+    """Novas leads do dia e "não prosseguiram" (apagadas pelo Celery) sobrevivem à exclusão dos leads."""
+    def setUp(self):
+        self.company = Company.objects.create(name="Contagem Teste")
+        seed_roteiro_padrao(self.company)
+        Question.objects.filter(company=self.company, question_id="apresentacao").update(text="Olá!")
+
+    def abrir(self, contact, mid="m1"):
+        data = {"contact": contact, "message_id": mid, "kind": "text", "marker": "Q", "question_id": "apresentacao",
+                "fields": {}, "human_required": False, "reason": "pedido humano"}
+        r = receive(self.company, data)
+        Event.objects.filter(pk=r["event_id"]).update(delivery="SENT")
+        return r
+
+    def contagem(self):
+        from .models import ContagemDiaria
+        return {c.data: (c.novas, c.nao_prosseguiram) for c in ContagemDiaria.objects.filter(company=self.company)}
+
+    def test_conta_so_leads_novos_e_nao_mensagens_seguintes(self):
+        self.abrir("+5585911110010"); self.abrir("+5585911110010", "m2"); self.abrir("+5585911110011")
+        self.assertEqual(self.contagem(), {timezone.localdate(): (2, 0)})
+
+    def test_celery_apaga_e_soma_em_nao_prosseguiram_no_dia_do_nascimento(self):
+        from .services import apagar_triagens_abandonadas
+        self.abrir("+5585911110010"); self.abrir("+5585911110011")
+        antigo = timezone.now() - timedelta(days=2)
+        Lead.objects.filter(contact="+5585911110010").update(created_at=antigo, last_contact=antigo)
+        self.assertEqual(apagar_triagens_abandonadas(), 1)
+        c = self.contagem()
+        self.assertEqual(c[timezone.localdate()], (2, 0))
+        self.assertEqual(c[timezone.localtime(antigo).date()], (0, 1))
+        # Idempotente: nada novo para apagar, nada some do contador.
+        self.assertEqual(apagar_triagens_abandonadas(), 0)
+
+    def test_apagar_lead_por_erro_do_agente_nao_conta_como_nao_prosseguiu(self):
+        self.abrir("+5585911110010")
+        data = {"contact": "+5585911110010", "message_id": "x", "kind": "text", "marker": "CLASSIFICADO", "question_id": "",
+                "fields": {"temperatura": "Quente", "prioridade": "Alta"}, "human_required": False, "reason": "pedido humano"}
+        self.assertTrue(receive(self.company, data).get("lead_apagado"))
+        self.assertEqual(self.contagem()[timezone.localdate()], (1, 0))
+
+    def test_resumo_traz_contadores_e_respeita_periodo_e_filtros(self):
+        from .models import ContagemDiaria
+        from .services import resumo_dashboard
+        hoje = timezone.localdate()
+        ContagemDiaria.objects.create(company=self.company, data=hoje, novas=3, nao_prosseguiram=1)
+        ContagemDiaria.objects.create(company=self.company, data=hoje - timedelta(days=10), novas=5, nao_prosseguiram=2)
+        r = resumo_dashboard(self.company)
+        self.assertEqual((r["novas_leads"], r["nao_prosseguiram"], r["novas_hoje"]), (8, 3, 3))
+        r7 = resumo_dashboard(self.company, dias=7)
+        self.assertEqual((r7["novas_leads"], r7["nao_prosseguiram"]), (3, 1))
+        rp = resumo_dashboard(self.company, data_inicio=hoje - timedelta(days=12), data_fim=hoje - timedelta(days=8))
+        self.assertEqual((rp["novas_leads"], rp["nao_prosseguiram"]), (5, 2))
+        # Com filtro de área/busca não dá para atribuir (o lead apagado não existe mais): nulos.
+        self.assertIsNone(resumo_dashboard(self.company, area="Consumidor")["nao_prosseguiram"])
+        self.assertIsNone(resumo_dashboard(self.company, busca="x")["novas_leads"])
