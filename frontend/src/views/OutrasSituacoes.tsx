@@ -19,6 +19,7 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
   const [error, setError] = useState('');
   const [detalhe, setDetalhe] = useState<Lead | null>(null);
   const [novo, setNovo] = useState(false);
+  const [busca, setBusca] = useState('');
   const [salvandoNovo, setSalvandoNovo] = useState(false);
 
   const carregar = useCallback(
@@ -82,6 +83,8 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
     }
   }
 
+  const termo = busca.trim().toLowerCase();
+  const visiveis = termo ? leads.filter((l) => `${l.name} ${l.contact} ${l.demand} ${l.notes}`.toLowerCase().includes(termo)) : leads;
   const podeAssumir = role === 'atendente';
   const podeConcluir = (l: Lead) => role === 'empresa' || !l.owner || l.owner === me.id;
 
@@ -93,9 +96,18 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
           <h1>Outras situações</h1>
           <p>Clientes que já têm processo e querem acompanhá-lo. Não são leads novos e não têm temperatura.{leads.length ? ` ${leads.length} em aberto.` : ''}</p>
         </div>
-        <button type="button" onClick={() => setNovo((v) => !v)}>
-          + Novo acompanhamento
-        </button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <input
+            placeholder="Buscar nome, telefone ou observação"
+            aria-label="Buscar acompanhamentos"
+            style={{ width: 260 }}
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+          />
+          <button type="button" onClick={() => setNovo((v) => !v)}>
+            + Novo acompanhamento
+          </button>
+        </div>
       </header>
       {error && (
         <p role="alert" className="error">
@@ -141,7 +153,8 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
       <section className="section">
         {busy && !leads.length && <p style={{ fontSize: 13 }}>Carregando…</p>}
         {!busy && !leads.length && <div className="empty">Nenhum acompanhamento em aberto.</div>}
-        {leads.map((l) => (
+        {!busy && leads.length > 0 && !visiveis.length && <div className="empty">Nenhum acompanhamento encontrado para “{busca.trim()}”.</div>}
+        {visiveis.map((l) => (
           <article key={l.id} className="queue-card" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
               <div style={{ flex: '1 1 320px', minWidth: 0, cursor: 'pointer' }} onClick={() => setDetalhe(l)}>

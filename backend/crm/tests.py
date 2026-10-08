@@ -3449,3 +3449,52 @@ class SituacaoEspecialManualTests(TestCase):
         from .services import avaliar_contato
         self.post(self.atendente, contact="+5585999991111")
         self.assertEqual(avaliar_contato(self.company, "+5585999991111")[1:], (False, "classificado"))
+
+
+class CadastroManualIgnoradoPeloAgenteTests(TestCase):
+    """Número cadastrado manualmente (atendimento ou acompanhamento) nunca é atendido pelo agente."""
+    def setUp(self):
+        self.company = Company.objects.create(name="Manual Ignorado")
+        seed_roteiro_padrao(self.company)
+        Question.objects.filter(company=self.company, question_id="apresentacao").update(text="Olá!")
+        self.atendente = get_user_model().objects.create_user(username="ig@x.com", email="ig@x.com")
+        self.company.members.add(self.atendente)
+        self.client_a = APIClient(); self.client_a.force_authenticate(self.atendente)
+
+    def cadastra(self, caminho, contact):
+        r = self.client_a.post(f"/api/leads/{caminho}/?company={self.company.pk}", {"name": "Fulana", "contact": contact, "demand": "x"}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+
+    def mensagem_do_contato(self, contact, marker):
+        data = {"contact": contact, "message_id": f"{marker}-1", "kind": "text", "marker": marker, "question_id": "apresentacao" if marker == "Q" else "",
+                "fields": {"proxima": "nome"} if marker == "ATUALIZAR" else {}, "human_required": False, "reason": "pedido humano"}
+        return receive(self.company, data)
+
+    def confere_ignorado(self, contact, motivo):
+        from .services import avaliar_contato, status_contato
+        lead, aceita, mot = avaliar_contato(self.company, contact)
+        self.assertEqual((aceita, mot), (False, motivo))
+        self.assertFalse(status_contato(self.company, contact)["aceita_agente"])
+        for marker in ("Q", "ATUALIZAR", "REPETIR"):
+            r = self.mensagem_do_contato(contact, marker)
+            self.assertEqual(r["action"], "NO_REPLY", marker)
+        # Nenhum lead novo, nenhuma resposta pendente de entrega, o lead segue como foi cadastrado.
+        self.assertEqual(Lead.objects.filter(contact=contact).count(), 1)
+        lead.refresh_from_db()
+        self.assertEqual(lead.desfecho, "")
+        self.assertFalse(Event.objects.filter(lead=lead, delivery="PENDING").exists())
+
+    def test_atendimento_manual_e_ignorado(self):
+        self.cadastra("manual", "+5585999991001")
+        self.confere_ignorado("+5585999991001", "humano")
+
+    def test_acompanhamento_manual_e_ignorado(self):
+        self.cadastra("especial", "+5585999991002")
+        self.confere_ignorado("+5585999991002", "classificado")
+
+    def test_numero_so_volta_ao_agente_depois_de_concluir(self):
+        self.cadastra("especial", "+5585999991003")
+        lead = Lead.objects.get()
+        r = self.client_a.post(f"/api/leads/{lead.pk}/especial/concluir/?company={self.company.pk}")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.mensagem_do_contato("+5585999991003", "Q")["action"], "TEXTO")
