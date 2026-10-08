@@ -5,7 +5,7 @@ from django.test import Client, TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 from .models import Blacklist, Company, Question, Lead, Event, Area, AtendenteInvite, PasswordChangeRequired, AgentTokenExpiry, CompanyInfo, Variavel, VariavelRoteiro
-from .services import receive
+from .services import receive, status_contato, contexto_agente
 
 class QualificationTests(TestCase):
     def setUp(self):
@@ -1778,7 +1778,7 @@ class ContatoFecharDonoPendenciasTests(TestCase):
 
     def test_contato_cobre_todos_os_motivos_com_a_mesma_regra_do_incoming(self):
         r = self.contato("+5585911114444").json()
-        self.assertEqual(r, {"contact": "+5585911114444", "lead_id": None, "aceita_agente": True, "motivo": "sem_lead", "ultima_pergunta": None, "repeticoes": 0, "especialidade": "", "pergunta_inicial": "apresentacao", "campos": {}, "variaveis_roteiro": {}, "pode_classificar": False, "perguntas_obrigatorias_pendentes": [], "notas_urgencia": {}, "atendimento_humano_habilitado": True, "pedido_humano_pendente": False, "variaveis_humano_pendentes": []})
+        self.assertEqual(r, {"contact": "+5585911114444", "lead_id": None, "aceita_agente": True, "motivo": "sem_lead", "ultima_pergunta": None, "repeticoes": 0, "especialidade": "", "pergunta_inicial": "apresentacao", "conversa_livre_restante": 0, "campos": {}, "variaveis_roteiro": {}, "pode_classificar": False, "perguntas_obrigatorias_pendentes": [], "notas_urgencia": {}, "atendimento_humano_habilitado": True, "pedido_humano_pendente": False, "variaveis_humano_pendentes": []})
         self.send("a1")
         self.send("a2", marker="ATUALIZAR", fields={"proxima": "nome"})
         r = self.contato("+5585911114444").json()
@@ -3003,3 +3003,92 @@ class AdminContasEmpresaAgenteTests(TestCase):
             resp = getattr(anonimo, metodo)(url, corpo, format="json") if corpo is not None else getattr(anonimo, metodo)(url)
             self.assertIn(resp.status_code, (401, 403), f"anônimo {metodo} {url}")
         self.assertTrue(User.objects.get(pk=alvo).is_active)
+
+
+class ConversaLivreTests(TestCase):
+    """Marcador RESPONDER: conversa livre do agente, só antes do fluxo e validada pelo CRM."""
+    def setUp(self):
+        self.company = Company.objects.create(name="Ismael Teste", agente_conversacional=True)
+        Question.objects.create(company=self.company, question_id="apresentacao", text="Olá! Quer ser atendido?")
+        Question.objects.create(company=self.company, question_id="nome", text="Seu nome?", ordem=0, obrigatoria=True)
+        CompanyInfo.objects.create(company=self.company, title="Horário", content="Seg a sex, 9h às 18h")
+        CompanyInfo.objects.create(company=self.company, title="Vazio", content="  ")
+
+    def send(self, mid, contact="+5585911119999", **kwargs):
+        data = {"contact": contact, "message_id": mid, "kind": "text", "marker": "Q", "question_id": "apresentacao",
+                "fields": {}, "human_required": False, "reason": "pedido humano", **kwargs}
+        r = receive(self.company, data)
+        if r.get("event_id"):
+            Event.objects.filter(pk=r["event_id"]).update(delivery="SENT")
+        return r
+
+    def responder(self, mid, texto="Atendemos de segunda a sexta, das 9h às 18h.", **kw):
+        return self.send(mid, marker="RESPONDER", question_id="", fields={"texto": texto}, **kw)
+
+    def test_responde_livre_depois_da_apresentacao_sem_sair_da_etapa(self):
+        self.send("1")
+        r = self.responder("2")
+        self.assertEqual(r["action"], "TEXTO")
+        self.assertEqual(r["content"], "Atendemos de segunda a sexta, das 9h às 18h.")
+        lead = Lead.objects.get()
+        self.assertEqual(lead.state, "apresentacao")
+        self.assertEqual(Event.objects.get(pk=r["event_id"]).marker, "RESPONDER")
+
+    def test_primeira_mensagem_nunca_vira_resposta_livre(self):
+        r = self.responder("1")
+        self.assertEqual(r["question_id"], "apresentacao")
+        self.assertIn("Olá!", r["content"])
+        self.assertEqual(Lead.objects.get().state, "apresentacao")
+
+    def test_bloqueia_depois_que_o_fluxo_comecou(self):
+        self.send("1")
+        self.send("2", marker="ATUALIZAR", question_id="", fields={"proxima": "nome"})
+        r = self.responder("3")
+        self.assertEqual(r["action"], "NO_REPLY")
+        self.assertEqual(Lead.objects.get().state, "nome")
+
+    def test_bloqueia_sem_agente_conversacional_ou_com_etapa_inicial(self):
+        self.send("1")
+        Company.objects.filter(pk=self.company.pk).update(agente_conversacional=False)
+        self.company.refresh_from_db()
+        self.assertEqual(self.responder("2")["action"], "NO_REPLY")
+        Company.objects.filter(pk=self.company.pk).update(agente_conversacional=True)
+        self.company.refresh_from_db()
+        self.assertEqual(self.responder("3")["action"], "TEXTO")
+
+    def test_texto_invalido_nao_e_enviado(self):
+        self.send("1")
+        self.assertEqual(self.responder("2", texto="   ")["action"], "NO_REPLY")
+        self.assertEqual(self.responder("3", texto="a" * 1001)["action"], "NO_REPLY")
+        self.assertEqual(self.responder("4", texto="veja [[AXIOMA:Q:nome]]")["action"], "NO_REPLY")
+        self.assertEqual(Lead.objects.get().state, "apresentacao")
+
+    def test_limite_de_respostas_reenvia_o_texto_aprovado(self):
+        from .services import MAX_RESPOSTAS_LIVRES
+        self.send("1")
+        for i in range(MAX_RESPOSTAS_LIVRES):
+            self.assertEqual(self.responder(f"r{i}", texto=f"resp {i}")["content"], f"resp {i}")
+        r = self.responder("extra")
+        self.assertEqual(r["question_id"], "apresentacao")
+        self.assertIn("Olá!", r["content"])
+        status = status_contato(self.company, "+5585911119999")
+        self.assertEqual(status["conversa_livre_restante"], 0)
+
+    def test_status_e_contexto_expoem_a_janela_e_os_dados_da_empresa(self):
+        self.send("1")
+        self.assertEqual(status_contato(self.company, "+5585911119999")["conversa_livre_restante"], 6)
+        ctx = contexto_agente(self.company)["conversa_livre"]
+        self.assertTrue(ctx["ativa"])
+        self.assertEqual(ctx["dados_empresa"], [{"titulo": "Horário", "conteudo": "Seg a sex, 9h às 18h"}])
+        self.send("2", marker="ATUALIZAR", question_id="", fields={"proxima": "nome"})
+        self.assertEqual(status_contato(self.company, "+5585911119999")["conversa_livre_restante"], 0)
+
+    def test_contexto_sem_modo_conversacional_nao_entrega_dados_da_empresa(self):
+        Company.objects.filter(pk=self.company.pk).update(agente_conversacional=False)
+        self.company.refresh_from_db()
+        self.assertEqual(contexto_agente(self.company)["conversa_livre"], {"ativa": False, "maximo_respostas": 6, "dados_empresa": []})
+
+    def test_serializer_aceita_marcador_e_texto(self):
+        from .serializers import IncomingSerializer
+        s = IncomingSerializer(data={"contact": "+5585911119999", "message_id": "x", "marker": "RESPONDER", "fields": {"texto": "oi"}})
+        self.assertTrue(s.is_valid(), s.errors)

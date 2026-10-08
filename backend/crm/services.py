@@ -281,6 +281,24 @@ def estado_spin_para_retomar(company, lead):
     return ids[0] if ids else ""
 
 MAX_REPETICOES = 3
+# Conversa livre (marcador RESPONDER): só antes do fluxo e com teto de respostas por lead.
+ESTADOS_PRE_FLUXO = ("apresentacao", "empresa")
+MAX_RESPOSTAS_LIVRES = 6
+LIMITE_TEXTO_LIVRE = 1000
+
+def conversa_livre_ativa(company):
+    return bool(company.agente_conversacional and not company.etapa_inicial)
+
+def respostas_livres_enviadas(lead):
+    return Event.objects.filter(lead=lead, marker="RESPONDER", result__action__in=["TEXTO", "AUDIO"]).count()
+
+def conversa_livre_restante(company, lead):
+    """Quantas respostas livres o agente ainda pode dar a este lead (0 = indisponível)."""
+    if not lead or lead.desfecho or lead.bot_closed or lead.pedido_humano_pendente or not conversa_livre_ativa(company):
+        return 0
+    if lead.state not in ESTADOS_PRE_FLUXO or not texto_fora_habilitado(company, "apresentacao"):
+        return 0
+    return max(0, MAX_RESPOSTAS_LIVRES - respostas_livres_enviadas(lead))
 REPEAT_PREFIX = "Por favor, responda novamente. "
 JANELA_ENTREGA_PENDENTE = timedelta(seconds=90)
 
@@ -384,6 +402,7 @@ def status_contato(company, contact):
         # Área já classificada no lead ativo: define qual lista SPIN o agente segue.
         "especialidade": (lead.especialidade or "") if lead and not lead.desfecho else "",
         "pergunta_inicial": pergunta_inicial(company),
+        "conversa_livre_restante": conversa_livre_restante(company, lead) if lead and aceita and motivo == "em_triagem" else 0,
         "campos": {key: (lead.name or lead.contact_name) if key == "nome" else getattr(lead, model_field) for key, model_field in FIELD_MAP.items()} if lead and aceita else {},
         "variaveis_roteiro": (lead.variaveis_roteiro or {}) if lead and aceita else {},
         "pode_classificar": bool(lead and aceita and dados_para_classificar(company, lead) and not perguntas_obrigatorias_pendentes(company, lead)),
@@ -514,6 +533,22 @@ def receive(company, data):
                 question_id = None
             else:
                 lead.state = question_id
+        elif marker == "RESPONDER":
+            texto = re.sub(r"[ \t]+", " ", str(fields.get("texto") or "")).strip()
+            question_id = None
+            if lead.state not in ESTADOS_PRE_FLUXO or not conversa_livre_ativa(company) or lead.bot_closed:
+                # Fora da janela anterior ao fluxo (ou empresa sem o modo): nunca envia.
+                event.summary = "Resposta livre bloqueada: só vale antes do fluxo, com Agente conversacional ligado"
+            elif not texto or len(texto) > LIMITE_TEXTO_LIVRE or "[[AXIOMA" in texto:
+                event.summary = "Resposta livre inválida (vazia, longa demais ou com marcador)"
+            elif conversa_livre_restante(company, lead) <= 0:
+                # Teto atingido: reenvia o convite aprovado em vez de conversar sem fim.
+                question_id = lead.state
+                event.summary = "Limite de respostas livres atingido; reenviando o texto aprovado"
+            else:
+                result = {"action": "TEXTO", "content": texto, "question_id": "conversa"}
+                event.delivery = "PENDING"
+                event.summary = "Resposta livre antes do fluxo"
         elif marker == "REPETIR":
             if contar_repeticoes(lead, excluir_pk=event.pk) >= MAX_REPETICOES:
                 # Último recurso (a ponte avança antes disso): triagem travada não vai pra equipe,
@@ -1392,6 +1427,11 @@ def contexto_agente(company):
         "mensagens_audio": company.audio_ativo,
         "numero_agente": company.numero_agente,
         "areas": [a.name for a in areas],
+        "conversa_livre": {
+            "ativa": conversa_livre_ativa(company),
+            "maximo_respostas": MAX_RESPOSTAS_LIVRES,
+            "dados_empresa": [{"titulo": e.title, "conteudo": e.content} for e in company.info_entries.all() if e.content.strip()] if conversa_livre_ativa(company) else [],
+        },
         "perguntas": perguntas,
         "spin": spin,
         "fora_do_fluxo": fora_do_fluxo,

@@ -268,6 +268,8 @@ class AgentFieldsSerializer(serializers.Serializer):
     # usado pra especialidade/Area. "validar" e "encerramento" continuam
     # reservados (nunca um "proxima" válido), também checado lá.
     proxima = serializers.CharField(max_length=80, required=False, allow_blank=True)
+    # RESPONDER: texto livre do agente, só antes do fluxo (validado em services.receive).
+    texto = serializers.CharField(max_length=1500, required=False, allow_blank=True)
     # CLASSIFICADO: nota 0-10 por question_id respondido; o CRM calcula a urgência
     # ponderando pelos pesos das Variáveis (services.calcular_urgencia).
     notas = serializers.DictField(child=serializers.FloatField(min_value=0, max_value=10), required=False)
@@ -280,7 +282,7 @@ class IncomingSerializer(serializers.Serializer):
     contact_name = serializers.CharField(max_length=160, required=False, allow_blank=True, default="")
     message_id = serializers.CharField(max_length=160)
     kind = serializers.ChoiceField(choices=["text", "audio"], default="text")
-    marker = serializers.ChoiceField(choices=["Q", "REPETIR", "ATUALIZAR", "VALIDAR", "CLASSIFICADO"])
+    marker = serializers.ChoiceField(choices=["Q", "REPETIR", "ATUALIZAR", "VALIDAR", "CLASSIFICADO", "RESPONDER"])
     question_id = serializers.CharField(max_length=80, required=False, allow_blank=True, default="")
     fields = AgentFieldsSerializer(required=False, default=dict)
     human_required = serializers.BooleanField(default=False)

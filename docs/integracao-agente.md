@@ -117,7 +117,7 @@ Corpo da requisição — um por marcador emitido pelo agent:
   "contact": "+5585999887766",       // E.164, obrigatório
   "message_id": "id-unico-do-provedor", // idempotência: repetir o mesmo id nunca gera efeito duas vezes
   "kind": "text",                    // "text" ou "audio" — o tipo da ENTRADA do contato, não da saída
-  "marker": "Q",                     // "Q" | "REPETIR" | "ATUALIZAR" | "VALIDAR" | "CLASSIFICADO"
+  "marker": "Q",                     // "Q" | "REPETIR" | "ATUALIZAR" | "VALIDAR" | "CLASSIFICADO" | "RESPONDER"
   "question_id": "apresentacao",     // obrigatório só quando marker="Q"
   "fields": {},                      // obrigatório (pode ser {}) para ATUALIZAR/VALIDAR/CLASSIFICADO
   "human_required": false,           // true trata reason antes do marcador (exceções abaixo)
@@ -253,6 +253,7 @@ mensagem real (não reaproveitável entre mensagens diferentes).
 | `[[AXIOMA:ATUALIZAR:{...}]]` | os campos conhecidos + **`proxima`** (obrigatório, um `question_id` cadastrado pela empresa na tela Roteiro) | grava os campos, avança o lead para `proxima`, devolve o conteúdo dela |
 | `[[AXIOMA:VALIDAR:{...}]]` | os campos conhecidos (sem `proxima`) | grava os campos, devolve a pergunta de confirmação fixa (`question_id="validar"`) |
 | `[[AXIOMA:CLASSIFICADO:{...}]]` | **`notas`** (recomendado) **ou** `temperatura` + `prioridade` (sem `proxima`). Com `"encerramento_antecipado": true`, pode vir antes do `VALIDAR`, com notas parciais ou nenhuma | Após `VALIDAR`, grava os campos finais, encerra o bot e devolve `question_id="encerramento"`. Desqualificado/Desconfiado recebem desfecho automático, ficam fora do Kanban e liberam o número imediatamente. Encerramento antecipado ou ausência de `VALIDAR` remove a triagem e retorna `NO_REPLY` com `lead_apagado=true`, sem promover notas parciais a Qualificados. |
+| `[[AXIOMA:RESPONDER:{"texto":"..."}]]` | **`texto`** (até 1000 caracteres, sem `[[AXIOMA`) | **Conversa livre**, só com `agente_conversacional` ligado, sem Etapa Inicial, e **antes do fluxo** (`lead.state` em `apresentacao`/`empresa`). Devolve `TEXTO` (ou `AUDIO`) com o texto do agente e `question_id="conversa"`; o estado do lead não muda. Máx. 6 respostas por lead (`conversa_livre_restante` em `/agente/contato/`); estourado, reenvia o texto aprovado da etapa. Fora da janela, texto inválido ou modo desligado → `NO_REPLY` sem alterar o lead. Como primeira mensagem de um lead novo é ignorado (começa pela apresentação). Os dados para responder vêm em `conversa_livre.dados_empresa` do contexto. |
 
 Campos aceitos dentro de `fields` (nomes exatamente como o agent emite):
 
