@@ -52,7 +52,9 @@ class AdminCompanySerializer(serializers.ModelSerializer):
     def get_tem_agente_ativo(self, obj):
         from .services import agent_status
         status = agent_status(obj)
-        if not status["masked_key"]:
+        # Chave existente não basta: conta desvinculada da empresa (o agente recebe 404) ou
+        # desativada não é "agente ativo".
+        if not status["masked_key"] or not status["vinculada"] or not status["ativa"]:
             return False
         return not (status["validade"] and status["validade"]["expirado"])
 

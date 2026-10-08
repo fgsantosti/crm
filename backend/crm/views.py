@@ -23,6 +23,9 @@ from .services import (
     solicitar_troca_email, confirmar_troca_email as confirmar_troca_email_service,
     redefinir_senha_atendente as redefinir_senha_atendente_service,
     agent_status, gerar_token_agente, revogar_token_agente, excluir_empresa,
+    contas_da_empresa, vincular_conta_agente, dados_conta_empresa, contas_empresa_queryset,
+    criar_conta_empresa as criar_conta_empresa_service, enviar_credenciais_conta_empresa,
+    redefinir_senha_conta_empresa, enviar_redefinicao_conta_empresa,
     reivindicar_lead as reivindicar_lead_service,
     acompanhar_lead as acompanhar_lead_service,
     mover_para_negociacao as mover_para_negociacao_service,
@@ -640,9 +643,60 @@ class AdminCompanyViewSet(viewsets.ModelViewSet):
                 return Response({"detail": "validade_dias precisa ser um número inteiro."}, status=400)
             if dias < 1 or dias > 730:
                 return Response({"detail": "Validade deve ser entre 1 e 730 dias."}, status=400)
-            return Response(gerar_token_agente(company, dias))
-        revogar_token_agente(company)
+            try:
+                return Response(gerar_token_agente(company, dias))
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=400)
+        user_id = request.query_params.get("user_id")
+        if user_id not in (None, "") and not str(user_id).isdigit():
+            return Response({"detail": "user_id inválido."}, status=400)
+        if not revogar_token_agente(company, int(user_id) if user_id else None):
+            return Response({"detail": "Esta conta de agente não pertence à empresa."}, status=404)
         return Response({"detail": "Token revogado."})
+
+    # --- Contas do seletor da empresa (Painel Admin): agente + conta Empresa -------------------
+
+    @action(detail=True, methods=["get"])
+    def contas(self, request, pk=None):
+        return Response(contas_da_empresa(self.get_object()))
+
+    @action(detail=True, methods=["post"], url_path="contas/agente/vincular")
+    def vincular_agente(self, request, pk=None):
+        """Religa a conta do agente à empresa (ou a cria) sem trocar a chave."""
+        try:
+            return Response(vincular_conta_agente(self.get_object()))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+
+    @action(detail=True, methods=["post"], url_path="contas/empresa")
+    def criar_conta_empresa(self, request, pk=None):
+        company = self.get_object()
+        try:
+            user, senha = criar_conta_empresa_service(company, request.data.get("email"), request.data.get("nome"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        enviado = enviar_credenciais_conta_empresa(user, senha, company.name)
+        return Response({"conta": dados_conta_empresa(user), "senha_provisoria": senha, "email_enviado": enviado}, status=201)
+
+    def _conta_empresa(self, company, user_id):
+        return get_object_or_404(contas_empresa_queryset(company), pk=user_id)
+
+    @action(detail=True, methods=["post"], url_path=r"contas/empresa/(?P<user_id>\d+)/redefinir-senha")
+    def redefinir_senha_empresa(self, request, pk=None, user_id=None):
+        user = self._conta_empresa(self.get_object(), user_id)
+        senha = redefinir_senha_conta_empresa(user)
+        return Response({"conta": dados_conta_empresa(user), "senha_provisoria": senha, "email_enviado": enviar_redefinicao_conta_empresa(user, senha)})
+
+    @action(detail=True, methods=["patch"], url_path=r"contas/empresa/(?P<user_id>\d+)")
+    def alterar_conta_empresa(self, request, pk=None, user_id=None):
+        """Desativa/reativa o login da conta Empresa (reversível; não apaga nada)."""
+        user = self._conta_empresa(self.get_object(), user_id)
+        ativo = request.data.get("is_active")
+        if not isinstance(ativo, bool):
+            return Response({"detail": "Informe is_active como true ou false."}, status=400)
+        user.is_active = ativo
+        user.save(update_fields=["is_active"])
+        return Response({"conta": dados_conta_empresa(user)})
 
     @action(detail=False, methods=["get"])
     def overview(self, request):

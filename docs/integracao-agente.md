@@ -629,3 +629,18 @@ Admin, modelo `Question`):
 Se o agent pedir um `question_id` sem `Question` cadastrada para aquela
 empresa, o CRM devolve `NO_REPLY` e transfere o lead para atendimento humano
 — não inventa texto.
+
+## Contas da empresa no painel Admin
+
+No Admin (superusuário), ao selecionar uma empresa:
+
+- **Conta do agente**: mostra se a conta está *vinculada* à empresa e *ativa*. Conta sem vínculo
+  faz o agente receber 404 em todas as chamadas, mesmo com chave válida; **Religar à empresa**
+  (`POST /admin-companies/{id}/contas/agente/vincular/`) cria/reativa/religa a conta sem trocar a
+  chave. A conta é localizada pelo grupo `agente` + vínculo à empresa (sobrevive a renomear a
+  empresa); uma conta de agente de outra empresa nunca é religada (400).
+- **Contas Empresa** (`is_staff`): `GET /admin-companies/{id}/contas/`, criar
+  (`POST .../contas/empresa/`, senha provisória exibida uma vez + e-mail), nova senha
+  (`POST .../contas/empresa/{user}/redefinir-senha/`) e ativar/desativar
+  (`PATCH .../contas/empresa/{user}/` com `{"is_active": bool}`).
+- **Outras contas de agente** da mesma empresa: revogar chave via `DELETE .../agente/?user_id=`.

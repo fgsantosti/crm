@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Spinner, SkeletonCards } from '../components/Skeleton';
 import { fetchTodasAsPaginas, type Api } from '../api';
+import { AdminContas } from '../components/AdminContas';
 import type { AdminCompany, AgentStatus } from '../types';
 
 /**
@@ -120,6 +121,22 @@ export function Admin({ api }: { api: Api }) {
       const status = await api(`/admin-companies/${selected.id}/agente/`);
       setAgentStatus(status);
       setCompanies((v) => v.map((c) => (c.id === selected.id ? { ...c, tem_agente_ativo: true } : c)));
+    } catch (err) {
+      setAgentError((err as Error).message);
+    } finally {
+      setAgentBusy(false);
+    }
+  }
+
+  async function religarAgente() {
+    if (!selected) return;
+    setAgentBusy(true);
+    setAgentError('');
+    try {
+      await api(`/admin-companies/${selected.id}/contas/agente/vincular/`, { method: 'POST' });
+      const status = await api(`/admin-companies/${selected.id}/agente/`);
+      setAgentStatus(status);
+      setCompanies((v) => v.map((c) => (c.id === selected.id ? { ...c, tem_agente_ativo: Boolean(status.masked_key && status.ativa && !status.validade?.expirado) } : c)));
     } catch (err) {
       setAgentError((err as Error).message);
     } finally {
@@ -251,7 +268,7 @@ export function Admin({ api }: { api: Api }) {
           {!selected ? (
             <div className="empty">Selecione uma empresa na lista para ver os detalhes.</div>
           ) : (
-            <form key={selected.id} onSubmit={saveCompany}>
+            <div key={selected.id}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                 <h2 style={{ fontSize: 21 }}>{selected.name}</h2>
                 <span className={`badge ${selected.tem_agente_ativo ? 'status-active' : 'status-pending'}`}>
@@ -260,6 +277,7 @@ export function Admin({ api }: { api: Api }) {
               </div>
               <p style={{ fontSize: '13.5px', marginBottom: 18 }}>{selected.member_count} conta(s) vinculada(s).</p>
 
+              <form onSubmit={saveCompany}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <label>
                   Nome
@@ -282,6 +300,7 @@ export function Admin({ api }: { api: Api }) {
                 {savingCompany && <Spinner />}
                 Salvar
               </button>
+              </form>
 
               <div className="section-divider" />
 
@@ -290,6 +309,21 @@ export function Admin({ api }: { api: Api }) {
                 <p style={{ fontSize: 13, marginBottom: 14 }}>Usadas pelo agente Axioma desta empresa para autenticar no Conecta CRM.</p>
 
                 {agentError && <p className="error">{agentError}</p>}
+
+                {agentStatus?.existe && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+                    <span className={`badge ${agentStatus.vinculada ? 'status-active' : 'status-pending'}`}>{agentStatus.vinculada ? 'Conta vinculada à empresa' : 'Conta SEM vínculo'}</span>
+                    <span className={`badge ${agentStatus.ativa ? 'status-active' : 'status-pending'}`}>{agentStatus.ativa ? 'Conta ativa' : 'Conta desativada'}</span>
+                    {!agentStatus.vinculada && (
+                      <button type="button" className="secondary" onClick={religarAgente} disabled={agentBusy}>
+                        Religar à empresa
+                      </button>
+                    )}
+                  </div>
+                )}
+                {agentStatus?.existe && !agentStatus.vinculada && (
+                  <p className="error" style={{ fontSize: 12.5 }}>Sem vínculo, o agente recebe 404 em todas as chamadas ao CRM, mesmo com a chave válida.</p>
+                )}
 
                 {generatedKey ? (
                   <div style={{ background: 'var(--warn-soft)', border: '1px solid var(--warn)', borderRadius: 10, padding: 14, marginBottom: 14 }}>
@@ -347,6 +381,10 @@ export function Admin({ api }: { api: Api }) {
 
               <div className="section-divider" />
 
+              <AdminContas api={api} companyId={selected.id} companyName={selected.name} />
+
+              <div className="section-divider" />
+
               <div>
                 <h3 style={{ fontSize: 15, marginBottom: 10 }}>Integração com a API</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
@@ -389,7 +427,7 @@ export function Admin({ api }: { api: Api }) {
                   Excluir empresa definitivamente
                 </button>
               </div>
-            </form>
+            </div>
           )}
         </aside>
     </div>

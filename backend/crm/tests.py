@@ -2768,3 +2768,238 @@ class NecessidadeHumanaTests(TestCase):
         self.assertEqual(self.question.text, "Texto aprovado pela empresa")
         self.assertEqual(Question.objects.filter(question_id="necessidade_humana").count(), 2)
         self.assertTrue(Question.objects.get(company=self.other, question_id="necessidade_humana").obrigatoria)
+
+
+class AdminContasEmpresaAgenteTests(TestCase):
+    """Painel Admin → seletor da empresa: controle da conta do agente e das contas Empresa."""
+
+    def setUp(self):
+        from .services import seed_roteiro_padrao
+        User = get_user_model()
+        self.su = User.objects.create_superuser(username="root-contas", password="x")
+        self.empresa = Company.objects.create(name="Contas Ltda")
+        seed_roteiro_padrao(self.empresa)
+        self.outra = Company.objects.create(name="Outra Contas")
+        seed_roteiro_padrao(self.outra)
+        self.c = APIClient()
+        self.c.force_authenticate(self.su)
+        self.base = f"/api/admin-companies/{self.empresa.pk}"
+
+    def gerar_chave(self, company=None):
+        company = company or self.empresa
+        resp = self.c.post(f"/api/admin-companies/{company.pk}/agente/", {"validade_dias": 30}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        return resp.json()["token"]
+
+    def criar_empresa(self, email="dono@contas.com", nome="Dono da Empresa"):
+        resp = self.c.post(f"{self.base}/contas/empresa/", {"email": email, "nome": nome}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        return resp.json()
+
+    def login(self, username, password):
+        return APIClient().post("/api/login/", {"username": username, "password": password}, format="json")
+
+    def agente_client(self, token):
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f"Token {token}")
+        return c
+
+    def test_contas_lista_agente_e_contas_empresa(self):
+        self.gerar_chave()
+        self.criar_empresa()
+        dados = self.c.get(f"{self.base}/contas/").json()
+        self.assertTrue(dados["agente"]["existe"])
+        self.assertTrue(dados["agente"]["vinculada"])
+        self.assertTrue(dados["agente"]["ativa"])
+        self.assertTrue(dados["agente"]["masked_key"])
+        self.assertEqual(dados["agentes_extras"], [])
+        self.assertEqual([c["username"] for c in dados["empresa"]], ["dono@contas.com"])
+        self.assertTrue(dados["empresa"][0]["must_change_password"])
+        self.assertTrue(dados["empresa"][0]["is_active"])
+
+    def test_conta_desvinculada_nao_e_agente_ativo_e_religa_sem_trocar_a_chave(self):
+        token = self.gerar_chave()
+        agente = get_user_model().objects.get(username="agente.contas-ltda")
+        self.empresa.members.remove(agente)
+        # O sintoma real: chave válida, mas o agente recebe 404 e o painel dizia "Agente ativo".
+        self.assertEqual(self.agente_client(token).get(f"/api/companies/{self.empresa.pk}/agente/contexto/").status_code, 404)
+        status = self.c.get(f"{self.base}/contas/").json()["agente"]
+        self.assertFalse(status["vinculada"])
+        self.assertTrue(status["masked_key"])
+        self.assertFalse(self.c.get(f"{self.base}/").json()["tem_agente_ativo"])
+
+        resp = self.c.post(f"{self.base}/contas/agente/vincular/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertTrue(resp.json()["vinculada"])
+        self.assertEqual(resp.json()["masked_key"], status["masked_key"])  # mesma chave
+        self.assertEqual(self.agente_client(token).get(f"/api/companies/{self.empresa.pk}/agente/contexto/").status_code, 200)
+        self.assertTrue(self.c.get(f"{self.base}/").json()["tem_agente_ativo"])
+        self.assertEqual(self.c.post(f"{self.base}/contas/agente/vincular/").status_code, 200)  # idempotente
+
+    def test_vincular_cria_a_conta_quando_ela_nao_existe_e_reativa_conta_desativada(self):
+        User = get_user_model()
+        status = self.c.post(f"{self.base}/contas/agente/vincular/").json()
+        self.assertTrue(status["existe"] and status["vinculada"])
+        self.assertIsNone(status["masked_key"])  # conta criada sem chave
+        agente = User.objects.get(username="agente.contas-ltda")
+        self.assertFalse(agente.has_usable_password())
+        self.assertTrue(agente.groups.filter(name="agente").exists())
+        agente.is_active = False
+        agente.save()
+        self.assertFalse(self.c.get(f"{self.base}/contas/").json()["agente"]["ativa"])
+        self.assertTrue(self.c.post(f"{self.base}/contas/agente/vincular/").json()["ativa"])
+
+    def test_gerar_chave_com_empresa_renomeada_reaproveita_a_conta(self):
+        User = get_user_model()
+        self.gerar_chave()
+        self.assertEqual(self.c.patch(f"{self.base}/", {"name": "Nome Totalmente Novo"}, format="json").status_code, 200)
+        self.assertTrue(self.c.get(f"{self.base}/contas/").json()["agente"]["existe"])
+        self.gerar_chave()
+        self.assertEqual(User.objects.filter(groups__name="agente").count(), 1)
+
+    def test_conta_de_agente_de_outra_empresa_nunca_e_religada(self):
+        User = get_user_model()
+        grupo, _ = __import__("django.contrib.auth.models", fromlist=["Group"]).Group.objects.get_or_create(name="agente")
+        alheia = User.objects.create_user(username="agente.contas-ltda")
+        alheia.groups.add(grupo)
+        self.outra.members.add(alheia)
+        resp = self.c.post(f"{self.base}/contas/agente/vincular/")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("outra empresa", resp.json()["detail"])
+        self.assertFalse(self.empresa.members.filter(pk=alheia.pk).exists())
+        self.assertEqual(self.c.post(f"{self.base}/agente/", {"validade_dias": 30}, format="json").status_code, 400)
+
+    def test_criar_conta_empresa(self):
+        dados = self.criar_empresa(email="  Dono@Contas.com ", nome="Dono da Empresa")
+        User = get_user_model()
+        user = User.objects.get(username="dono@contas.com")
+        self.assertTrue(user.is_staff)
+        self.assertFalse(user.is_superuser)
+        self.assertTrue(self.empresa.members.filter(pk=user.pk).exists())
+        self.assertFalse(self.outra.members.filter(pk=user.pk).exists())
+        self.assertTrue(PasswordChangeRequired.objects.filter(user=user).exists())
+        self.assertTrue(dados["email_enviado"])
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(dados["senha_provisoria"], mail.outbox[0].body)
+        # A senha provisória realmente entra, e o sistema exige a troca.
+        resp = self.login("dono@contas.com", dados["senha_provisoria"])
+        self.assertEqual(resp.status_code, 200, resp.content)
+        me = APIClient()
+        me.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.json()['access']}")
+        self.assertTrue(me.get("/api/me/").json()["must_change_password"])
+
+    def test_criar_conta_empresa_rejeita_email_invalido_e_duplicado(self):
+        User = get_user_model()
+        for ruim in ["", "abc", "a@b", "a b@c.com"]:
+            self.assertEqual(self.c.post(f"{self.base}/contas/empresa/", {"email": ruim}, format="json").status_code, 400, ruim)
+        self.criar_empresa(email="dono@contas.com")
+        self.assertEqual(self.c.post(f"{self.base}/contas/empresa/", {"email": "DONO@contas.com"}, format="json").status_code, 400)
+        User.objects.create_user(username="x", email="alheio@outra.com").companies.add(self.outra)
+        resp = self.c.post(f"{self.base}/contas/empresa/", {"email": "alheio@outra.com"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Já existe", resp.json()["detail"])
+
+    def test_falha_no_envio_do_email_nao_desfaz_a_conta(self):
+        from unittest import mock
+        with mock.patch("crm.services.send_credentials_email", side_effect=RuntimeError("smtp fora")):
+            resp = self.c.post(f"{self.base}/contas/empresa/", {"email": "dono@contas.com"}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertFalse(resp.json()["email_enviado"])
+        self.assertTrue(resp.json()["senha_provisoria"])
+        self.assertTrue(get_user_model().objects.filter(username="dono@contas.com").exists())
+
+    def test_redefinir_senha_da_conta_empresa(self):
+        dados = self.criar_empresa()
+        conta_id = dados["conta"]["id"]
+        resp = self.c.post(f"{self.base}/contas/empresa/{conta_id}/redefinir-senha/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        nova = resp.json()["senha_provisoria"]
+        self.assertNotEqual(nova, dados["senha_provisoria"])
+        self.assertTrue(resp.json()["email_enviado"])
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertGreaterEqual(self.login("dono@contas.com", dados["senha_provisoria"]).status_code, 400)
+        self.assertEqual(self.login("dono@contas.com", nova).status_code, 200)
+        self.assertTrue(PasswordChangeRequired.objects.filter(user_id=conta_id).exists())
+
+    def test_so_alcanca_contas_empresa_desta_empresa(self):
+        User = get_user_model()
+        atendente = User.objects.create_user(username="atendente@contas.com")
+        self.empresa.members.add(atendente)
+        outra_conta = User.objects.create_user(username="dono@outra.com", is_staff=True)
+        self.outra.members.add(outra_conta)
+        self.gerar_chave()
+        agente = User.objects.get(username="agente.contas-ltda")
+        for alvo in (atendente, outra_conta, agente, self.su):
+            self.assertEqual(self.c.post(f"{self.base}/contas/empresa/{alvo.pk}/redefinir-senha/").status_code, 404, alvo.username)
+            self.assertEqual(self.c.patch(f"{self.base}/contas/empresa/{alvo.pk}/", {"is_active": False}, format="json").status_code, 404, alvo.username)
+            alvo.refresh_from_db()
+            self.assertTrue(alvo.is_active)
+        self.assertEqual(self.c.get(f"{self.base}/contas/").json()["empresa"], [])
+
+    def test_desativar_e_reativar_conta_empresa(self):
+        dados = self.criar_empresa()
+        conta_id = dados["conta"]["id"]
+        url = f"{self.base}/contas/empresa/{conta_id}/"
+        self.assertEqual(self.c.patch(url, {"is_active": "nao"}, format="json").status_code, 400)
+        self.assertFalse(self.c.patch(url, {"is_active": False}, format="json").json()["conta"]["is_active"])
+        self.assertGreaterEqual(self.login("dono@contas.com", dados["senha_provisoria"]).status_code, 400)
+        self.assertTrue(self.c.patch(url, {"is_active": True}, format="json").json()["conta"]["is_active"])
+        self.assertEqual(self.login("dono@contas.com", dados["senha_provisoria"]).status_code, 200)
+
+    def test_revogar_chave_de_conta_de_agente_extra(self):
+        from django.contrib.auth.models import Group
+        from rest_framework.authtoken.models import Token
+        User = get_user_model()
+        principal_token = self.gerar_chave()
+        grupo, _ = Group.objects.get_or_create(name="agente")
+        legado = User.objects.create_user(username="agente.nome-antigo")
+        legado.groups.add(grupo)
+        self.empresa.members.add(legado)
+        Token.objects.create(user=legado)
+        alheio = User.objects.create_user(username="agente.de-outra")
+        alheio.groups.add(grupo)
+        self.outra.members.add(alheio)
+        Token.objects.create(user=alheio)
+
+        extras = self.c.get(f"{self.base}/contas/").json()["agentes_extras"]
+        self.assertEqual([e["username"] for e in extras], ["agente.nome-antigo"])
+        self.assertTrue(extras[0]["masked_key"])
+
+        url = f"{self.base}/agente/"
+        self.assertEqual(self.c.delete(f"{url}?user_id={alheio.pk}").status_code, 404)
+        self.assertTrue(Token.objects.filter(user=alheio).exists())
+        self.assertEqual(self.c.delete(f"{url}?user_id=abc").status_code, 400)
+        self.assertEqual(self.c.delete(f"{url}?user_id={legado.pk}").status_code, 200)
+        self.assertFalse(Token.objects.filter(user=legado).exists())
+        self.assertEqual(self.agente_client(principal_token).get(f"/api/companies/{self.empresa.pk}/agente/contexto/").status_code, 200)
+        self.assertEqual(self.c.delete(url).status_code, 200)  # sem user_id: a principal
+        self.assertEqual(self.agente_client(principal_token).get(f"/api/companies/{self.empresa.pk}/agente/contexto/").status_code, 401)
+
+    def test_so_superuser_acessa_os_controles(self):
+        from django.contrib.auth.models import Group
+        User = get_user_model()
+        empresa = User.objects.create_user(username="dono-estaff@x.com", is_staff=True)
+        atendente = User.objects.create_user(username="atendente@x.com")
+        agente = User.objects.create_user(username="agente.qualquer")
+        agente.groups.add(Group.objects.get_or_create(name="agente")[0])
+        self.empresa.members.add(empresa, atendente, agente)
+        alvo = self.criar_empresa()["conta"]["id"]
+        chamadas = [
+            ("get", f"{self.base}/contas/", None),
+            ("post", f"{self.base}/contas/agente/vincular/", None),
+            ("post", f"{self.base}/contas/empresa/", {"email": "novo@x.com"}),
+            ("post", f"{self.base}/contas/empresa/{alvo}/redefinir-senha/", None),
+            ("patch", f"{self.base}/contas/empresa/{alvo}/", {"is_active": False}),
+            ("delete", f"{self.base}/agente/", None),
+        ]
+        for quem in (empresa, atendente, agente):
+            cliente = APIClient()
+            cliente.force_authenticate(quem)
+            for metodo, url, corpo in chamadas:
+                resp = getattr(cliente, metodo)(url, corpo, format="json") if corpo is not None else getattr(cliente, metodo)(url)
+                self.assertEqual(resp.status_code, 403, f"{quem.username} {metodo} {url}")
+        for metodo, url, corpo in chamadas:
+            anonimo = APIClient()
+            resp = getattr(anonimo, metodo)(url, corpo, format="json") if corpo is not None else getattr(anonimo, metodo)(url)
+            self.assertIn(resp.status_code, (401, 403), f"anônimo {metodo} {url}")
+        self.assertTrue(User.objects.get(pk=alvo).is_active)

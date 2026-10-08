@@ -12,7 +12,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.authtoken.models import Token
 from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
-from .models import Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, DEFAULT_HUMAN_MESSAGE
+from .models import Profile, Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, DEFAULT_HUMAN_MESSAGE
 
 logger = logging.getLogger(__name__)
 
@@ -803,22 +803,72 @@ def redefinir_senha_atendente(atendente):
 def _agent_username(company):
     return f"agente.{slugify(company.name)}"
 
-def agent_status(company):
-    """Estado atual do token do agente desta empresa, pra tela Admin e pro
-    serializer (nunca devolve a chave inteira, só uma prévia mascarada)."""
+def conta_agente_principal(company):
+    """Conta de serviço do agente desta empresa -> (usuário ou None, vinculada?).
+
+    Procura primeiro entre os MEMBROS da empresa que estão no grupo "agente" (assim renomear a
+    empresa não "perde" a conta nem cria uma segunda). Sem membro, cai no username padrão
+    agente.<slug> -- só se essa conta não pertencer a nenhuma outra empresa (uma conta de agente
+    nunca pode ser compartilhada entre empresas); nesse caso ela existe mas está DESVINCULADA, e
+    o agente dela recebe 404 do CRM até ser religada."""
     User = get_user_model()
     username = _agent_username(company)
-    user = User.objects.filter(username=username).first()
-    if not user:
-        return {"existe": False, "username": username, "masked_key": None, "validade": None}
+    membros = list(company.members.filter(groups__name="agente").order_by("pk"))
+    for u in membros:
+        if u.username == username:
+            return u, True
+    if membros:
+        return membros[0], True
+    u = User.objects.filter(username=username).first()
+    if u and u.groups.filter(name="agente").exists() and not u.companies.exists():
+        return u, False
+    return None, False
+
+def _status_conta_agente(user, vinculada):
     token = Token.objects.filter(user=user).first()
-    if not token:
-        return {"existe": True, "username": username, "masked_key": None, "validade": None}
-    expiry = getattr(token, "expiry", None)
-    validade = None
-    if expiry:
-        validade = {"expires_at": expiry.expires_at, "expirado": expiry.expires_at < timezone.now()}
-    return {"existe": True, "username": username, "masked_key": f"{token.key[:8]}…{token.key[-4:]}", "validade": validade}
+    masked, validade = None, None
+    if token:
+        masked = f"{token.key[:8]}…{token.key[-4:]}"
+        expiry = getattr(token, "expiry", None)
+        if expiry:
+            validade = {"expires_at": expiry.expires_at, "expirado": expiry.expires_at < timezone.now()}
+    return {"existe": True, "id": user.pk, "username": user.username, "vinculada": vinculada,
+            "ativa": user.is_active, "masked_key": masked, "validade": validade}
+
+def agent_status(company):
+    """Estado atual da conta e do token do agente desta empresa, pra tela Admin e pro
+    serializer (nunca devolve a chave inteira, só uma prévia mascarada)."""
+    user, vinculada = conta_agente_principal(company)
+    if not user:
+        return {"existe": False, "id": None, "username": _agent_username(company), "vinculada": False,
+                "ativa": False, "masked_key": None, "validade": None}
+    return _status_conta_agente(user, vinculada)
+
+def _garantir_conta_agente(company):
+    """Cria (se faltar), reativa e liga à empresa a conta de serviço do agente, SEM mexer na chave."""
+    User = get_user_model()
+    agent_group, _ = Group.objects.get_or_create(name="agente")
+    user, _ = conta_agente_principal(company)
+    if user is None:
+        username = _agent_username(company)
+        if User.objects.filter(username=username).exists():
+            raise ValueError(f"A conta {username} já existe e pertence a outra empresa. Renomeie esta empresa.")
+        user = User.objects.create(username=username)
+        user.set_unusable_password()
+        user.save()
+    if not user.is_active:
+        user.is_active = True
+        user.save(update_fields=["is_active"])
+    user.groups.add(agent_group)
+    company.members.add(user)
+    return user
+
+@transaction.atomic
+def vincular_conta_agente(company):
+    """Religa (ou cria) a conta do agente à empresa sem trocar a chave -- o agente volta a
+    funcionar com a mesma chave que já tem. Idempotente."""
+    _garantir_conta_agente(company)
+    return agent_status(company)
 
 @transaction.atomic
 def gerar_token_agente(company, dias_validade):
@@ -826,26 +876,103 @@ def gerar_token_agente(company, dias_validade):
     GERA UM TOKEN NOVO (rotação: qualquer token antigo dessa empresa para de
     funcionar na hora). A chave completa só é devolvida aqui -- depois disso
     só a versão mascarada (agent_status) fica disponível, igual ao Django Admin."""
-    User = get_user_model()
-    agent_group, _ = Group.objects.get_or_create(name="agente")
-    username = _agent_username(company)
-    user, created = User.objects.get_or_create(username=username)
-    if created:
-        user.set_unusable_password()
-        user.save()
-    user.groups.add(agent_group)
-    company.members.add(user)
+    user = _garantir_conta_agente(company)
     Token.objects.filter(user=user).delete()
     token = Token.objects.create(user=user)
     expires_at = timezone.now() + timedelta(days=dias_validade)
     AgentTokenExpiry.objects.create(token=token, expires_at=expires_at)
-    return {"username": username, "token": token.key, "expires_at": expires_at}
+    return {"username": user.username, "token": token.key, "expires_at": expires_at}
 
-def revogar_token_agente(company):
+def revogar_token_agente(company, user_id=None):
+    """Apaga a chave da conta principal do agente, ou a de uma conta de agente específica desta
+    empresa (user_id). Devolve False se user_id não for uma conta de agente desta empresa."""
+    principal, _ = conta_agente_principal(company)
+    if user_id is None:
+        alvo = principal
+    else:
+        alvo = company.members.filter(groups__name="agente", pk=user_id).first()
+        if alvo is None and principal is not None and principal.pk == user_id:
+            alvo = principal  # a principal, mesmo desvinculada, ainda é "desta empresa"
+        if alvo is None:
+            return False
+    if alvo is not None:
+        Token.objects.filter(user=alvo).delete()
+    return True
+
+def dados_conta_empresa(u):
+    profile = getattr(u, "profile", None)
+    return {
+        "id": u.pk, "username": u.username, "email": u.email,
+        "display_name": (profile.display_name if profile else "") or u.first_name,
+        "is_active": u.is_active, "date_joined": u.date_joined, "last_login": u.last_login,
+        "must_change_password": PasswordChangeRequired.objects.filter(user=u).exists(),
+    }
+
+def contas_empresa_queryset(company):
+    return company.members.filter(is_staff=True, is_superuser=False).exclude(groups__name="agente").order_by("username")
+
+def contas_da_empresa(company):
+    """Tudo que o Painel Admin mostra de contas no seletor da empresa: a conta do agente
+    (+ outras contas de agente legadas) e as contas "Empresa" (login humano do cliente)."""
+    principal, _ = conta_agente_principal(company)
+    extras = [
+        _status_conta_agente(u, True)
+        for u in company.members.filter(groups__name="agente").order_by("pk")
+        if not principal or u.pk != principal.pk
+    ]
+    return {
+        "agente": agent_status(company),
+        "agentes_extras": extras,
+        "empresa": [dados_conta_empresa(u) for u in contas_empresa_queryset(company)],
+    }
+
+@transaction.atomic
+def criar_conta_empresa(company, email, nome=""):
+    """Conta Empresa (login humano do cliente no painel): is_staff, membro desta empresa, senha
+    provisória com troca obrigatória no 1º acesso -- mesmo padrão dos convites de atendente.
+    Devolve (usuário, senha provisória); o envio do e-mail é feito pela view (pode falhar sem
+    desfazer a conta, e a senha aparece para o admin uma única vez)."""
     User = get_user_model()
-    user = User.objects.filter(username=_agent_username(company)).first()
-    if user:
-        Token.objects.filter(user=user).delete()
+    email = (email or "").strip().lower()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email) or len(email) > 150:
+        raise ValueError("Informe um e-mail válido.")
+    if User.objects.filter(Q(username__iexact=email) | Q(email__iexact=email)).exists():
+        raise ValueError("Já existe uma conta com este e-mail.")
+    nome = (nome or "").strip()[:150]
+    senha = secrets.token_urlsafe(9)
+    user = User.objects.create_user(username=email, email=email, password=senha, first_name=nome, is_staff=True)
+    Profile.objects.get_or_create(user=user, defaults={"display_name": nome})
+    PasswordChangeRequired.objects.create(user=user)
+    company.members.add(user)
+    return user, senha
+
+def enviar_credenciais_conta_empresa(user, senha, company_name):
+    """True se o e-mail saiu; False (sem levantar) se o SMTP falhou -- a conta já existe e a
+    senha provisória é mostrada ao admin de qualquer jeito."""
+    try:
+        send_credentials_email(user.email, user.first_name or company_name, senha)
+        return True
+    except Exception:
+        logger.exception("Falha ao enviar credenciais da conta Empresa %s", user.pk)
+        return False
+
+def redefinir_senha_conta_empresa(user):
+    """Nova senha provisória (troca obrigatória no próximo login). Devolve a senha."""
+    senha = secrets.token_urlsafe(9)
+    user.set_password(senha)
+    user.save()
+    PasswordChangeRequired.objects.get_or_create(user=user)
+    return senha
+
+def enviar_redefinicao_conta_empresa(user, senha):
+    try:
+        profile = getattr(user, "profile", None)
+        nome = (profile.display_name if profile else "") or user.first_name or user.username
+        send_password_reset_by_admin_email(user.email or user.username, nome, senha)
+        return True
+    except Exception:
+        logger.exception("Falha ao enviar a nova senha da conta Empresa %s", user.pk)
+        return False
 
 @transaction.atomic
 def excluir_empresa(company):

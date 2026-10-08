@@ -182,9 +182,30 @@ export type AdminCompany = {
 
 export type AgentStatus = {
   existe: boolean;
+  id: number | null;
   username: string;
+  /** Conta ligada à empresa (membro). Desvinculada = chave válida, mas o agente recebe 404 do CRM. */
+  vinculada: boolean;
+  ativa: boolean;
   masked_key: string | null;
   validade: { expires_at: string; expirado: boolean } | null;
+};
+
+export type ContaEmpresa = {
+  id: number;
+  username: string;
+  email: string;
+  display_name: string;
+  is_active: boolean;
+  date_joined: string;
+  last_login: string | null;
+  must_change_password: boolean;
+};
+
+export type ContasDaEmpresa = {
+  agente: AgentStatus;
+  agentes_extras: AgentStatus[];
+  empresa: ContaEmpresa[];
 };
 
 export type AdminOverview = {
