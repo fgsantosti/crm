@@ -4,8 +4,6 @@ import type { Company, Lead, Me } from '../types';
 import { LeadDetalheDialog, ObservacoesLead } from '../components/LeadDetalheDialog';
 import { Spinner } from '../components/Skeleton';
 
-export const COR_ESPECIAL = '#7C3AED';
-
 const ROTULOS: Record<string, string> = { acompanhamento: 'Acompanhamento de processo' };
 export const rotuloSituacao = (valor: string) => ROTULOS[valor] ?? valor;
 
@@ -70,30 +68,27 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
     <>
       <header className="page-header" style={{ alignItems: 'flex-end' }}>
         <div>
-          <small className="eyebrow" style={{ color: COR_ESPECIAL }}>Fora do fluxo de leads novos</small>
-          <h1 style={{ color: COR_ESPECIAL }}>Outras situações</h1>
+          <small className="eyebrow">Fora do fluxo de leads novos</small>
+          <h1>Outras situações</h1>
           <p>Clientes que já têm processo e querem acompanhá-lo. Não são leads novos e não têm temperatura.{leads.length ? ` ${leads.length} em aberto.` : ''}</p>
         </div>
       </header>
-    <section className="panel" style={{ borderTop: `3px solid ${COR_ESPECIAL}` }} aria-label="Outras situações em aberto">
       {error && (
-        <p role="alert" className="error" style={{ margin: '0 20px' }}>
+        <p role="alert" className="error">
           {error}
         </p>
       )}
-      <div style={{ padding: '4px 20px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <section className="section">
         {busy && !leads.length && <p style={{ fontSize: 13 }}>Carregando…</p>}
         {!busy && !leads.length && <div className="empty">Nenhum acompanhamento em aberto.</div>}
         {leads.map((l) => (
-          <article key={l.id} className="queue-card" style={{ borderLeft: `4px solid ${COR_ESPECIAL}`, flexDirection: 'column', alignItems: 'stretch' }}>
+          <article key={l.id} className="queue-card" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
               <div style={{ flex: '1 1 320px', minWidth: 0, cursor: 'pointer' }} onClick={() => setDetalhe(l)}>
                 <div className="queue-meta">
                   <strong style={{ fontSize: 16 }}>{l.name || 'Sem nome informado'}</strong>
                   <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 12.5, color: 'var(--muted)' }}>{l.contact}</span>
-                  <span className="chip" style={{ background: 'rgba(124,58,237,.12)', color: COR_ESPECIAL }}>
-                    {rotuloSituacao(l.situacao_especial)}
-                  </span>
+                  <span className="chip chip-neutral">{rotuloSituacao(l.situacao_especial)}</span>
                 </div>
                 <div style={{ fontSize: 13, margin: '4px 0' }}>
                   <ObservacoesLead notes={l.notes} vazio="Sem observações." />
@@ -129,7 +124,6 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
             </div>
           </article>
         ))}
-      </div>
       {detalhe && <LeadDetalheDialog lead={detalhe} estagio={rotuloSituacao(detalhe.situacao_especial)} onClose={() => setDetalhe(null)} />}
     </section>
     </>
