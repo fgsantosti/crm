@@ -3,6 +3,7 @@ import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Company, Lead, Me } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 import { AreaSelect } from '../components/AreaSelect';
+import { ObservacoesLead } from '../components/LeadDetalheDialog';
 
 const DESFECHO_OPTIONS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string; help: string }[] = [
   { value: 'encerrado', label: 'Encerrado', color: 'var(--success)', help: 'Sucesso de comunicação — o cliente conseguiu realizar o que desejava.' },
@@ -218,7 +219,13 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
                   <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 12.5, color: 'var(--muted)' }}>{l.contact}</span>
                   {l.origem_manual && <span className="chip chip-neutral">cadastro manual</span>}
                 </div>
-                <p style={{ color: 'var(--ink)', marginBottom: 4 }}>{l.demand || l.notes || 'Sem detalhes registrados.'}</p>
+                <p style={{ color: 'var(--ink)', marginBottom: 4 }}>{l.demand || (l.notes ? '' : 'Sem detalhes registrados.')}</p>
+                {l.notes && (
+                  <div style={{ fontSize: 13, marginBottom: 6 }}>
+                    <small style={{ display: 'block', color: 'var(--muted)' }}>Observações</small>
+                    <ObservacoesLead notes={l.notes} />
+                  </div>
+                )}
                 <p style={{ fontSize: 12.5 }}>
                   {l.last_contact ? `Último contato em ${new Date(l.last_contact).toLocaleString('pt-BR')}` : 'Sem contato registrado'} · em execução
                 </p>

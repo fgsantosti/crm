@@ -1797,7 +1797,7 @@ class ContatoFecharDonoPendenciasTests(TestCase):
 
     def test_contato_cobre_todos_os_motivos_com_a_mesma_regra_do_incoming(self):
         r = self.contato("+5585911114444").json()
-        self.assertEqual(r, {"contact": "+5585911114444", "lead_id": None, "aceita_agente": True, "motivo": "sem_lead", "ultima_pergunta": None, "repeticoes": 0, "especialidade": "", "pergunta_inicial": "apresentacao", "conversa_livre_restante": 0, "campos": {}, "variaveis_roteiro": {}, "pode_classificar": False, "perguntas_obrigatorias_pendentes": [], "notas_urgencia": {}, "atendimento_humano_habilitado": True, "pedido_humano_pendente": False, "variaveis_humano_pendentes": []})
+        self.assertEqual(r, {"contact": "+5585911114444", "lead_id": None, "aceita_agente": True, "motivo": "sem_lead", "ultima_pergunta": None, "repeticoes": 0, "especialidade": "", "pergunta_inicial": "apresentacao", "conversa_livre_restante": 0, "campos": {}, "variaveis_roteiro": {}, "observacoes": "", "pode_classificar": False, "perguntas_obrigatorias_pendentes": [], "notas_urgencia": {}, "atendimento_humano_habilitado": True, "pedido_humano_pendente": False, "variaveis_humano_pendentes": []})
         self.send("a1")
         self.send("a2", marker="ATUALIZAR", fields={"proxima": "nome"})
         r = self.contato("+5585911114444").json()
@@ -3111,3 +3111,73 @@ class ConversaLivreTests(TestCase):
         from .serializers import IncomingSerializer
         s = IncomingSerializer(data={"contact": "+5585911119999", "message_id": "x", "marker": "RESPONDER", "fields": {"texto": "oi"}})
         self.assertTrue(s.is_valid(), s.errors)
+
+
+class ObservacoesDoLeadTests(TestCase):
+    """Campo de observações (Lead.notes): dados não sensíveis gravados pelo agente, separados por ';'."""
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from rest_framework.authtoken.models import Token
+        self.company = Company.objects.create(name="Obs Teste")
+        Area.objects.create(company=self.company, name="Consumidor")
+        Question.objects.create(company=self.company, question_id="apresentacao", text="Olá!")
+        Question.objects.create(company=self.company, question_id="nome", text="Seu nome?", ordem=0)
+        Question.objects.create(company=self.company, question_id="situacao", text="Qual a situação?", ordem=1)
+        self.contact = "+5585911110001"
+
+    def atualizar(self, mid, **fields):
+        data = {"contact": self.contact, "message_id": mid, "kind": "text", "marker": "ATUALIZAR", "question_id": "",
+                "fields": fields, "human_required": False, "reason": "pedido humano"}
+        r = receive(self.company, data)
+        if r.get("event_id"):
+            Event.objects.filter(pk=r["event_id"]).update(delivery="SENT")
+        return r
+
+    def abrir(self):
+        data = {"contact": self.contact, "message_id": "a0", "kind": "text", "marker": "Q", "question_id": "apresentacao",
+                "fields": {}, "human_required": False, "reason": "pedido humano"}
+        r = receive(self.company, data)
+        Event.objects.filter(pk=r["event_id"]).update(delivery="SENT")
+
+    def test_merge_acrescenta_sem_duplicar_e_preserva_edicao_da_atendente(self):
+        from .services import mesclar_observacoes
+        self.assertEqual(mesclar_observacoes("Já tem advogado", "Filha envia documentos;  já tem advogado ;Não pode enviar senha agora"),
+                         "Já tem advogado; Filha envia documentos; Não pode enviar senha agora")
+
+    def test_filtra_dados_sensiveis(self):
+        from .services import mesclar_observacoes
+        r = mesclar_observacoes("", "CPF 123.456.789-09; senha é 1234; código: 889977; telefone 86 99999 8888; Filha ajuda com o app")
+        self.assertEqual(r, "Filha ajuda com o app")
+
+    def test_limite_de_tamanho_e_de_item(self):
+        from .services import mesclar_observacoes, LIMITE_OBSERVACOES, LIMITE_ITEM_OBSERVACAO
+        r = mesclar_observacoes("", "; ".join(f"item numero {chr(65 + i % 26)}{'x' * 100} {i}" for i in range(60)))
+        self.assertLessEqual(len(r), LIMITE_OBSERVACOES)
+        self.assertLessEqual(max(len(i) for i in r.split("; ")), LIMITE_ITEM_OBSERVACAO)
+
+    def test_agente_grava_e_repeticao_e_idempotente(self):
+        self.abrir()
+        self.atualizar("a1", nome="Ana", proxima="nome", observacoes="Filha envia os documentos quando chegar; Não pode enviar senha agora")
+        self.atualizar("a2", proxima="situacao", observacoes="Não pode enviar senha agora; Recebe só R$ 700")
+        lead = Lead.objects.get()
+        self.assertEqual(lead.notes, "Filha envia os documentos quando chegar; Não pode enviar senha agora; Recebe só R$ 700")
+        self.assertEqual(lead.demand, "")
+
+    def test_status_do_contato_traz_observacoes(self):
+        from .services import status_contato
+        self.abrir()
+        self.atualizar("a1", proxima="nome", observacoes="Prefere contato à noite")
+        self.assertEqual(status_contato(self.company, self.contact)["observacoes"], "Prefere contato à noite")
+
+    def test_serializer_aceita_observacoes_e_api_expoe_ao_atendente(self):
+        from .serializers import IncomingSerializer
+        s = IncomingSerializer(data={"contact": self.contact, "message_id": "x", "marker": "ATUALIZAR", "fields": {"proxima": "nome", "observacoes": "a; b"}})
+        self.assertTrue(s.is_valid(), s.errors)
+        self.abrir()
+        self.atualizar("a1", proxima="nome", observacoes="Prefere contato à noite")
+        user = get_user_model().objects.create_user(username="atend@x.com", email="atend@x.com")
+        self.company.members.add(user)
+        c = APIClient(); c.force_authenticate(user)
+        lead = Lead.objects.get()
+        body = c.get(f"/api/leads/{lead.pk}/?company={self.company.pk}").json()
+        self.assertEqual(body["notes"], "Prefere contato à noite")

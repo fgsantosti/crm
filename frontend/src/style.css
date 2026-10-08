@@ -408,3 +408,12 @@ button.block-button {
   border-color: #111111;
   color: #ffffff;
 }
+
+.lead-dialog { width: min(640px, calc(100vw - 32px)); max-width: none; max-height: 85vh; padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--ink); box-shadow: 0 32px 70px rgba(0,0,0,.35); }
+.lead-dialog[open] { display: flex; flex-direction: column; }
+.lead-dialog::backdrop { background: rgba(20,14,9,.6); backdrop-filter: blur(2px); }
+.lead-dialog .panel-toolbar { flex-shrink: 0; }
+.lead-dialog-content { overflow: auto; padding: 18px 20px; }
+.lead-dialog-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--line); flex-shrink: 0; }
+tr.linha-clicavel { cursor: pointer; }
+tr.linha-clicavel:hover { background: var(--accent-soft, rgba(0,0,0,.04)); }

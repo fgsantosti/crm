@@ -1,3 +1,4 @@
+import { ObservacoesLead } from '../components/LeadDetalheDialog';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchTodasAsPaginas, type Api } from '../api';
@@ -95,6 +96,12 @@ function TriagemResumo({ lead, api, onUpdated }: { lead: Lead; api?: Api; onUpda
         Demanda
         <input readOnly value={lead.demand || '—'} />
       </label>
+      {lead.notes && (
+        <div style={{ gridColumn: '1 / -1', fontSize: 14 }}>
+          <small style={{ display: 'block', color: 'var(--muted)', marginBottom: 2 }}>Observações</small>
+          <ObservacoesLead notes={lead.notes} />
+        </div>
+      )}
     </div>
   );
 }

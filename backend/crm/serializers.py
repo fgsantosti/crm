@@ -268,6 +268,8 @@ class AgentFieldsSerializer(serializers.Serializer):
     # usado pra especialidade/Area. "validar" e "encerramento" continuam
     # reservados (nunca um "proxima" válido), também checado lá.
     proxima = serializers.CharField(max_length=80, required=False, allow_blank=True)
+    # Dados não sensíveis que ajudam o atendimento, separados por ";" (ver services.mesclar_observacoes).
+    observacoes = serializers.CharField(max_length=1000, required=False, allow_blank=True)
     # RESPONDER: texto livre do agente, só antes do fluxo (validado em services.receive).
     texto = serializers.CharField(max_length=1500, required=False, allow_blank=True)
     # CLASSIFICADO: nota 0-10 por question_id respondido; o CRM calcula a urgência

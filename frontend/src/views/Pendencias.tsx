@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Company, Lead } from '../types';
 import { SkeletonRows } from '../components/Skeleton';
+import { LeadDetalheDialog } from '../components/LeadDetalheDialog';
 
 // Pendências = Kanban "Qualificados" + "Atendimentos em espera" (backend: ?pending=1, já ordenado
 // com Em espera antes de Classificado). "Pegar Lead" assume o atendimento e leva o lead para
@@ -17,6 +18,7 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
   const [pegandoId, setPegandoId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [recarregar, setRecarregar] = useState(0);
+  const [detalhe, setDetalhe] = useState<Lead | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -44,6 +46,7 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
     try {
       await api(`/leads/${lead.id}/negociar/?company=${company.id}`, { method: 'POST' });
       setLeads((v) => v.filter((l) => l.id !== lead.id));
+      setDetalhe(null);
     } catch (e) {
       setError((e as Error).message);
       setRecarregar((n) => n + 1);
@@ -87,7 +90,19 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
               {busy && !visible.length && <SkeletonRows rows={4} cols={5} />}
               {visible.map((l) => {
                 return (
-                  <tr key={l.id}>
+                  <tr
+                    key={l.id}
+                    className="linha-clicavel"
+                    tabIndex={0}
+                    aria-label={`Ver dados de ${l.name || l.contact}`}
+                    onClick={() => setDetalhe(l)}
+                    onKeyDown={(e) => {
+                      if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                        e.preventDefault();
+                        setDetalhe(l);
+                      }
+                    }}
+                  >
                     <td>
                       <span className={`priority priority-${l.priority === 'Alta' ? 'alta' : l.priority === 'Média' ? 'media' : 'baixa'}`}>
                         <span className="priority-dot" />
@@ -103,7 +118,10 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
                     <td>
                       <button
                         type="button"
-                        onClick={() => pegarLead(l)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          pegarLead(l);
+                        }}
                         disabled={pegandoId !== null}
                         title="Assumir e levar para Meus Atendimentos"
                       >
@@ -117,8 +135,9 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
           </table>
         </div>
         {!busy && !visible.length && <div className="empty">Nenhuma pendência nesta empresa.</div>}
-        <p className="table-note">Casos em negociação ou despacho não aparecem aqui — veja em “Meus Atendimentos”.</p>
+        <p className="table-note">Clique em uma linha para ver a demanda e as observações. Casos em negociação ou despacho não aparecem aqui — veja em “Meus Atendimentos”.</p>
       </section>
+      {detalhe && <LeadDetalheDialog lead={detalhe} estagio={estagio(detalhe)} onClose={() => setDetalhe(null)} onPegar={pegarLead} pegando={pegandoId === detalhe.id} />}
     </>
   );
 }

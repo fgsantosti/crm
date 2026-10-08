@@ -261,7 +261,8 @@ Campos aceitos dentro de `fields` (nomes exatamente como o agent emite):
 | --- | --- | --- |
 | `nome` | Nome do lead | texto livre |
 | `especialidade` | Área/especialidade (isso é o que o dashboard chama de "área") | Precisa bater exatamente com uma área cadastrada em Equipe. Área desconhecida remove a triagem. A exceção `Fora de escopo` desqualifica com prioridade Baixa, sem entrar no Kanban, inclusive antes de concluir o roteiro. |
-| `tema` | Resumo da demanda | texto livre |
+| `tema` | Situação-problema do cliente (o que aconteceu, valores, fatos) | texto livre |
+| `observacoes` | **opcional**. Dados **não sensíveis** que ajudam o atendimento e não descrevem o problema (ex.: `Não pode enviar senha agora; Filha envia os documentos quando chegar`), itens curtos separados por `;`. Grava em `Lead.notes` | O CRM **só acrescenta**: mantém o que já existe (inclusive edições da atendente), ignora itens repetidos, corta cada item em 200 caracteres e o total em 1500, e descarta itens com sequências longas de dígitos (CPF, telefone, conta, cartão) ou senha/código. `GET /agente/contato/` devolve o texto atual em `observacoes`. |
 | `impacto` | Impacto relatado | texto livre |
 | `interesse` | Interesse em seguir | `sim` \| `nao` \| `depois` |
 | `temperatura` | Classificação comercial | `Qualificado` \| `Quente` \| `Desconfiado` \| `Remarketing` \| `Desqualificado` |

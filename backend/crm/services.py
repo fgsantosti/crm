@@ -111,6 +111,27 @@ def escalate(lead, reason):
             lead.demand = f"{demanda[:300 - len(motivo) - 3]} | {motivo}" if demanda else motivo
     lead.save()
 
+LIMITE_OBSERVACOES = 1500
+LIMITE_ITEM_OBSERVACAO = 200
+# Observações guardam só dados não sensíveis: sequências longas de dígitos (CPF, telefone, conta,
+# cartão) e senhas/códigos ditos no chat não entram, mesmo que o agente os envie.
+_PADRAO_SENSIVEL = re.compile(r"(?:\d[\s.\-/]?){8,}|\b(?:senha|código|codigo|token)\b\s*(?:é|e|:|=)", re.I)
+
+def mesclar_observacoes(atual, novas):
+    """Observações do lead = itens curtos separados por ';'. O agente só acrescenta: itens já
+    existentes (inclusive os editados pela atendente) são mantidos e repetições são ignoradas."""
+    itens = [i.strip() for i in (atual or "").split(";") if i.strip()]
+    vistos = {i.casefold() for i in itens}
+    for bruto in re.split(r"[;\n]", str(novas or "")):
+        item = re.sub(r"\s+", " ", bruto).strip()[:LIMITE_ITEM_OBSERVACAO].strip()
+        if not item or item.casefold() in vistos or _PADRAO_SENSIVEL.search(item):
+            continue
+        if len("; ".join([*itens, item])) > LIMITE_OBSERVACOES:
+            break
+        itens.append(item)
+        vistos.add(item.casefold())
+    return "; ".join(itens)
+
 def apply_fields(lead, company, fields):
     """Grava os campos recebidos no lead; retorna uma mensagem de erro (str) se
     `especialidade` não for uma Area cadastrada para a empresa, ou None se ok.
@@ -130,6 +151,8 @@ def apply_fields(lead, company, fields):
     for key, model_field in FIELD_MAP.items():
         if key in fields and fields[key]:
             setattr(lead, model_field, fields[key])
+    if fields.get("observacoes"):
+        lead.notes = mesclar_observacoes(lead.notes, fields["observacoes"])
     extra = fields.get("variaveis_roteiro")
     if extra:
         slugs_validos = set(company.variaveis_roteiro.filter(builtin=False).values_list("slug", flat=True))
@@ -405,6 +428,7 @@ def status_contato(company, contact):
         "conversa_livre_restante": conversa_livre_restante(company, lead) if lead and aceita and motivo == "em_triagem" else 0,
         "campos": {key: (lead.name or lead.contact_name) if key == "nome" else getattr(lead, model_field) for key, model_field in FIELD_MAP.items()} if lead and aceita else {},
         "variaveis_roteiro": (lead.variaveis_roteiro or {}) if lead and aceita else {},
+        "observacoes": (lead.notes or "") if lead and aceita else "",
         "pode_classificar": bool(lead and aceita and dados_para_classificar(company, lead) and not perguntas_obrigatorias_pendentes(company, lead)),
         "perguntas_obrigatorias_pendentes": [q.question_id for q in perguntas_obrigatorias_pendentes(company, lead)] if aceita else [],
         "notas_urgencia": (lead.urgencia_detalhe or {}).get("notas", {}) if lead and aceita else {},
