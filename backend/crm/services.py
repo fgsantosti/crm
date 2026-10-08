@@ -1403,6 +1403,35 @@ def marcar_situacao_especial(company, lead, event, valor, fields):
             event.delivery = "PENDING"
     return result
 
+def criar_situacao_especial_manual(company, user, dados, valor="acompanhamento"):
+    """Outras situações: cadastro manual de um acompanhamento (cliente que contatou por outro canal).
+    Atendente que cadastra vira o responsável; a conta Empresa deixa sem responsável. Não passa pela
+    triagem nem conta como nova lead. Retorna (lead, erro)."""
+    from django.db import IntegrityError
+    from .serializers import LeadManualSerializer
+    info = SITUACOES_ESPECIAIS[valor]
+    entrada = LeadManualSerializer(data=dados)
+    if not entrada.is_valid():
+        campo, erros = next(iter(entrada.errors.items()))
+        return None, str(erros[0]) if campo == "non_field_errors" else f"{LeadManualSerializer.ROTULOS.get(campo, campo)}: {erros[0]}"
+    v = entrada.validated_data
+    try:
+        with transaction.atomic():
+            Company.objects.select_for_update().get(pk=company.pk)
+            if Lead.objects.filter(company=company, contact=v["contact"], desfecho="").exists():
+                return None, "Já existe um lead ativo com esse contato nesta empresa."
+            lead = Lead.objects.create(
+                company=company, name=v["name"], contact=v["contact"], demand=v["demand"],
+                notes=mesclar_observacoes("", (dados.get("observacoes") if hasattr(dados, "get") else "") or ""),
+                state="ENCERRADO_ESPECIAL", funnel_stage=info["rotulo"], next_action=info["next_action"],
+                situacao_especial=valor, bot_closed=True, origem_manual=True,
+                owner=None if user.is_staff else user,
+            )
+            Event.objects.create(lead=lead, message_id=f"especial-manual:{secrets.token_hex(16)}", summary=f"Cadastro manual: {info['rotulo']}")
+    except IntegrityError:
+        return None, "Já existe um lead ativo com esse contato nesta empresa."
+    return lead, None
+
 def _lead_especial_com_acesso(lead_id, user):
     lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
     if not lead or not Company.objects.filter(pk=lead.company_id, members=user).exists():

@@ -35,6 +35,7 @@ from .services import (
     liberar_lead as liberar_lead_service,
     enviar_despachos as enviar_despachos_service,
     criar_lead_manual as criar_lead_manual_service,
+    criar_situacao_especial_manual as criar_situacao_especial_manual_service,
     seed_roteiro_padrao,
     resumo_dashboard, FORA_DO_KANBAN,
 )
@@ -374,7 +375,7 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
             # que nunca aparecem no Kanban).
             qs = qs.filter(owner=self.request.user, desfecho="").filter(
                 Q(etapa_atendimento__in=["negociacao", "despacho"]) | Q(origem_manual=True)
-            )
+            ).filter(situacao_especial="")
         return qs
     def perform_update(self, serializer):
         from django.db import transaction
@@ -449,6 +450,13 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
         if erro:
             return Response({"detail": erro}, status=400)
         return Response(LeadSerializer(self.get_object()).data)
+    @action(detail=False, methods=["post"], url_path="especial")
+    def especial_criar(self, request):
+        """Outras situações: cadastra um acompanhamento (atendente fica como responsável; conta Empresa também pode cadastrar)."""
+        lead, erro = criar_situacao_especial_manual_service(self.company(), request.user, request.data)
+        if erro:
+            return Response({"detail": erro}, status=400)
+        return Response(LeadSerializer(lead).data, status=201)
     @action(detail=True, methods=["post"], url_path="especial/assumir")
     def especial_assumir(self, request, pk=None):
         """Outras situações: o atendente assume o acompanhamento."""

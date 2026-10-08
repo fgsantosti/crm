@@ -18,6 +18,8 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
   const [acaoId, setAcaoId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [detalhe, setDetalhe] = useState<Lead | null>(null);
+  const [novo, setNovo] = useState(false);
+  const [salvandoNovo, setSalvandoNovo] = useState(false);
 
   const carregar = useCallback(
     (silent = false) => {
@@ -47,6 +49,25 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
     return () => clearInterval(id);
   }, [carregar]);
 
+  async function criarAcompanhamento(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSalvandoNovo(true);
+    setError('');
+    const form = new FormData(e.currentTarget);
+    try {
+      await api(`/leads/especial/?company=${company.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ name: form.get('name'), contact: form.get('contact'), demand: form.get('demand'), observacoes: form.get('observacoes') }),
+      });
+      setNovo(false);
+      await carregar(true);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSalvandoNovo(false);
+    }
+  }
+
   async function acao(lead: Lead, caminho: 'assumir' | 'concluir') {
     if (caminho === 'concluir' && !window.confirm(`Concluir o acompanhamento de "${lead.name || lead.contact}"? O número é liberado e sai desta lista.`)) return;
     setAcaoId(lead.id);
@@ -72,12 +93,51 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
           <h1>Outras situações</h1>
           <p>Clientes que já têm processo e querem acompanhá-lo. Não são leads novos e não têm temperatura.{leads.length ? ` ${leads.length} em aberto.` : ''}</p>
         </div>
+        <button type="button" onClick={() => setNovo((v) => !v)}>
+          + Novo acompanhamento
+        </button>
       </header>
       {error && (
         <p role="alert" className="error">
           {error}
         </p>
       )}
+      {novo && (
+        <form onSubmit={criarAcompanhamento} className="panel" style={{ padding: 16, marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <h3 style={{ margin: 0, fontSize: 15 }}>Novo acompanhamento</h3>
+          <small style={{ color: 'var(--muted)' }}>
+            Cadastra um cliente que já tem processo no escritório e contatou por outro canal. Não passa pela triagem do agente e não conta como lead nova.
+          </small>
+          <div className="fields">
+            <label style={{ margin: 0 }}>
+              Nome
+              <input name="name" />
+            </label>
+            <label style={{ margin: 0 }}>
+              Contato (telefone)
+              <input name="contact" required />
+            </label>
+          </div>
+          <label style={{ margin: 0 }}>
+            Demanda (qual processo ou assunto)
+            <input name="demand" maxLength={300} />
+          </label>
+          <label style={{ margin: 0 }}>
+            Observações (separadas por “;”)
+            <input name="observacoes" maxLength={1000} placeholder="Ex.: Filha envia os documentos; Prefere contato à tarde" />
+          </label>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button disabled={salvandoNovo}>
+              {salvandoNovo && <Spinner />}
+              Cadastrar
+            </button>
+            <button type="button" className="secondary" onClick={() => setNovo(false)}>
+              Cancelar
+            </button>
+          </div>
+        </form>
+      )}
+
       <section className="section">
         {busy && !leads.length && <p style={{ fontSize: 13 }}>Carregando…</p>}
         {!busy && !leads.length && <div className="empty">Nenhum acompanhamento em aberto.</div>}
@@ -87,9 +147,11 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
               <div style={{ flex: '1 1 320px', minWidth: 0, cursor: 'pointer' }} onClick={() => setDetalhe(l)}>
                 <div className="queue-meta">
                   <strong style={{ fontSize: 16 }}>{l.name || 'Sem nome informado'}</strong>
+                  {l.origem_manual && <span className="chip chip-neutral">cadastro manual</span>}
                   <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 12.5, color: 'var(--muted)' }}>{l.contact}</span>
                   <span className="chip chip-neutral">{rotuloSituacao(l.situacao_especial)}</span>
                 </div>
+                {l.demand && <p style={{ color: 'var(--ink)', marginBottom: 4 }}>{l.demand}</p>}
                 <div style={{ fontSize: 13, margin: '4px 0' }}>
                   <ObservacoesLead notes={l.notes} vazio="Sem observações." />
                 </div>

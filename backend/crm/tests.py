@@ -3398,3 +3398,54 @@ class TemperaturaFrioTests(TestCase):
         mod.renomear(django_apps, Schema)
         lead.refresh_from_db()
         self.assertEqual((lead.temperature, lead.urgencia_detalhe), ("Frio", {"temperatura_calculada": "Frio", "score": 6.0}))
+
+
+class SituacaoEspecialManualTests(TestCase):
+    """Cadastro manual de acompanhamento (tela Outras situações)."""
+    def setUp(self):
+        self.company = Company.objects.create(name="Esp Manual")
+        seed_roteiro_padrao(self.company)
+        User = get_user_model()
+        self.atendente = User.objects.create_user(username="m1@x.com", email="m1@x.com")
+        self.empresa = User.objects.create_user(username="m2@x.com", email="m2@x.com", is_staff=True)
+        for u in (self.atendente, self.empresa):
+            self.company.members.add(u)
+
+    def post(self, user, **dados):
+        c = APIClient(); c.force_authenticate(user)
+        return c.post(f"/api/leads/especial/?company={self.company.pk}", dados, format="json")
+
+    def test_atendente_cadastra_e_vira_responsavel_sem_contar_como_nova_lead(self):
+        from .models import ContagemDiaria
+        r = self.post(self.atendente, name="Maria", contact="85 99999-1111", demand="Processo trabalhista", observacoes="Filha liga; CPF 123.456.789-09")
+        self.assertEqual(r.status_code, 201, r.content)
+        lead = Lead.objects.get()
+        self.assertEqual((lead.situacao_especial, lead.owner_id, lead.contact, lead.demand, lead.bot_closed, lead.origem_manual),
+                         ("acompanhamento", self.atendente.pk, "+5585999991111", "Processo trabalhista", True, True))
+        self.assertEqual(lead.notes, "Filha liga")
+        self.assertEqual(ContagemDiaria.objects.count(), 0)
+
+    def test_empresa_cadastra_sem_responsavel(self):
+        r = self.post(self.empresa, name="Ana", contact="+5585999992222")
+        self.assertEqual(r.status_code, 201)
+        self.assertIsNone(Lead.objects.get().owner)
+
+    def test_aparece_em_outras_situacoes_e_nao_em_meus_atendimentos(self):
+        self.post(self.atendente, name="Maria", contact="+5585999991111")
+        c = APIClient(); c.force_authenticate(self.atendente)
+        base = f"/api/leads/?company={self.company.pk}"
+        self.assertEqual(c.get(base + "&especial=1").json()["count"], 1)
+        self.assertEqual(c.get(base + "&meus=1").json()["count"], 0)
+        self.assertEqual(c.get(base + "&ativos=1").json()["count"], 0)
+
+    def test_contato_ativo_duplicado_e_telefone_invalido(self):
+        self.assertEqual(self.post(self.atendente, contact="+5585999991111").status_code, 201)
+        r = self.post(self.atendente, contact="+5585999991111")
+        self.assertEqual((r.status_code, r.json()["detail"]), (400, "Já existe um lead ativo com esse contato nesta empresa."))
+        self.assertEqual(self.post(self.atendente, contact="123").status_code, 400)
+        self.assertEqual(self.post(self.atendente).status_code, 400)
+
+    def test_agente_nao_atende_o_numero_enquanto_o_acompanhamento_estiver_aberto(self):
+        from .services import avaliar_contato
+        self.post(self.atendente, contact="+5585999991111")
+        self.assertEqual(avaliar_contato(self.company, "+5585999991111")[1:], (False, "classificado"))
