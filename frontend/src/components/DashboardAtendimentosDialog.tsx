@@ -12,12 +12,13 @@ export type AtendimentoResumo = {
   created_at: string;
   desfecho: string;
   origem_manual: boolean;
-  categoria_status: 'despachado' | 'automatico' | 'equipe' | 'desqualificado' | 'especial';
+  categoria_status: 'despachado' | 'automatico' | 'aguardando' | 'equipe' | 'desqualificado' | 'especial';
   triagem_concluida: boolean;
 };
 
 const STATUS = {
   automatico: { label: 'Em triagem', color: '#2563EB' },
+  aguardando: { label: 'Triagem concluída', color: 'var(--warn)' },
   equipe: { label: 'Com a equipe', color: 'var(--accent)' },
   despachado: { label: 'Despachado', color: 'var(--success)' },
   desqualificado: { label: 'Desqualificado/desconfiado', color: 'var(--muted)' },

@@ -1218,7 +1218,7 @@ class DashboardResumoTests(TestCase):
         self.lead("+5585000000005", bot_closed=True, temperature="Desqualificado")
         self.lead("+5585000000006", bot_closed=True, mode="HUMANO", owner=self.ana, desfecho="falha", temperature="Quente")
         data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
-        self.assertEqual(data["status"], {"despachado": 1, "automatico": 1, "equipe": 3, "desqualificado": 1, "especial": 0, "nao_prosseguiram": 0})
+        self.assertEqual(data["status"], {"despachado": 1, "automatico": 1, "aguardando": 2, "equipe": 1, "desqualificado": 1, "especial": 0, "nao_prosseguiram": 0})
         self.assertEqual(sum(data["status"].values()), data["total"])
 
     def test_resumo_taxa_por_atendente_usa_desfecho_nao_bot_closed(self):
@@ -1294,7 +1294,7 @@ class DashboardResumoTests(TestCase):
         data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
         rows = data["atendimentos"]
         self.assertEqual(len(rows), data["total"])
-        self.assertEqual(data["triagem_concluida"], 1)
+        self.assertEqual(data["triagem_concluida"], 2)  # qualificada + escalada para humano, ambas na fila de Pendências
         self.assertEqual(sum(row["triagem_concluida"] for row in rows), data["triagem_concluida"])
         for category, count in data["status"].items():
             self.assertEqual(sum(row["categoria_status"] == category for row in rows), count)
@@ -3531,7 +3531,7 @@ class DashboardTotalComNaoProsseguiramTests(TestCase):
         self.assertEqual(c.post("/api/leads/especial/" + base, {"name": "B", "contact": "+5585999990004"}, format="json").status_code, 201)
         r = resumo_dashboard(self.company)
         self.assertEqual(r["total"], 7)  # 2 do agente + 2 manuais + 3 que não prosseguiram
-        self.assertEqual((r["status"]["equipe"], r["status"]["especial"]), (2, 1))
+        self.assertEqual((r["status"]["equipe"], r["status"]["especial"], r["status"]["aguardando"]), (1, 1, 1))
         self.assertEqual(sum(r["status"].values()), r["total"])
         self.assertEqual({a["contact"] for a in r["atendimentos"] if a["origem_manual"]}, {"+5585999990003", "+5585999990004"})
 
@@ -3549,3 +3549,16 @@ class DashboardTotalComNaoProsseguiramTests(TestCase):
         # O lead Quente do setUp também está em Qualificados.
         self.assertEqual(marcados, {"+558599991001", "+558599991002", "+5585999990002"})
         self.assertEqual(r["triagem_concluida"], 3)
+
+    def test_com_a_equipe_so_tem_negociacao_despacho_e_cadastros_manuais(self):
+        from .services import resumo_dashboard
+        mk = lambda n, **kw: Lead.objects.create(company=self.company, contact=f"+55859999200{n}", bot_closed=True, temperature="Qualificado", **kw)
+        mk(1)                                                   # Qualificados -> aguardando
+        mk(2, etapa_atendimento="espera")                       # Em espera -> aguardando
+        mk(3, etapa_atendimento="negociacao", mode="HUMANO")    # Em negociação -> equipe
+        mk(4, etapa_atendimento="despacho", mode="HUMANO")      # Despacho do atendente -> equipe
+        mk(5, origem_manual=True, mode="HUMANO")                # cadastro manual -> equipe
+        r = resumo_dashboard(self.company)
+        por_contato = {a["contact"]: a["categoria_status"] for a in r["atendimentos"]}
+        self.assertEqual([por_contato[f"+55859999200{n}"] for n in range(1, 6)], ["aguardando", "aguardando", "equipe", "equipe", "equipe"])
+        self.assertEqual(sum(r["status"].values()), r["total"])

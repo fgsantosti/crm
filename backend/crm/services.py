@@ -1592,9 +1592,10 @@ def contexto_agente(company):
     }
 
 def _categoria_status(lead):
-    """Categoria exclusiva (cada lead cai em exatamente uma) usada no donut/tiles
-    do Dashboard -- antes "Concluído" (bot_closed) e "Atendimento humano"
-    (mode=HUMANO) se sobrepunham e a soma passava do total."""
+    """Categoria exclusiva (cada lead cai em exatamente uma) usada no donut/tiles do Dashboard:
+    especial (Outras situações), desqualificado, despachado, automatico (em triagem), aguardando
+    (Qualificados + Atendimentos em espera = a fila de Pendências, "Triagem concluída") e equipe
+    (Em negociação, Despacho e cadastros manuais dos atendentes)."""
     if lead.get("situacao_especial"):
         return "especial"
     if lead["desfecho"] == "desqualificado":
@@ -1605,16 +1606,13 @@ def _categoria_status(lead):
         return "automatico"
     if lead["bot_closed"] and lead["mode"] != "HUMANO" and lead["temperature"] in FORA_DO_KANBAN:
         return "desqualificado"
+    if not lead["origem_manual"] and lead["etapa_atendimento"] in ("", "espera"):
+        return "aguardando"
     return "equipe"
 
 def _triagem_concluida_dashboard(lead):
-    """Triagem concluída = leads classificadas que ainda aguardam a equipe: colunas Qualificados e
-    Em espera (mesma fila de Pendências). Quem já está em negociação, em despacho ou foi despachado
-    não entra mais aqui."""
-    return (
-        lead["bot_closed"] and not lead["origem_manual"] and not lead["situacao_especial"] and lead["desfecho"] == ""
-        and lead["etapa_atendimento"] in ("", "espera") and lead["temperature"] in {"Frio", "Qualificado", "Quente"}
-    )
+    """Triagem concluída = leads que aguardam a equipe (colunas Qualificados e Em espera)."""
+    return _categoria_status(lead) == "aguardando"
 
 def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, data_fim=None):
     """Agregados do Dashboard calculados no servidor sobre TODOS os leads da
@@ -1655,7 +1653,7 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
     User = get_user_model()
     nomes = {u.pk: _nome_usuario(u) for u in User.objects.filter(pk__in={r["owner"] for r in rows if r["owner"]}).select_related("profile")}
 
-    status = {"despachado": 0, "automatico": 0, "equipe": 0, "desqualificado": 0, "especial": 0, "nao_prosseguiram": 0}
+    status = {"despachado": 0, "automatico": 0, "aguardando": 0, "equipe": 0, "desqualificado": 0, "especial": 0, "nao_prosseguiram": 0}
     desfechos = {"encerrado": 0, "comprometido": 0, "falha": 0, "bloqueado": 0}
     por_area, por_mes, por_owner = {}, {}, {}
     tz = timezone.get_current_timezone()
