@@ -254,7 +254,7 @@ class ContagemDiaria(models.Model):
 
 class Lead(models.Model):
     ESPECIALIDADE_CHOICES = [("Previdenciário", "Previdenciário"), ("Consumidor", "Consumidor"), ("Trabalhista", "Trabalhista"), ("Fora de escopo", "Fora de escopo")]
-    TEMPERATURA_CHOICES = [("Qualificado", "Qualificado"), ("Quente", "Quente"), ("Desconfiado", "Desconfiado"), ("Remarketing", "Remarketing"), ("Desqualificado", "Desqualificado")]
+    TEMPERATURA_CHOICES = [("Qualificado", "Qualificado"), ("Quente", "Quente"), ("Desconfiado", "Desconfiado"), ("Frio", "Frio"), ("Desqualificado", "Desqualificado")]
     INTERESSE_CHOICES = [("sim", "Sim"), ("nao", "Não"), ("depois", "Depois")]
     DESFECHO_CHOICES = [
         ("encerrado", "Encerrado"),

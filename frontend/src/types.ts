@@ -31,7 +31,7 @@ export type Lead = {
   impacto: string;
   interesse: 'sim' | 'nao' | 'depois' | '';
   /** Campo "temperatura" do protocolo Axioma. */
-  temperature: 'Qualificado' | 'Quente' | 'Desconfiado' | 'Remarketing' | 'Desqualificado' | '';
+  temperature: 'Qualificado' | 'Quente' | 'Desconfiado' | 'Frio' | 'Desqualificado' | '';
   urgencia_rank: number;
   last_contact: string | null;
   next_action: string;

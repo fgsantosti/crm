@@ -9,8 +9,8 @@ import { LeadNameField } from '../components/LeadNameField';
 import { OutrasSituacoes } from '../components/OutrasSituacoes';
 
 // Mesma ordem de services.FAIXAS_URGENCIA no backend (menos urgente -> mais urgente).
-export const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Remarketing: 2, Qualificado: 3, Quente: 4 };
-export const URGENCIA_COR: Record<string, string> = { Remarketing: '#2563EB', Qualificado: '#D4A72C', Quente: '#E2574C' };
+export const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Frio: 2, Qualificado: 3, Quente: 4 };
+export const URGENCIA_COR: Record<string, string> = { Frio: '#2563EB', Qualificado: '#D4A72C', Quente: '#E2574C' };
 export const FORA_DO_KANBAN = new Set(['Desqualificado', 'Desconfiado']);
 
 const DESFECHO_OPTIONS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string; help: string }[] = [

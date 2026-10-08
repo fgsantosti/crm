@@ -1281,7 +1281,7 @@ def enviar_despachos(user, company):
 FAIXAS_URGENCIA = [
     (0, 3, "Desqualificado"),
     (3, 5, "Desconfiado"),
-    (5, 7, "Remarketing"),
+    (5, 7, "Frio"),
     (7, 9, "Qualificado"),
     (9, None, "Quente"),
 ]
@@ -1292,7 +1292,7 @@ PRIORIDADE_POR_TEMPERATURA = {"Quente": "Alta", "Qualificado": "Média"}
 # -- mas esses dois nunca entram no fluxo operacional do Kanban nem podem ser
 # assumidos por atendente, só contam nas estatísticas do dashboard.
 FORA_DO_KANBAN = {"Desqualificado", "Desconfiado"}
-PODE_ASSUMIR_A_PARTIR_DE = "Remarketing"
+PODE_ASSUMIR_A_PARTIR_DE = "Frio"
 # "Concluído com sucesso" = desfecho Encerrado (o cliente conseguiu o que queria);
 # Comprometido e Falha também são conclusões, mas não de sucesso.
 DESFECHO_SUCESSO = "encerrado"
@@ -1579,7 +1579,7 @@ def _categoria_status(lead):
     return "equipe"
 
 def _triagem_concluida_dashboard(lead):
-    return lead["bot_closed"] and not lead["origem_manual"] and lead["temperature"] in {"Remarketing", "Qualificado", "Quente"} and lead["desfecho"] != "desqualificado"
+    return lead["bot_closed"] and not lead["origem_manual"] and lead["temperature"] in {"Frio", "Qualificado", "Quente"} and lead["desfecho"] != "desqualificado"
 
 def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, data_fim=None):
     """Agregados do Dashboard calculados no servidor sobre TODOS os leads da

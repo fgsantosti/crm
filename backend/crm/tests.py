@@ -233,7 +233,7 @@ class QualificationTests(TestCase):
         self.assertEqual((r["action"], r["lead_novo"]), ("TEXTO", True))
     def test_classificado_sempre_em_uma_das_cinco_temperaturas(self):
         from .services import calcular_urgencia
-        cinco = {"Desqualificado", "Desconfiado", "Remarketing", "Qualificado", "Quente"}
+        cinco = {"Desqualificado", "Desconfiado", "Frio", "Qualificado", "Quente"}
         for decimos in range(0, 101):
             _, temperatura = calcular_urgencia({"q": decimos / 10}, {"q": 7})
             self.assertIn(temperatura, cinco)
@@ -456,7 +456,7 @@ class QualificationTests(TestCase):
         from .services import calcular_urgencia
         self.assertEqual(calcular_urgencia({"a": 2.9}, {"a": 5})[1], "Desqualificado")
         self.assertEqual(calcular_urgencia({"a": 3}, {"a": 5})[1], "Desconfiado")
-        self.assertEqual(calcular_urgencia({"a": 5}, {"a": 5})[1], "Remarketing")
+        self.assertEqual(calcular_urgencia({"a": 5}, {"a": 5})[1], "Frio")
         self.assertEqual(calcular_urgencia({"a": 7}, {"a": 5})[1], "Qualificado")
         self.assertEqual(calcular_urgencia({"a": 9}, {"a": 5})[1], "Quente")
         score, temp = calcular_urgencia({"situacao": 8, "renda": 10, "avaliar": 6}, {"situacao": 9, "renda": 7, "avaliar": 4})
@@ -654,7 +654,7 @@ class QualificationTests(TestCase):
         lead.refresh_from_db()
         self.assertIsNone(lead.owner)
 
-        lead.temperature = "Remarketing"
+        lead.temperature = "Frio"
         lead.desfecho = ""
         lead.save()
         ok = client.post(f"/api/leads/{lead.pk}/reivindicar/?company={self.company.pk}")
@@ -2594,7 +2594,7 @@ class BlacklistEFiltragemTests(TestCase):
         from django.db import connection
         from types import SimpleNamespace
         fora = Lead.objects.create(company=self.company, contact=self.contact, priority="Alta", mode="HUMANO", next_action="fora de escopo")
-        abandonado = Lead.objects.create(company=self.company, contact="+5585999998887", bot_closed=True, temperature="Remarketing", urgencia_detalhe={"motivo": "abandono"})
+        abandonado = Lead.objects.create(company=self.company, contact="+5585999998887", bot_closed=True, temperature="Frio", urgencia_detalhe={"motivo": "abandono"})
         assumido = Lead.objects.create(company=self.company, contact="+5585999998886", bot_closed=True, owner=self.ana, urgencia_detalhe={"motivo": "abandono"})
         corrigir = importlib.import_module("crm.migrations.0030_fora_de_escopo_desqualificado").corrigir
         corrigir(apps, SimpleNamespace(connection=connection))
@@ -3367,3 +3367,34 @@ class ContagemDiariaTests(TestCase):
         # Com filtro de área/busca não dá para atribuir (o lead apagado não existe mais): nulos.
         self.assertIsNone(resumo_dashboard(self.company, area="Consumidor")["nao_prosseguiram"])
         self.assertIsNone(resumo_dashboard(self.company, busca="x")["novas_leads"])
+
+
+class TemperaturaFrioTests(TestCase):
+    """"Remarketing" foi renomeada para "Frio"."""
+    def test_faixa_e_choices_usam_frio(self):
+        from .services import FAIXAS_URGENCIA
+        self.assertIn("Frio", [t for _, _, t in FAIXAS_URGENCIA])
+        self.assertNotIn("Remarketing", [c[0] for c in Lead.TEMPERATURA_CHOICES])
+
+    def test_serializer_aceita_o_nome_antigo_como_alias(self):
+        from .serializers import IncomingSerializer
+        for nome in ("Frio", "Remarketing"):
+            s = IncomingSerializer(data={"contact": "+5585911110099", "message_id": "x", "marker": "CLASSIFICADO",
+                                         "fields": {"temperatura": nome, "prioridade": "Baixa"}})
+            self.assertTrue(s.is_valid(), s.errors)
+            self.assertEqual(s.validated_data["fields"]["temperatura"], "Frio")
+
+    def test_migracao_renomeia_temperatura_e_detalhe(self):
+        import importlib
+        from django.apps import apps as django_apps
+        mod = importlib.import_module("crm.migrations.0039_temperatura_frio")
+        company = Company.objects.create(name="Mig")
+        lead = Lead.objects.create(company=company, contact="+5585911110098", temperature="Frio", urgencia_detalhe={"temperatura_calculada": "Frio"})
+        Lead.objects.filter(pk=lead.pk).update(temperature="Remarketing", urgencia_detalhe={"temperatura_calculada": "Remarketing", "score": 6.0})
+
+        class Schema:
+            class connection:
+                alias = "default"
+        mod.renomear(django_apps, Schema)
+        lead.refresh_from_db()
+        self.assertEqual((lead.temperature, lead.urgencia_detalhe), ("Frio", {"temperatura_calculada": "Frio", "score": 6.0}))

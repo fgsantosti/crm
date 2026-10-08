@@ -266,7 +266,7 @@ Campos aceitos dentro de `fields` (nomes exatamente como o agent emite):
 | `situacao_especial` | **opcional**, só `"acompanhamento"` (valores em `contexto.situacoes_especiais`) | Em `ATUALIZAR`, **sem `proxima`**. Tira o lead da triagem de lead novo (sem temperatura, fora do Kanban e das Pendências; aparece em **Outras situações** em Todos os leads), fecha o bot e **mantém o número preso** até a equipe concluir. Só vale com a lead em triagem (lead já classificado/atendido é ignorado); a 1ª mensagem de um lead novo também vale. Responde com o texto obrigatório fora do fluxo `especial_acompanhamento` (`TEXTO`/`AUDIO`, `question_id` = o do texto) ou **`NO_REPLY` em silêncio** quando o texto está desabilitado ou a Etapa Inicial está ligada. Ações da equipe: `POST /api/leads/{id}/especial/assumir/` (só atendente) e `/especial/concluir/` (responsável ou conta Empresa; libera o número); lista: `GET /api/leads/?company={id}&especial=1`. |
 | `impacto` | Impacto relatado | texto livre |
 | `interesse` | Interesse em seguir | `sim` \| `nao` \| `depois` |
-| `temperatura` | Classificação comercial | `Qualificado` \| `Quente` \| `Desconfiado` \| `Remarketing` \| `Desqualificado` |
+| `temperatura` | Classificação comercial | `Qualificado` \| `Quente` \| `Desconfiado` \| `Frio` \| `Desqualificado` |
 | `prioridade` | Prioridade de atendimento | `Alta` \| `Média` \| `Baixa` |
 | `notas` | **não é campo do lead** — só em `CLASSIFICADO`: dict `{"<question_id>": nota}` com nota de 0 a 10 para cada pergunta respondida (quão urgente/relevante foi a resposta) | O CRM calcula `score = Σ(nota × peso) / Σ(peso)` e converte pelas `faixas_urgencia`. Prevalece sobre a temperatura enviada junto; prioridade ausente sai da temperatura (Quente→Alta, Qualificado→Média, demais→Baixa). Pergunta desconhecida ou sem variável é ignorada; se nenhuma sobrar, a triagem é removida. O detalhe fica em `Lead.urgencia_detalhe`. |
 | `proxima` | **não é campo do lead** — só em `ATUALIZAR`, diz qual é o próximo `question_id` | **desde a tela Roteiro customizável**: qualquer `question_id` cadastrado pela empresa (3 sempre existem: `nome`, `situacao`, `demanda`; o resto é livre). Nunca `validar` nem `encerramento` — reservados. Um `question_id` que a empresa não cadastrou transfere o lead pra atendimento humano em vez de travar. |
@@ -320,7 +320,7 @@ Use para conduzir o roteiro **na ordem configurada pela empresa** na tela
   "faixas_urgencia": [
     {"min": 0, "max_exclusivo": 3, "temperatura": "Desqualificado"},
     {"min": 3, "max_exclusivo": 5, "temperatura": "Desconfiado"},
-    {"min": 5, "max_exclusivo": 7, "temperatura": "Remarketing"},
+    {"min": 5, "max_exclusivo": 7, "temperatura": "Frio"},
     {"min": 7, "max_exclusivo": 9, "temperatura": "Qualificado"},
     {"min": 9, "max_exclusivo": null, "temperatura": "Quente"}
   ]

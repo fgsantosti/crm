@@ -250,6 +250,11 @@ class DashboardPeriodSerializer(serializers.Serializer):
             raise serializers.ValidationError("A data de início deve ser anterior ou igual à data de fim.")
         return attrs
 
+class TemperaturaField(serializers.ChoiceField):
+    """Aceita o nome antigo "Remarketing" (hoje "Frio") de agentes que ainda não receberam o SOUL novo."""
+    def to_internal_value(self, data):
+        return super().to_internal_value("Frio" if data == "Remarketing" else data)
+
 class AgentFieldsSerializer(serializers.Serializer):
     nome = serializers.CharField(max_length=160, required=False, allow_blank=True)
     # Antes era um ChoiceField fixo e global. Agora cada empresa cadastra suas
@@ -259,7 +264,7 @@ class AgentFieldsSerializer(serializers.Serializer):
     tema = serializers.CharField(max_length=300, required=False, allow_blank=True)
     impacto = serializers.CharField(max_length=300, required=False, allow_blank=True)
     interesse = serializers.ChoiceField(choices=[c[0] for c in Lead.INTERESSE_CHOICES], required=False, allow_blank=True)
-    temperatura = serializers.ChoiceField(choices=[c[0] for c in Lead.TEMPERATURA_CHOICES], required=False, allow_blank=True)
+    temperatura = TemperaturaField(choices=[c[0] for c in Lead.TEMPERATURA_CHOICES], required=False, allow_blank=True)
     prioridade = serializers.ChoiceField(choices=["Alta", "Média", "Baixa"], required=False, allow_blank=True)
     # Antes era um ChoiceField fixo com os 8 question_id do roteiro da Rufus.
     # Agora a empresa adiciona/remove perguntas (Roteiro), então a lista de
