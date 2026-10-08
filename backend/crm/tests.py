@@ -3520,3 +3520,17 @@ class DashboardTotalComNaoProsseguiramTests(TestCase):
         r = resumo_dashboard(self.company, area="Consumidor")
         self.assertEqual((r["total"], r["status"]["nao_prosseguiram"], r["nao_prosseguiram"]), (1, 0, None))
         self.assertEqual(sum(r["status"].values()), r["total"])
+
+    def test_atendimentos_e_acompanhamentos_manuais_entram_no_total(self):
+        from .services import resumo_dashboard
+        user = get_user_model().objects.create_user(username="tot@x.com", email="tot@x.com")
+        self.company.members.add(user)
+        c = APIClient(); c.force_authenticate(user)
+        base = f"?company={self.company.pk}"
+        self.assertEqual(c.post("/api/leads/manual/" + base, {"name": "A", "contact": "+5585999990003"}, format="json").status_code, 201)
+        self.assertEqual(c.post("/api/leads/especial/" + base, {"name": "B", "contact": "+5585999990004"}, format="json").status_code, 201)
+        r = resumo_dashboard(self.company)
+        self.assertEqual(r["total"], 7)  # 2 do agente + 2 manuais + 3 que não prosseguiram
+        self.assertEqual((r["status"]["equipe"], r["status"]["especial"]), (2, 1))
+        self.assertEqual(sum(r["status"].values()), r["total"])
+        self.assertEqual({a["contact"] for a in r["atendimentos"] if a["origem_manual"]}, {"+5585999990003", "+5585999990004"})

@@ -167,7 +167,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   }
 
   const cardsResumo = [
-    { title: 'Total de atendimentos', count: total, color: 'var(--ink)', description: 'Todos os atendimentos do período: em triagem, com a equipe, despachados, desqualificados, outras situações e os que não prosseguiram. “Triagem concluída” é um recorte desses.', matches: (_lead: AtendimentoResumo) => true, detalhe: resumo.nao_prosseguiram === null ? undefined : `inclui ${resumo.nao_prosseguiram} que não prosseguiram · ${resumo.novas_hoje} novas hoje` },
+    { title: 'Total de atendimentos', count: total, color: 'var(--ink)', description: 'Todos os atendimentos do período selecionado.', matches: (_lead: AtendimentoResumo) => true },
     { title: 'Triagem concluída', count: concluidos, color: 'var(--success)', description: 'Leads que concluíram a triagem e seguiram para os classificados.', matches: (lead: AtendimentoResumo) => lead.triagem_concluida },
     { title: 'Em triagem', count: automatico, color: '#2563EB', description: 'Atendimentos aguardando a conclusão da triagem automática.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'automatico' },
     { title: 'Com a equipe', count: humano, color: 'var(--accent)', description: 'Atendimentos disponíveis para a equipe ou em atendimento humano.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'equipe' },
