@@ -1218,7 +1218,7 @@ class DashboardResumoTests(TestCase):
         self.lead("+5585000000005", bot_closed=True, temperature="Desqualificado")
         self.lead("+5585000000006", bot_closed=True, mode="HUMANO", owner=self.ana, desfecho="falha", temperature="Quente")
         data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
-        self.assertEqual(data["status"], {"despachado": 1, "automatico": 1, "equipe": 3, "desqualificado": 1, "especial": 0})
+        self.assertEqual(data["status"], {"despachado": 1, "automatico": 1, "equipe": 3, "desqualificado": 1, "especial": 0, "nao_prosseguiram": 0})
         self.assertEqual(sum(data["status"].values()), data["total"])
 
     def test_resumo_taxa_por_atendente_usa_desfecho_nao_bot_closed(self):
@@ -3498,3 +3498,25 @@ class CadastroManualIgnoradoPeloAgenteTests(TestCase):
         r = self.client_a.post(f"/api/leads/{lead.pk}/especial/concluir/?company={self.company.pk}")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(self.mensagem_do_contato("+5585999991003", "Q")["action"], "TEXTO")
+
+
+class DashboardTotalComNaoProsseguiramTests(TestCase):
+    """Total de atendimentos = leads existentes + os que não prosseguiram (apagados pelo Celery)."""
+    def setUp(self):
+        self.company = Company.objects.create(name="Total Teste")
+        Lead.objects.create(company=self.company, contact="+5585999990001", especialidade="Consumidor")
+        Lead.objects.create(company=self.company, contact="+5585999990002", bot_closed=True, temperature="Quente")
+        from .models import ContagemDiaria
+        ContagemDiaria.objects.create(company=self.company, data=timezone.localdate(), novas=5, nao_prosseguiram=3)
+
+    def test_total_soma_os_que_nao_prosseguiram_e_o_status_fecha_com_o_total(self):
+        from .services import resumo_dashboard
+        r = resumo_dashboard(self.company)
+        self.assertEqual((r["total"], r["status"]["nao_prosseguiram"], r["nao_prosseguiram"]), (5, 3, 3))
+        self.assertEqual(sum(r["status"].values()), r["total"])
+
+    def test_com_filtro_de_area_o_total_so_tem_os_leads_existentes(self):
+        from .services import resumo_dashboard
+        r = resumo_dashboard(self.company, area="Consumidor")
+        self.assertEqual((r["total"], r["status"]["nao_prosseguiram"], r["nao_prosseguiram"]), (1, 0, None))
+        self.assertEqual(sum(r["status"].values()), r["total"])

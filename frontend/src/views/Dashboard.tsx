@@ -15,7 +15,7 @@ type Resumo = {
   novas_hoje: number;
   triagem_concluida: number;
   desqualificados: number;
-  status: { despachado: number; automatico: number; equipe: number; desqualificado: number; especial: number };
+  status: { despachado: number; automatico: number; equipe: number; desqualificado: number; especial: number; nao_prosseguiram: number };
   desfechos: Record<'encerrado' | 'comprometido' | 'falha' | 'bloqueado', number>;
   por_area: [string, number][];
   por_mes: [string, number][];
@@ -41,7 +41,7 @@ type LeadConcluido = {
 
 const RESUMO_VAZIO: Resumo = {
   total: 0, novas_leads: 0, nao_prosseguiram: 0, novas_hoje: 0, triagem_concluida: 0, desqualificados: 0,
-  status: { despachado: 0, automatico: 0, equipe: 0, desqualificado: 0, especial: 0 },
+  status: { despachado: 0, automatico: 0, equipe: 0, desqualificado: 0, especial: 0, nao_prosseguiram: 0 },
   desfechos: { encerrado: 0, comprometido: 0, falha: 0, bloqueado: 0 },
   por_area: [], por_mes: [], por_owner: [], sucesso: 0, concluidos: [], atendimentos: [],
 };
@@ -57,6 +57,7 @@ const STATUS_DONUT: { key: keyof Resumo['status']; label: string; color: string 
   { key: 'equipe', label: 'Com a equipe', color: 'var(--accent)' },
   { key: 'desqualificado', label: 'Desqualificado/desconfiado', color: 'var(--muted)' },
   { key: 'especial', label: 'Outras situações', color: '#7C3AED' },
+  { key: 'nao_prosseguiram', label: 'Não prosseguiram', color: 'var(--muted-soft)' },
 ];
 
 const DESFECHO_LABELS: { value: LeadConcluido['desfecho']; label: string; color: string }[] = [
@@ -166,7 +167,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   }
 
   const cardsResumo = [
-    { title: 'Total de atendimentos', count: total, color: 'var(--ink)', description: 'Todos os atendimentos recebidos no período selecionado.', matches: (_lead: AtendimentoResumo) => true, detalhe: resumo.novas_leads === null ? undefined : `${resumo.novas_leads} novas leads no período · ${resumo.novas_hoje} hoje` },
+    { title: 'Total de atendimentos', count: total, color: 'var(--ink)', description: 'Todos os atendimentos do período: em triagem, com a equipe, despachados, desqualificados, outras situações e os que não prosseguiram. “Triagem concluída” é um recorte desses.', matches: (_lead: AtendimentoResumo) => true, detalhe: resumo.nao_prosseguiram === null ? undefined : `inclui ${resumo.nao_prosseguiram} que não prosseguiram · ${resumo.novas_hoje} novas hoje` },
     { title: 'Triagem concluída', count: concluidos, color: 'var(--success)', description: 'Leads que concluíram a triagem e seguiram para os classificados.', matches: (lead: AtendimentoResumo) => lead.triagem_concluida },
     { title: 'Em triagem', count: automatico, color: '#2563EB', description: 'Atendimentos aguardando a conclusão da triagem automática.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'automatico' },
     { title: 'Com a equipe', count: humano, color: 'var(--accent)', description: 'Atendimentos disponíveis para a equipe ou em atendimento humano.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'equipe' },

@@ -1649,7 +1649,7 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
     User = get_user_model()
     nomes = {u.pk: _nome_usuario(u) for u in User.objects.filter(pk__in={r["owner"] for r in rows if r["owner"]}).select_related("profile")}
 
-    status = {"despachado": 0, "automatico": 0, "equipe": 0, "desqualificado": 0, "especial": 0}
+    status = {"despachado": 0, "automatico": 0, "equipe": 0, "desqualificado": 0, "especial": 0, "nao_prosseguiram": 0}
     desfechos = {"encerrado": 0, "comprometido": 0, "falha": 0, "bloqueado": 0}
     por_area, por_mes, por_owner = {}, {}, {}
     tz = timezone.get_current_timezone()
@@ -1671,6 +1671,9 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
             if r["desfecho"] == DESFECHO_SUCESSO:
                 o["sucesso"] += 1
 
+    # Triagens abandonadas que o Celery apagou: não existem mais como lead, mas fazem parte do total.
+    nao_prosseguiram = 0 if sem_contagem else (totais["nao"] or 0)
+    status["nao_prosseguiram"] = nao_prosseguiram
     # Despachados pela equipe (encerrado/comprometido/falha), mais recentes primeiro --
     # mesmos filtros de período/área/busca de todo o resto do resumo.
     concluidos = sorted(
@@ -1678,7 +1681,9 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
         key=lambda r: r["concluido_em"] or r["created_at"], reverse=True,
     )
     return {
-        "total": len(rows),
+        # Total = leads existentes (em triagem, com a equipe, despachados, desqualificados e
+        # outras situações) + os que não prosseguiram. "Triagem concluída" é um recorte dos existentes.
+        "total": len(rows) + nao_prosseguiram,
         "novas_leads": None if sem_contagem else (totais["novas"] or 0),
         "nao_prosseguiram": None if sem_contagem else (totais["nao"] or 0),
         "novas_hoje": novas_hoje,
