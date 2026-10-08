@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Company, Lead, Me } from '../types';
-import { LeadDetalheDialog, ObservacoesLead } from './LeadDetalheDialog';
-import { Spinner } from './Skeleton';
+import { LeadDetalheDialog, ObservacoesLead } from '../components/LeadDetalheDialog';
+import { Spinner } from '../components/Skeleton';
 
 export const COR_ESPECIAL = '#7C3AED';
 
@@ -10,11 +10,11 @@ const ROTULOS: Record<string, string> = { acompanhamento: 'Acompanhamento de pro
 export const rotuloSituacao = (valor: string) => ROTULOS[valor] ?? valor;
 
 /**
- * "Outras situações" (abaixo de Todos os leads): leads que não são leads novos -- hoje, clientes que já
+ * "Outras situações" (item próprio da barra lateral, entre Todos os leads e Pendências): leads que não são leads novos -- hoje, clientes que já
  * têm processo no escritório e querem acompanhá-lo. Ficam fora das temperaturas e do Kanban.
  * Atendentes assumem e concluem; a conta Empresa vê e pode concluir.
  */
-export function OutrasSituacoes({ api, company, role, me }: { api: Api; company: Company; role: 'atendente' | 'empresa' | 'admin'; me: Me }) {
+export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api; company: Company; role: 'atendente' | 'empresa' | 'admin'; me: Me; onChange?: (abertos: number) => void }) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [busy, setBusy] = useState(true);
   const [acaoId, setAcaoId] = useState<string | null>(null);
@@ -27,6 +27,7 @@ export function OutrasSituacoes({ api, company, role, me }: { api: Api; company:
       return fetchTodasAsPaginas<Lead>(api, `/leads/?company=${company.id}&especial=1`)
         .then((todos) => {
           setLeads(todos);
+          onChange?.(todos.length);
           setDetalhe((d) => (d ? todos.find((l) => l.id === d.id) ?? null : d));
         })
         .catch((e) => {
@@ -36,6 +37,7 @@ export function OutrasSituacoes({ api, company, role, me }: { api: Api; company:
           if (!silent) setBusy(false);
         });
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [api, company.id],
   );
 
@@ -65,18 +67,15 @@ export function OutrasSituacoes({ api, company, role, me }: { api: Api; company:
   const podeConcluir = (l: Lead) => role === 'empresa' || !l.owner || l.owner === me.id;
 
   return (
-    <section className="panel" style={{ marginTop: 16, borderTop: `3px solid ${COR_ESPECIAL}` }} aria-labelledby="outras-situacoes-titulo">
-      <div className="panel-toolbar">
+    <>
+      <header className="page-header" style={{ alignItems: 'flex-end' }}>
         <div>
-          <h2 id="outras-situacoes-titulo" style={{ color: COR_ESPECIAL }}>
-            Outras situações
-          </h2>
-          <small>Clientes que já têm processo e querem acompanhá-lo. Não são leads novos e não têm temperatura.</small>
+          <small className="eyebrow" style={{ color: COR_ESPECIAL }}>Fora do fluxo de leads novos</small>
+          <h1 style={{ color: COR_ESPECIAL }}>Outras situações</h1>
+          <p>Clientes que já têm processo e querem acompanhá-lo. Não são leads novos e não têm temperatura.{leads.length ? ` ${leads.length} em aberto.` : ''}</p>
         </div>
-        <span className="chip" style={{ background: 'rgba(124,58,237,.12)', color: COR_ESPECIAL }}>
-          {leads.length} em aberto
-        </span>
-      </div>
+      </header>
+    <section className="panel" style={{ borderTop: `3px solid ${COR_ESPECIAL}` }} aria-label="Outras situações em aberto">
       {error && (
         <p role="alert" className="error" style={{ margin: '0 20px' }}>
           {error}
@@ -133,5 +132,6 @@ export function OutrasSituacoes({ api, company, role, me }: { api: Api; company:
       </div>
       {detalhe && <LeadDetalheDialog lead={detalhe} estagio={rotuloSituacao(detalhe.situacao_especial)} onClose={() => setDetalhe(null)} />}
     </section>
+    </>
   );
 }

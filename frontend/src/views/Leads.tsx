@@ -6,7 +6,6 @@ import type { Company, Lead, LeadEvent, Me } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 import { AreaSelect } from '../components/AreaSelect';
 import { LeadNameField } from '../components/LeadNameField';
-import { OutrasSituacoes } from '../components/OutrasSituacoes';
 
 // Mesma ordem de services.FAIXAS_URGENCIA no backend (menos urgente -> mais urgente).
 export const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Frio: 2, Qualificado: 3, Quente: 4 };
@@ -496,8 +495,6 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
           )}
         </p>
       </section>
-
-      <OutrasSituacoes api={api} company={company} role={role} me={me} />
 
       {selected && (
         <section className="panel detail">

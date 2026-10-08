@@ -7,6 +7,7 @@ import { Login } from './views/Login';
 import { Dashboard } from './views/Dashboard';
 import { Leads } from './views/Leads';
 import { Pendencias } from './views/Pendencias';
+import { OutrasSituacoes } from './views/OutrasSituacoes';
 import { AtendimentoHumano } from './views/AtendimentoHumano';
 import { BlackList } from './views/BlackList';
 import { Roteiro } from './views/Roteiro';
@@ -30,6 +31,7 @@ export function App() {
   const [view, setView] = useState<View>('dashboard');
   const [error, setError] = useState('');
   const [leadsCount, setLeadsCount] = useState(0);
+  const [especialCount, setEspecialCount] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
   const [humanCount, setHumanCount] = useState(0);
   const [companiesRetry, setCompaniesRetry] = useState(0);
@@ -101,9 +103,11 @@ export function App() {
         api(`/leads/?company=${company.id}&ativos=1`),
         api(`/leads/?company=${company.id}&pending=1`),
         api(`/leads/?company=${company.id}&meus=1`),
+        api(`/leads/?company=${company.id}&especial=1`),
       ])
-        .then(([ativos, pending, meus]: [Paginated<Lead>, Paginated<Lead>, Paginated<Lead>]) => {
+        .then(([ativos, pending, meus, especiais]: [Paginated<Lead>, Paginated<Lead>, Paginated<Lead>, Paginated<Lead>]) => {
           if (!active) return;
+          setEspecialCount(especiais.count);
           setLeadsCount(ativos.count);
           setHumanCount(meus.count);
           setPendingCount(pending.count);
@@ -214,6 +218,7 @@ export function App() {
         onNavigate={setView}
         onLogout={logout}
         leadsCount={leadsCount}
+        especialCount={especialCount}
         pendingCount={pendingCount}
         humanCount={humanCount}
         api={api}
@@ -232,6 +237,7 @@ export function App() {
         <div key={view} className="view-enter">
           {view === 'dashboard' && <Dashboard api={api} company={company} role={role === 'atendente' ? 'atendente' : 'empresa'} />}
           {view === 'leads' && <Leads api={api} company={company} role={role} me={me} />}
+          {view === 'especiais' && <OutrasSituacoes api={api} company={company} role={role === 'atendente' ? 'atendente' : 'empresa'} me={me} onChange={setEspecialCount} />}
           {view === 'pendencias' && <Pendencias api={api} company={company} />}
           {view === 'humano' && <AtendimentoHumano api={api} company={company} me={me} />}
           {view === 'blacklist' && <BlackList api={api} company={company} />}

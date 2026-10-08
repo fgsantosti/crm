@@ -3,7 +3,7 @@ import { ProfileMenu } from './ProfileMenu';
 import type { Api } from '../api';
 import type { Company, Me } from '../types';
 
-export type View = 'dashboard' | 'leads' | 'pendencias' | 'humano' | 'blacklist' | 'roteiro' | 'dados-empresa' | 'equipe';
+export type View = 'dashboard' | 'leads' | 'especiais' | 'pendencias' | 'humano' | 'blacklist' | 'roteiro' | 'dados-empresa' | 'equipe';
 
 export function Sidebar({
   role,
@@ -14,6 +14,7 @@ export function Sidebar({
   onNavigate,
   onLogout,
   leadsCount,
+  especialCount,
   pendingCount,
   humanCount,
   api,
@@ -31,6 +32,7 @@ export function Sidebar({
   onNavigate: (v: View) => void;
   onLogout: () => void;
   leadsCount: number;
+  especialCount: number;
   pendingCount: number;
   humanCount: number;
   api: Api;
@@ -43,9 +45,11 @@ export function Sidebar({
   const items: { key: View; label: string; count?: number }[] = [{ key: 'dashboard', label: 'Dashboard' }];
   if (role === 'atendente') {
     items.push({ key: 'leads', label: 'Todos os leads', count: leadsCount });
+    items.push({ key: 'especiais', label: 'Outras situações', count: especialCount });
     items.push({ key: 'pendencias', label: 'Pendências', count: pendingCount });
     items.push({ key: 'humano', label: 'Meus Atendimentos', count: humanCount });
   }
+  if (role === 'empresa') items.push({ key: 'especiais', label: 'Outras situações', count: especialCount });
   items.push({ key: 'blacklist', label: 'BlackList' });
   if (role === 'empresa') {
     items.push({ key: 'roteiro', label: 'Roteiro do agente' });
