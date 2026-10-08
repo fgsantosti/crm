@@ -26,7 +26,7 @@ const MANDATORY_LABELS: Record<string, string> = {
 // vendo o que o agente responde sobre a empresa), e "validar"/"encerramento" fecham
 // a triagem. "necessidade_humana" confirma o encaminhamento solicitado pelo cliente.
 // Esses textos não têm Variável de classificação (ver backend).
-const OFFFLOW_IDS = ['apresentacao', 'empresa', 'validar', 'encerramento', 'necessidade_humana'] as const;
+const OFFFLOW_IDS = ['apresentacao', 'empresa', 'validar', 'encerramento', 'necessidade_humana', 'especial_acompanhamento'] as const;
 // Obrigatórias que ficam sempre nas perguntas fixas: a área só é conhecida depois delas.
 const SEMPRE_FIXAS = ['nome', 'situacao'];
 const ETAPAS_SPIN: { value: Question['etapa_spin']; label: string }[] = [
@@ -42,6 +42,7 @@ const OFFFLOW_LABELS: Record<string, { title: string; help: string }> = {
   validar: { title: 'Confirmação dos dados', help: 'Resumo enviado para o cliente confirmar antes de encerrar a triagem.' },
   encerramento: { title: 'Encerramento', help: 'Mensagem final, enviada quando a triagem é concluída e classificada.' },
   necessidade_humana: { title: 'Necessidade humana', help: 'Mensagem enviada ao cliente caso ele peça atendimento humano' },
+  especial_acompanhamento: { title: 'Outras situações — acompanhamento de processo', help: 'Resposta enviada ao cliente que já tem processo no escritório e quer acompanhá-lo (o lead vai para “Outras situações”). Em silêncio quando “Etapa Inicial?” está marcada.' },
 };
 
 const TOKEN_RE = /(<br\s*\/?>)|(\{[a-zA-Z_]+\})/g;
@@ -771,13 +772,14 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                   <span className="step-tag">{label.title}</span>
                   {q && (
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
-                      <input type="checkbox" style={{ width: 'auto' }} checked={q.habilitada && !(etapaInicial && id === 'necessidade_humana')} disabled={!canEdit || savingQ === q.id || (etapaInicial && id === 'necessidade_humana')} onChange={(e) => saveQuestion(q, { habilitada: e.target.checked })} />
+                      <input type="checkbox" style={{ width: 'auto' }} checked={q.habilitada && !(etapaInicial && (id === 'necessidade_humana' || id === 'especial_acompanhamento'))} disabled={!canEdit || savingQ === q.id || (etapaInicial && (id === 'necessidade_humana' || id === 'especial_acompanhamento'))} onChange={(e) => saveQuestion(q, { habilitada: e.target.checked })} />
                       Permitir envio pelo agente
                     </label>
                   )}
                 </div>
                 <small style={{ display: 'block', color: 'var(--muted)', marginBottom: 10 }}>{label.help}</small>
                 {etapaInicial && id === 'necessidade_humana' && <p style={{ color: 'var(--muted)', fontSize: 13 }}>Pedido de atendimento humano desabilitado durante o início por SPIN. O agente segue a triagem e encaminha a lead após classificá-la.</p>}
+                {etapaInicial && id === 'especial_acompanhamento' && <p style={{ color: 'var(--muted)', fontSize: 13 }}>Com “Etapa Inicial?” marcada o agente não responde ao cliente: o lead vai para “Outras situações” em silêncio.</p>}
                 {!q ? (
                   <p style={{ fontSize: 13, color: 'var(--warn)' }}>Carregando…</p>
                 ) : canEdit ? (

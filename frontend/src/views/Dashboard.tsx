@@ -10,7 +10,7 @@ type Resumo = {
   total: number;
   triagem_concluida: number;
   desqualificados: number;
-  status: { despachado: number; automatico: number; equipe: number; desqualificado: number };
+  status: { despachado: number; automatico: number; equipe: number; desqualificado: number; especial: number };
   desfechos: Record<'encerrado' | 'comprometido' | 'falha' | 'bloqueado', number>;
   por_area: [string, number][];
   por_mes: [string, number][];
@@ -36,7 +36,7 @@ type LeadConcluido = {
 
 const RESUMO_VAZIO: Resumo = {
   total: 0, triagem_concluida: 0, desqualificados: 0,
-  status: { despachado: 0, automatico: 0, equipe: 0, desqualificado: 0 },
+  status: { despachado: 0, automatico: 0, equipe: 0, desqualificado: 0, especial: 0 },
   desfechos: { encerrado: 0, comprometido: 0, falha: 0, bloqueado: 0 },
   por_area: [], por_mes: [], por_owner: [], sucesso: 0, concluidos: [], atendimentos: [],
 };
@@ -51,6 +51,7 @@ const STATUS_DONUT: { key: keyof Resumo['status']; label: string; color: string 
   { key: 'automatico', label: 'Em triagem', color: '#2563EB' },
   { key: 'equipe', label: 'Com a equipe', color: 'var(--accent)' },
   { key: 'desqualificado', label: 'Desqualificado/desconfiado', color: 'var(--muted)' },
+  { key: 'especial', label: 'Outras situações', color: '#7C3AED' },
 ];
 
 const DESFECHO_LABELS: { value: LeadConcluido['desfecho']; label: string; color: string }[] = [
@@ -164,6 +165,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
     { title: 'Triagem concluída', count: concluidos, color: 'var(--success)', description: 'Leads que concluíram a triagem e seguiram para os classificados.', matches: (lead: AtendimentoResumo) => lead.triagem_concluida },
     { title: 'Em triagem', count: automatico, color: '#2563EB', description: 'Atendimentos aguardando a conclusão da triagem automática.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'automatico' },
     { title: 'Com a equipe', count: humano, color: 'var(--accent)', description: 'Atendimentos disponíveis para a equipe ou em atendimento humano.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'equipe' },
+    { title: 'Outras situações', count: resumo.status.especial, color: '#7C3AED', description: 'Clientes que já têm processo e querem acompanhá-lo (não são leads novos).', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'especial' },
     { title: 'Desqualificados', count: desqualificados, color: 'var(--muted)', description: 'Leads classificados como desqualificados ou desconfiados.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'desqualificado' },
   ];
 

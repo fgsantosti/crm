@@ -5,7 +5,7 @@ from django.test import Client, TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 from .models import Blacklist, Company, Question, Lead, Event, Area, AtendenteInvite, PasswordChangeRequired, AgentTokenExpiry, CompanyInfo, Variavel, VariavelRoteiro
-from .services import receive, status_contato, contexto_agente
+from .services import receive, status_contato, contexto_agente, seed_roteiro_padrao
 
 class QualificationTests(TestCase):
     def setUp(self):
@@ -556,7 +556,7 @@ class QualificationTests(TestCase):
         # seed_roteiro_padrao: empresa nova já nasce com o mínimo pro funil funcionar.
         nova = Company.objects.get(pk=company_id)
         ids = set(Question.objects.filter(company=nova).values_list("question_id", flat=True))
-        self.assertEqual(ids, {"nome", "situacao", "demanda", "apresentacao", "empresa", "validar", "encerramento", "necessidade_humana"})
+        self.assertEqual(ids, {"nome", "situacao", "demanda", "apresentacao", "empresa", "validar", "encerramento", "necessidade_humana", "especial_acompanhamento"})
         self.assertTrue(Question.objects.filter(company=nova, question_id="nome", obrigatoria=True, variavel__isnull=False).exists())
         self.assertTrue(Question.objects.filter(company=nova, question_id="apresentacao", obrigatoria=True, variavel__isnull=True).exists())
         self.assertEqual(CompanyInfo.objects.filter(company=nova, obrigatorio=True).count(), 3)
@@ -1218,7 +1218,7 @@ class DashboardResumoTests(TestCase):
         self.lead("+5585000000005", bot_closed=True, temperature="Desqualificado")
         self.lead("+5585000000006", bot_closed=True, mode="HUMANO", owner=self.ana, desfecho="falha", temperature="Quente")
         data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
-        self.assertEqual(data["status"], {"despachado": 1, "automatico": 1, "equipe": 3, "desqualificado": 1})
+        self.assertEqual(data["status"], {"despachado": 1, "automatico": 1, "equipe": 3, "desqualificado": 1, "especial": 0})
         self.assertEqual(sum(data["status"].values()), data["total"])
 
     def test_resumo_taxa_por_atendente_usa_desfecho_nao_bot_closed(self):
@@ -3181,3 +3181,131 @@ class ObservacoesDoLeadTests(TestCase):
         lead = Lead.objects.get()
         body = c.get(f"/api/leads/{lead.pk}/?company={self.company.pk}").json()
         self.assertEqual(body["notes"], "Prefere contato à noite")
+
+
+class SituacaoEspecialTests(TestCase):
+    """situacao_especial: lead em triagem que vira "Outras situações" (ex.: acompanhamento de processo)."""
+    def setUp(self):
+        self.company = Company.objects.create(name="Esp Teste")
+        seed_roteiro_padrao(self.company)
+        Question.objects.filter(company=self.company, question_id="apresentacao").update(text="Olá!")
+        Area.objects.create(company=self.company, name="Consumidor")
+        self.contact = "+5585911110002"
+        User = get_user_model()
+        self.atendente = User.objects.create_user(username="a1@x.com", email="a1@x.com")
+        self.outro = User.objects.create_user(username="a2@x.com", email="a2@x.com")
+        self.empresa = User.objects.create_user(username="e@x.com", email="e@x.com", is_staff=True)
+        for u in (self.atendente, self.outro, self.empresa):
+            self.company.members.add(u)
+
+    def client_de(self, user):
+        c = APIClient(); c.force_authenticate(user); return c
+
+    def send(self, mid, marker="ATUALIZAR", **fields):
+        data = {"contact": self.contact, "message_id": mid, "kind": "text", "marker": marker,
+                "question_id": "apresentacao" if marker == "Q" else "", "fields": fields,
+                "human_required": False, "reason": "pedido humano"}
+        r = receive(self.company, data)
+        if r.get("event_id"):
+            Event.objects.filter(pk=r["event_id"]).update(delivery="SENT")
+        return r
+
+    def especial(self, mid="e1", **extra):
+        return self.send(mid, situacao_especial="acompanhamento", observacoes="Quer saber o andamento do processo", **extra)
+
+    def test_lead_em_triagem_vira_acompanhamento_e_recebe_o_texto_obrigatorio(self):
+        self.send("a0", marker="Q")
+        r = self.especial()
+        self.assertEqual((r["action"], r["question_id"]), ("TEXTO", "especial_acompanhamento"))
+        lead = Lead.objects.get()
+        self.assertEqual((lead.situacao_especial, lead.temperature, lead.bot_closed, lead.desfecho), ("acompanhamento", "", True, ""))
+        self.assertEqual(lead.notes, "Quer saber o andamento do processo")
+        self.assertEqual(lead.next_action, "Acompanhar processo")
+        # O número segue preso: o agente não atende mais esse contato até concluir.
+        self.assertEqual(self.send("a9", marker="Q")["action"], "NO_REPLY")
+        self.assertEqual(Lead.objects.filter(contact=self.contact).count(), 1)
+
+    def test_primeira_mensagem_ja_pode_ser_acompanhamento(self):
+        r = self.especial("p1")
+        self.assertEqual(r["action"], "TEXTO")
+        self.assertEqual(Lead.objects.get().situacao_especial, "acompanhamento")
+
+    def test_etapa_inicial_ligada_classifica_em_silencio(self):
+        area = Area.objects.get(company=self.company)
+        Question.objects.create(company=self.company, question_id="cons_a", text="Pergunta?", area=area, etapa_spin="situacao")
+        Company.objects.filter(pk=self.company.pk).update(etapa_inicial=True, spin_inicial=area)
+        self.company.refresh_from_db()
+        r = self.especial("s1")
+        self.assertEqual(r["action"], "NO_REPLY")
+        lead = Lead.objects.get()
+        self.assertEqual((lead.situacao_especial, lead.bot_closed), ("acompanhamento", True))
+
+    def test_texto_desabilitado_ou_vazio_tambem_fica_em_silencio(self):
+        Question.objects.filter(company=self.company, question_id="especial_acompanhamento").update(habilitada=False)
+        self.assertEqual(self.especial("d1")["action"], "NO_REPLY")
+        self.assertEqual(Lead.objects.get().situacao_especial, "acompanhamento")
+
+    def test_lead_ja_classificado_nao_muda_de_categoria(self):
+        self.send("a0", marker="Q")
+        Lead.objects.update(bot_closed=True, state="ENCERRADO_CLASSIFICADO", temperature="Quente")
+        r = self.especial("x1")
+        self.assertEqual(r["action"], "NO_REPLY")
+        self.assertEqual(Lead.objects.get().situacao_especial, "")
+
+    def test_filas_do_kanban_nao_incluem_e_a_lista_outras_situacoes_inclui(self):
+        self.send("a0", marker="Q"); self.especial()
+        c = self.client_de(self.atendente)
+        base = f"/api/leads/?company={self.company.pk}"
+        self.assertEqual(c.get(base + "&pending=1").json()["count"], 0)
+        self.assertEqual(c.get(base + "&ativos=1").json()["count"], 0)
+        lista = c.get(base + "&especial=1").json()
+        self.assertEqual(lista["count"], 1)
+        self.assertEqual(lista["results"][0]["situacao_especial"], "acompanhamento")
+        self.assertEqual(self.client_de(self.empresa).get(base + "&especial=1").json()["count"], 1)
+
+    def test_assumir_e_concluir_liberam_o_numero(self):
+        self.send("a0", marker="Q"); self.especial()
+        lead = Lead.objects.get()
+        url = lambda acao: f"/api/leads/{lead.pk}/especial/{acao}/?company={self.company.pk}"
+        self.assertEqual(self.client_de(self.empresa).post(url("assumir")).status_code, 403)
+        self.assertEqual(self.client_de(self.atendente).post(url("assumir")).status_code, 200)
+        self.assertEqual(self.client_de(self.outro).post(url("assumir")).status_code, 400)
+        self.assertEqual(self.client_de(self.outro).post(url("concluir")).status_code, 400)
+        self.assertEqual(self.client_de(self.atendente).post(url("concluir")).status_code, 200)
+        lead.refresh_from_db()
+        self.assertEqual((lead.desfecho, lead.owner_id), ("encerrado", self.atendente.pk))
+        self.assertEqual(self.client_de(self.atendente).post(url("concluir")).status_code, 400)
+        # Número livre: a próxima mensagem abre um lead novo, pela apresentação.
+        r = self.send("n1", marker="Q")
+        self.assertEqual((r["action"], r["lead_novo"]), ("TEXTO", True))
+
+    def test_conta_empresa_pode_concluir(self):
+        self.send("a0", marker="Q"); self.especial()
+        lead = Lead.objects.get()
+        r = self.client_de(self.empresa).post(f"/api/leads/{lead.pk}/especial/concluir/?company={self.company.pk}")
+        self.assertEqual(r.status_code, 200)
+
+    def test_dashboard_tem_categoria_propria_e_nao_conta_desfecho(self):
+        from .services import resumo_dashboard
+        self.send("a0", marker="Q"); self.especial()
+        lead = Lead.objects.get()
+        self.client_de(self.atendente).post(f"/api/leads/{lead.pk}/especial/concluir/?company={self.company.pk}")
+        resumo = resumo_dashboard(self.company)
+        self.assertEqual((resumo["status"]["especial"], resumo["status"]["despachado"], resumo["desfechos"]["encerrado"]), (1, 0, 0))
+        self.assertEqual(resumo["atendimentos"] and [a["categoria_status"] for a in resumo["atendimentos"]], ["especial"])
+
+    def test_contexto_lista_situacoes_e_texto_obrigatorio_nao_pode_ser_excluido(self):
+        ctx = contexto_agente(self.company)
+        self.assertEqual([s["valor"] for s in ctx["situacoes_especiais"]], ["acompanhamento"])
+        self.assertIn("especial_acompanhamento", [q["question_id"] for q in ctx["fora_do_fluxo"]])
+        q = Question.objects.get(company=self.company, question_id="especial_acompanhamento")
+        self.assertTrue(q.obrigatoria)
+        c = self.client_de(self.empresa)
+        self.assertEqual(c.delete(f"/api/questions/{q.pk}/?company={self.company.pk}").status_code, 400)
+
+    def test_valor_desconhecido_e_rejeitado_pelo_serializer(self):
+        from .serializers import IncomingSerializer
+        ok = IncomingSerializer(data={"contact": self.contact, "message_id": "x", "marker": "ATUALIZAR", "fields": {"situacao_especial": "acompanhamento"}})
+        ruim = IncomingSerializer(data={"contact": self.contact, "message_id": "x", "marker": "ATUALIZAR", "fields": {"situacao_especial": "outra"}})
+        self.assertTrue(ok.is_valid(), ok.errors)
+        self.assertFalse(ruim.is_valid())

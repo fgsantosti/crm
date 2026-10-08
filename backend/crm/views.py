@@ -17,6 +17,8 @@ from .models import Blacklist, Company, Lead, Question, CompanyInfo, Event, Area
 from .serializers import BlacklistSerializer, CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer, VariavelRoteiroSerializer
 from .services import (
     aplicar_audio,
+    assumir_situacao_especial as assumir_situacao_especial_service,
+    concluir_situacao_especial as concluir_situacao_especial_service,
     receive, escalate, create_invite, contexto_agente, status_contato,
     validar_convite as validar_convite_service,
     trocar_senha as trocar_senha_service,
@@ -353,7 +355,7 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
             # "Pendências" = colunas "Qualificados" + "Atendimentos em espera" do Kanban (mesma
             # regra de Leads.columnOf): triagem concluída (ou escalada pra humano), ainda não
             # em negociação nem despachada. Em espera vem antes de Classificado.
-            qs = qs.filter(desfecho="", origem_manual=False, etapa_atendimento__in=["", "espera"]).exclude(
+            qs = qs.filter(desfecho="", origem_manual=False, situacao_especial="", etapa_atendimento__in=["", "espera"]).exclude(
                 temperature__in=FORA_DO_KANBAN
             ).filter(Q(bot_closed=True) | Q(mode="HUMANO")).annotate(
                 estagio_rank=Case(When(etapa_atendimento="espera", then=Value(0)), default=Value(1), output_field=IntegerField()),
@@ -362,7 +364,10 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
         if self.request.query_params.get("ativos") == "1":
             # Só o que o Kanban mostra (mesma regra de Leads.leadsVisiveisNoKanban) --
             # evita que leads despachados ocupem a página e empurrem ativos pra fora.
-            qs = qs.filter(desfecho="", origem_manual=False).exclude(temperature__in=FORA_DO_KANBAN)
+            qs = qs.filter(desfecho="", origem_manual=False, situacao_especial="").exclude(temperature__in=FORA_DO_KANBAN)
+        if self.request.query_params.get("especial") == "1":
+            # "Outras situações": leads fora do fluxo de leads novos (ex.: acompanhamento de processo).
+            qs = qs.exclude(situacao_especial="").filter(desfecho="").order_by("created_at")
         if self.request.query_params.get("meus") == "1":
             # "Meus Atendimentos": em negociação ou já no Despacho comigo + meus cadastros manuais
             # (o Despacho aparece aqui pra o atendente conseguir enviar -- inclusive os manuais,
@@ -441,6 +446,22 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
         if self._bloqueia_staff(request):
             return Response({"detail": "Esse perfil não assume atendimentos."}, status=403)
         erro = mover_para_negociacao_service(self.get_object().pk, request.user)
+        if erro:
+            return Response({"detail": erro}, status=400)
+        return Response(LeadSerializer(self.get_object()).data)
+    @action(detail=True, methods=["post"], url_path="especial/assumir")
+    def especial_assumir(self, request, pk=None):
+        """Outras situações: o atendente assume o acompanhamento."""
+        if self._bloqueia_staff(request):
+            return Response({"detail": "Esse perfil não assume atendimentos."}, status=403)
+        erro = assumir_situacao_especial_service(self.get_object().pk, request.user)
+        if erro:
+            return Response({"detail": erro}, status=400)
+        return Response(LeadSerializer(self.get_object()).data)
+    @action(detail=True, methods=["post"], url_path="especial/concluir")
+    def especial_concluir(self, request, pk=None):
+        """Outras situações: conclui o acompanhamento e libera o número (responsável ou conta Empresa)."""
+        erro = concluir_situacao_especial_service(self.get_object().pk, request.user)
         if erro:
             return Response({"detail": erro}, status=400)
         return Response(LeadSerializer(self.get_object()).data)

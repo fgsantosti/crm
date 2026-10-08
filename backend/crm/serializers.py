@@ -1,7 +1,7 @@
 import re
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, VariavelRoteiro, MANDATORY_OFFFLOW_QUESTION_IDS, MANDATORY_QUESTION_IDS
+from .models import Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, VariavelRoteiro, MANDATORY_OFFFLOW_QUESTION_IDS, MANDATORY_QUESTION_IDS, SITUACOES_ESPECIAIS
 
 # Obrigatórias que nunca entram numa lista SPIN (a área só é conhecida depois delas).
 FIXED_QUESTION_IDS = {"nome", "situacao"}
@@ -78,7 +78,7 @@ class LeadSerializer(serializers.ModelSerializer):
         # owner/mode só mudam via as actions assumir/despachar (services.py) --
         # nunca mais um PATCH livre de texto, pra garantir atomicidade real
         # na disputa por um lead entre atendentes.
-        read_only_fields = ["id", "company", "contact", "contact_name", "created_at", "state", "last_audio_id", "bot_closed", "pedido_humano_pendente", "last_contact", "owner", "mode", "desfecho", "variaveis_roteiro", "urgencia_detalhe", "etapa_atendimento", "desfecho_pendente", "origem_manual"]
+        read_only_fields = ["id", "company", "contact", "contact_name", "created_at", "state", "last_audio_id", "bot_closed", "pedido_humano_pendente", "situacao_especial", "last_contact", "owner", "mode", "desfecho", "variaveis_roteiro", "urgencia_detalhe", "etapa_atendimento", "desfecho_pendente", "origem_manual"]
 
     def validate(self, attrs):
         if attrs.get("mode") == "AUTOMÁTICO" and self.instance and self.instance.mode == "HUMANO":
@@ -268,6 +268,8 @@ class AgentFieldsSerializer(serializers.Serializer):
     # usado pra especialidade/Area. "validar" e "encerramento" continuam
     # reservados (nunca um "proxima" válido), também checado lá.
     proxima = serializers.CharField(max_length=80, required=False, allow_blank=True)
+    # Tira o lead da triagem de lead novo (ex.: "acompanhamento" = cliente com processo no escritório).
+    situacao_especial = serializers.ChoiceField(choices=[k for k in SITUACOES_ESPECIAIS], required=False)
     # Dados não sensíveis que ajudam o atendimento, separados por ";" (ver services.mesclar_observacoes).
     observacoes = serializers.CharField(max_length=1000, required=False, allow_blank=True)
     # RESPONDER: texto livre do agente, só antes do fluxo (validado em services.receive).

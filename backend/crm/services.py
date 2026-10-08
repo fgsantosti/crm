@@ -12,12 +12,12 @@ from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.authtoken.models import Token
 from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
-from .models import Profile, Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, DEFAULT_HUMAN_MESSAGE
+from .models import Profile, Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, DEFAULT_HUMAN_MESSAGE, SITUACOES_ESPECIAIS, ESPECIAL_QUESTION_IDS
 
 logger = logging.getLogger(__name__)
 
 NO_REPLY = {"action": "NO_REPLY"}
-RESERVED_QUESTION_IDS = {"validar", "encerramento", "necessidade_humana"}
+RESERVED_QUESTION_IDS = {"validar", "encerramento", "necessidade_humana", *ESPECIAL_QUESTION_IDS}
 
 # question_id -> (nome de exibição, slug/placeholder fixo) das 3 Variáveis de roteiro
 # builtin: reaproveitam os placeholders já existentes (FIELD_MAP), sem precisar de
@@ -27,6 +27,8 @@ BUILTIN_VARIAVEL_ROTEIRO = {
     "situacao": ("Área da Lead", "especialidade"),
     "demanda": ("Demanda", "tema"),
 }
+
+TEXTOS_PADRAO_ESPECIAIS = {v["question_id"]: v["texto_padrao"] for v in SITUACOES_ESPECIAIS.values()}
 
 def seed_roteiro_padrao(company):
     """Garante o mínimo pra uma empresa nova conseguir operar o funil: a Variavel
@@ -43,7 +45,7 @@ def seed_roteiro_padrao(company):
     for question_id in MANDATORY_OFFFLOW_QUESTION_IDS:
         Question.objects.get_or_create(company=company, question_id=question_id, defaults={
             "obrigatoria": True, "variavel": None,
-            "text": DEFAULT_HUMAN_MESSAGE if question_id == "necessidade_humana" else "",
+            "text": DEFAULT_HUMAN_MESSAGE if question_id == "necessidade_humana" else TEXTOS_PADRAO_ESPECIAIS.get(question_id, ""),
         })
     for title in CompanyInfo.MANDATORY_TITLES:
         CompanyInfo.objects.get_or_create(company=company, title=title, defaults={"obrigatorio": True})
@@ -484,6 +486,9 @@ def receive(company, data):
         event.summary = "SPIN inicial sem perguntas disponíveis"
     elif data["human_required"] and data["reason"] == "fora de escopo":
         desqualificar_fora_de_escopo(lead)
+    elif (data.get("fields") or {}).get("situacao_especial") in SITUACOES_ESPECIAIS and data["marker"] == "ATUALIZAR":
+        # Só chega aqui lead em triagem (aceita): quem já foi classificado/atendido não muda de categoria.
+        result = marcar_situacao_especial(company, lead, event, data["fields"]["situacao_especial"], data["fields"])
     elif data["human_required"] and data["reason"] == "falha de integração":
         apagar_lead, motivo_apagar = True, "Agente sinalizou falha de integração"
     elif data["human_required"] and data["reason"] != "pedido humano":
@@ -1353,6 +1358,71 @@ def apagar_triagens_abandonadas(agora=None):
             total += por_modelo.get("crm.Lead", 0)
     return total
 
+def marcar_situacao_especial(company, lead, event, valor, fields):
+    """Lead em triagem que não é lead novo (ex.: cliente que quer acompanhar um processo): sai da
+    triagem, fica sem temperatura e fora do Kanban (aparece em "Outras situações") e o número segue
+    preso até a equipe concluir. Devolve a resposta ao contato: o texto obrigatório fora do fluxo da
+    situação, ou silêncio (NO_REPLY) quando ele está desligado ou a Etapa Inicial está ligada."""
+    info = SITUACOES_ESPECIAIS[valor]
+    extras = {k: fields[k] for k in ("nome", "observacoes") if fields.get(k)}
+    if extras:
+        apply_fields(lead, company, extras)
+    if not lead.name.strip():
+        lead.name = lead.contact_name
+    lead.situacao_especial = valor
+    lead.bot_closed = True
+    lead.mode = "AUTOMÁTICO"
+    lead.pedido_humano_pendente = False
+    lead.state = "ENCERRADO_ESPECIAL"
+    lead.funnel_stage = info["rotulo"]
+    lead.next_action = info["next_action"]
+    lead.save()
+    event.summary = f"Situação especial: {info['rotulo']}"
+    result = dict(NO_REPLY)
+    question = Question.objects.filter(company=company, question_id=info["question_id"]).first()
+    if question and texto_fora_habilitado(company, info["question_id"]) and (question.text or "").strip():
+        asset = render_text(question.text, lead, company)
+        if asset:
+            result = {"action": "TEXTO", "content": asset, "question_id": info["question_id"]}
+            event.delivery = "PENDING"
+    return result
+
+def _lead_especial_com_acesso(lead_id, user):
+    lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
+    if not lead or not Company.objects.filter(pk=lead.company_id, members=user).exists():
+        return None, "Lead não encontrado."
+    if not lead.situacao_especial or lead.desfecho:
+        return None, "Este lead não está em Outras situações."
+    return lead, None
+
+@transaction.atomic
+def assumir_situacao_especial(lead_id, user):
+    """Atendente assume o acompanhamento (fica como responsável); o lead continua em Outras situações."""
+    lead, erro = _lead_especial_com_acesso(lead_id, user)
+    if erro:
+        return erro
+    if lead.owner_id and lead.owner_id != user.pk:
+        return "Este lead já foi assumido por outro atendente."
+    lead.owner = user
+    lead.save(update_fields=["owner"])
+    Event.objects.create(lead=lead, message_id=f"especial-assumir:{secrets.token_hex(16)}", summary="Atendente assumiu o acompanhamento")
+    return None
+
+@transaction.atomic
+def concluir_situacao_especial(lead_id, user):
+    """Encerra o acompanhamento e libera o número (a próxima mensagem abre um lead novo)."""
+    lead, erro = _lead_especial_com_acesso(lead_id, user)
+    if erro:
+        return erro
+    if lead.owner_id and lead.owner_id != user.pk and not user.is_staff:
+        return "Só o responsável (ou a conta Empresa) conclui este acompanhamento."
+    lead.desfecho = "encerrado"
+    lead.concluido_em = timezone.now()
+    lead.next_action = ""
+    lead.save(update_fields=["desfecho", "concluido_em", "next_action"])
+    Event.objects.create(lead=lead, message_id=f"especial-concluir:{secrets.token_hex(16)}", summary="Acompanhamento concluído")
+    return None
+
 def desqualificar_sem_resposta(lead):
     """A mesma pergunta foi repetida MAX_REPETICOES vezes sem resposta utilizável: desqualifica
     (o lead fica registrado, fora do Kanban) e libera o número em vez de apagar a triagem."""
@@ -1467,6 +1537,9 @@ def contexto_agente(company):
         "perguntas": perguntas,
         "spin": spin,
         "fora_do_fluxo": fora_do_fluxo,
+        "situacoes_especiais": [
+            {"valor": k, "descricao": v["descricao"]} for k, v in SITUACOES_ESPECIAIS.items()
+        ],
         "faixas_urgencia": [
             {"min": minimo, "max_exclusivo": maximo, "temperatura": temperatura}
             for minimo, maximo, temperatura in FAIXAS_URGENCIA
@@ -1477,6 +1550,8 @@ def _categoria_status(lead):
     """Categoria exclusiva (cada lead cai em exatamente uma) usada no donut/tiles
     do Dashboard -- antes "Concluído" (bot_closed) e "Atendimento humano"
     (mode=HUMANO) se sobrepunham e a soma passava do total."""
+    if lead.get("situacao_especial"):
+        return "especial"
     if lead["desfecho"] == "desqualificado":
         return "desqualificado"
     if lead["desfecho"]:
@@ -1513,17 +1588,19 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
         )
     rows = list(qs.values(
         "id", "name", "contact", "created_at", "concluido_em", "desfecho", "bot_closed", "mode",
-        "temperature", "priority", "especialidade", "owner", "origem_manual", "demand", "etapa_atendimento",
+        "temperature", "priority", "especialidade", "owner", "origem_manual", "demand", "etapa_atendimento", "situacao_especial",
     ))
     User = get_user_model()
     nomes = {u.pk: _nome_usuario(u) for u in User.objects.filter(pk__in={r["owner"] for r in rows if r["owner"]}).select_related("profile")}
 
-    status = {"despachado": 0, "automatico": 0, "equipe": 0, "desqualificado": 0}
+    status = {"despachado": 0, "automatico": 0, "equipe": 0, "desqualificado": 0, "especial": 0}
     desfechos = {"encerrado": 0, "comprometido": 0, "falha": 0, "bloqueado": 0}
     por_area, por_mes, por_owner = {}, {}, {}
     tz = timezone.get_current_timezone()
     for r in rows:
         status[_categoria_status(r)] += 1
+        if r["situacao_especial"]:
+            continue  # Outras situações não entram em desfechos, áreas nem produtividade
         if r["desfecho"] in desfechos:
             desfechos[r["desfecho"]] += 1
         chave_area = r["especialidade"] or "Sem especialidade"
@@ -1541,7 +1618,7 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
     # Despachados pela equipe (encerrado/comprometido/falha), mais recentes primeiro --
     # mesmos filtros de período/área/busca de todo o resto do resumo.
     concluidos = sorted(
-        (r for r in rows if r["desfecho"] in Lead.DESFECHO_CONCLUIDO),
+        (r for r in rows if r["desfecho"] in Lead.DESFECHO_CONCLUIDO and not r["situacao_especial"]),
         key=lambda r: r["concluido_em"] or r["created_at"], reverse=True,
     )
     return {

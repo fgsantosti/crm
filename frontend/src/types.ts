@@ -47,6 +47,8 @@ export type Lead = {
   last_audio_id: string;
   bot_closed: boolean;
   notes: string;
+  /** Fora do fluxo de leads novos (ex.: 'acompanhamento' = cliente com processo no escritório). Vazio = lead normal. */
+  situacao_especial: '' | 'acompanhamento';
   /** 'desqualificado' é automático (classificado Desqualificado/Desconfiado), nunca escolhido no Despacho. */
   desfecho: 'encerrado' | 'comprometido' | 'falha' | 'desqualificado' | 'bloqueado' | '';
   concluido_em: string | null;

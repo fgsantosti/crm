@@ -48,7 +48,20 @@ MANDATORY_QUESTION_IDS = ["nome", "situacao", "demanda"]
 # dados coletados (VALIDAR), encerramento (CLASSIFICADO) e necessidade humana.
 # Não contam resposta do lead
 # pra classificação, então não ficam atreladas a uma Variavel (ver QuestionSerializer).
-MANDATORY_OFFFLOW_QUESTION_IDS = ["apresentacao", "empresa", "validar", "encerramento", "necessidade_humana"]
+# Situações especiais: o agente tira o lead da triagem de lead novo (sem temperatura, fora do Kanban)
+# e o encaminha para a seção "Outras situações". Cada uma tem um texto obrigatório fora do fluxo
+# (question_id) que o CRM envia ao contato -- em silêncio com Etapa Inicial ligada.
+SITUACOES_ESPECIAIS = {
+    "acompanhamento": {
+        "rotulo": "Acompanhamento de processo",
+        "descricao": "Cliente que já tem processo com o escritório e quer acompanhá-lo (não é lead novo).",
+        "question_id": "especial_acompanhamento",
+        "next_action": "Acompanhar processo",
+        "texto_padrao": "Entendido! Já avisei a nossa equipe sobre o acompanhamento do seu processo. Em breve alguém entrará em contato.",
+    },
+}
+ESPECIAL_QUESTION_IDS = [v["question_id"] for v in SITUACOES_ESPECIAIS.values()]
+MANDATORY_OFFFLOW_QUESTION_IDS = ["apresentacao", "empresa", "validar", "encerramento", "necessidade_humana", *ESPECIAL_QUESTION_IDS]
 DEFAULT_HUMAN_MESSAGE = "Entendido. Vou encaminhar seu pedido para um atendente humano."
 
 class Variavel(models.Model):
@@ -256,6 +269,10 @@ class Lead(models.Model):
     demand = models.CharField(max_length=300, blank=True, help_text="Campo 'tema' do protocolo Axioma.")
     impacto = models.CharField(max_length=300, blank=True)
     interesse = models.CharField(max_length=10, choices=INTERESSE_CHOICES, blank=True)
+    situacao_especial = models.CharField(
+        max_length=30, blank=True, default="", choices=[(k, v["rotulo"]) for k, v in SITUACOES_ESPECIAIS.items()],
+        help_text="Lead fora do fluxo de leads novos (ex.: acompanhamento de processo). Sem temperatura e fora do Kanban; aparece em Outras situações.",
+    )
     temperature = models.CharField(max_length=20, choices=TEMPERATURA_CHOICES, blank=True)
     last_contact = models.DateTimeField(null=True, blank=True)
     next_action = models.CharField(max_length=250, blank=True)
