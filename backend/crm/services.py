@@ -1608,7 +1608,13 @@ def _categoria_status(lead):
     return "equipe"
 
 def _triagem_concluida_dashboard(lead):
-    return lead["bot_closed"] and not lead["origem_manual"] and lead["temperature"] in {"Frio", "Qualificado", "Quente"} and lead["desfecho"] != "desqualificado"
+    """Triagem concluída = leads classificadas que ainda aguardam a equipe: colunas Qualificados e
+    Em espera (mesma fila de Pendências). Quem já está em negociação, em despacho ou foi despachado
+    não entra mais aqui."""
+    return (
+        lead["bot_closed"] and not lead["origem_manual"] and not lead["situacao_especial"] and lead["desfecho"] == ""
+        and lead["etapa_atendimento"] in ("", "espera") and lead["temperature"] in {"Frio", "Qualificado", "Quente"}
+    )
 
 def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, data_fim=None):
     """Agregados do Dashboard calculados no servidor sobre TODOS os leads da

@@ -168,7 +168,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
 
   const cardsResumo = [
     { title: 'Total de atendimentos', count: total, color: 'var(--ink)', description: 'Todos os atendimentos do período selecionado.', matches: (_lead: AtendimentoResumo) => true },
-    { title: 'Triagem concluída', count: concluidos, color: 'var(--success)', description: 'Leads que concluíram a triagem e seguiram para os classificados.', matches: (lead: AtendimentoResumo) => lead.triagem_concluida },
+    { title: 'Triagem concluída', count: concluidos, color: 'var(--success)', description: 'Leads classificadas que aguardam a equipe: Qualificados e Atendimentos em espera.', matches: (lead: AtendimentoResumo) => lead.triagem_concluida },
     { title: 'Em triagem', count: automatico, color: '#2563EB', description: 'Atendimentos aguardando a conclusão da triagem automática.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'automatico' },
     { title: 'Com a equipe', count: humano, color: 'var(--accent)', description: 'Atendimentos disponíveis para a equipe ou em atendimento humano.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'equipe' },
     { title: 'Despachos', count: resumo.status.despachado, color: 'var(--success)', description: 'Atendimentos concluídos e despachados pela equipe (encerrado, comprometido, falha ou bloqueado) no período selecionado.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'despachado' },

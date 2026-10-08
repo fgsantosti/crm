@@ -1294,7 +1294,7 @@ class DashboardResumoTests(TestCase):
         data = self.client.get(f"/api/leads/resumo/?company={self.company.pk}&dias=all").json()
         rows = data["atendimentos"]
         self.assertEqual(len(rows), data["total"])
-        self.assertEqual(data["triagem_concluida"], 2)
+        self.assertEqual(data["triagem_concluida"], 1)
         self.assertEqual(sum(row["triagem_concluida"] for row in rows), data["triagem_concluida"])
         for category, count in data["status"].items():
             self.assertEqual(sum(row["categoria_status"] == category for row in rows), count)
@@ -3534,3 +3534,18 @@ class DashboardTotalComNaoProsseguiramTests(TestCase):
         self.assertEqual((r["status"]["equipe"], r["status"]["especial"]), (2, 1))
         self.assertEqual(sum(r["status"].values()), r["total"])
         self.assertEqual({a["contact"] for a in r["atendimentos"] if a["origem_manual"]}, {"+5585999990003", "+5585999990004"})
+
+    def test_triagem_concluida_so_tem_qualificadas_e_em_espera(self):
+        from .services import resumo_dashboard
+        mk = lambda n, **kw: Lead.objects.create(company=self.company, contact=f"+55859999100{n}", bot_closed=True, temperature="Qualificado", **kw)
+        mk(1)                                           # Qualificados
+        mk(2, etapa_atendimento="espera")               # Em espera
+        mk(3, etapa_atendimento="negociacao", mode="HUMANO")  # já com um atendente
+        mk(4, etapa_atendimento="despacho", mode="HUMANO")
+        mk(5, desfecho="encerrado")                     # despachada
+        mk(6, situacao_especial="acompanhamento")       # outras situações
+        r = resumo_dashboard(self.company)
+        marcados = {a["contact"] for a in r["atendimentos"] if a["triagem_concluida"]}
+        # O lead Quente do setUp também está em Qualificados.
+        self.assertEqual(marcados, {"+558599991001", "+558599991002", "+5585999990002"})
+        self.assertEqual(r["triagem_concluida"], 3)
