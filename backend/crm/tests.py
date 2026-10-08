@@ -129,7 +129,7 @@ class QualificationTests(TestCase):
         self.assertEqual(result["question_id"], "nome")
         self.assertEqual(Event.objects.get(pk=first["event_id"]).delivery, "EXPIRADO")
         self.assertEqual(Lead.objects.get().mode, "AUTOMÁTICO")
-    def test_repetir_conta_e_escala_na_quarta(self):
+    def test_repetir_conta_e_desqualifica_na_quarta(self):
         from .services import status_contato
         self.delivered(self.send())
         for i in range(3):
@@ -138,10 +138,27 @@ class QualificationTests(TestCase):
             self.assertEqual(r["content"].count("Por favor, responda novamente."), 1)
             self.delivered(r)
         self.assertEqual(status_contato(self.company, "+5585999999999")["repeticoes"], 3)
-        self.assertTriagemReiniciada(self.send("r3", marker="REPETIR"))
-        # Próxima mensagem do mesmo número recomeça do zero pela apresentação.
+        r = self.send("r3", marker="REPETIR")
+        self.assertEqual(r["action"], "NO_REPLY")
+        self.assertFalse(r.get("lead_apagado"))
+        lead = Lead.objects.get()
+        self.assertEqual((lead.temperature, lead.desfecho, lead.bot_closed), ("Desqualificado", "desqualificado", True))
+        self.assertEqual(lead.urgencia_detalhe["motivo"], "sem_resposta")
+        # Número liberado: a próxima mensagem abre um lead novo, pela apresentação.
         r = self.send("r4", marker="REPETIR")
         self.assertEqual((r["action"], r["question_id"], r["lead_novo"]), ("TEXTO", "apresentacao", True))
+        self.assertEqual(Lead.objects.filter(contact="+5585999999999").count(), 2)
+    def test_repeticoes_por_pergunta_nao_acumulam(self):
+        # 3 repetições na 1ª pergunta, avanço, 3 na seguinte: ninguém é desqualificado.
+        self.delivered(self.send())
+        for i in range(3):
+            self.delivered(self.send(f"a{i}", marker="REPETIR"))
+        self.delivered(self.send("av", marker="ATUALIZAR", fields={"proxima": "nome"}))
+        for i in range(3):
+            r = self.send(f"b{i}", marker="REPETIR")
+            self.assertEqual(r["action"], "TEXTO")
+            self.delivered(r)
+        self.assertEqual(Lead.objects.get().desfecho, "")
     def test_repeticoes_zera_com_marcador_de_avanco(self):
         from .services import status_contato
         self.delivered(self.send())
@@ -159,7 +176,9 @@ class QualificationTests(TestCase):
             self.assertEqual(r["content"], "Por favor, responda novamente. Qual é o seu nome?")
             self.delivered(r)
         self.assertEqual(status_contato(self.company, "+5585999999999")["repeticoes"], 3)
-        self.assertTriagemReiniciada(self.send("a4", marker="ATUALIZAR", fields={"proxima": "nome"}))
+        r = self.send("a4", marker="ATUALIZAR", fields={"proxima": "nome"})
+        self.assertEqual(r["action"], "NO_REPLY")
+        self.assertEqual(Lead.objects.get().desfecho, "desqualificado")
     def test_repetir_na_validacao_reenvia_validar(self):
         self.delivered(self.send())
         self.delivered(self.send("v1", marker="VALIDAR", fields={"nome": "Ana"}))

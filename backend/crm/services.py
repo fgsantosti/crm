@@ -551,9 +551,10 @@ def receive(company, data):
                 event.summary = "Resposta livre antes do fluxo"
         elif marker == "REPETIR":
             if contar_repeticoes(lead, excluir_pk=event.pk) >= MAX_REPETICOES:
-                # Último recurso (a ponte avança antes disso): triagem travada não vai pra equipe,
-                # o lead é apagado e o número recomeça do zero na próxima mensagem.
-                apagar_lead, motivo_apagar = True, "Triagem travada: 3 repetições sem resposta"
+                # A mesma pergunta foi repetida 3 vezes sem resposta utilizável (o contador zera
+                # a cada pergunta nova): desqualifica e libera o número, sem ir pra equipe.
+                desqualificar_sem_resposta(lead)
+                event.summary = "Desqualificado: 3 repetições da mesma pergunta sem resposta"
                 question_id = None
             else:
                 # Na validação o estado é "VALIDANDO", mas a pergunta reenviada é "validar".
@@ -583,7 +584,8 @@ def receive(company, data):
                     # Avançar para a mesma pergunta é uma repetição disfarçada: conta no mesmo limite.
                     event.marker = "REPETIR"
                     if contar_repeticoes(lead, excluir_pk=event.pk) >= MAX_REPETICOES:
-                        apagar_lead, motivo_apagar = True, "Triagem travada: 3 repetições sem resposta"
+                        desqualificar_sem_resposta(lead)
+                        event.summary = "Desqualificado: 3 repetições da mesma pergunta sem resposta"
                         question_id = None
                     else:
                         event.summary = "Mesma pergunta pedida de novo; contada como repetição"
@@ -1327,22 +1329,28 @@ def apagar_triagens_abandonadas(agora=None):
             total += por_modelo.get("crm.Lead", 0)
     return total
 
+def desqualificar_sem_resposta(lead):
+    """A mesma pergunta foi repetida MAX_REPETICOES vezes sem resposta utilizável: desqualifica
+    (o lead fica registrado, fora do Kanban) e libera o número em vez de apagar a triagem."""
+    desqualificar_fora_de_escopo(lead, motivo="sem_resposta", proxima_acao="Sem resposta após repetições")
+
 def _eh_fora_de_escopo(especialidade):
     return (especialidade or "").strip().lower() == "fora de escopo"
 
-def desqualificar_fora_de_escopo(lead):
+def desqualificar_fora_de_escopo(lead, motivo="fora_de_escopo", proxima_acao="Fora de escopo"):
     """Fora de escopo nunca chega a Qualificados nem fica com prioridade Alta: desqualifica na
-    hora (fora do Kanban, conta nas estatísticas) e libera o número."""
+    hora (fora do Kanban, conta nas estatísticas) e libera o número. Também encerra o contato
+    que não deu resposta utilizável depois de MAX_REPETICOES repetições (motivo "sem_resposta")."""
     lead.temperature = "Desqualificado"
     lead.priority = "Baixa"
     lead.mode = "AUTOMÁTICO"
     lead.bot_closed = True
     lead.state = "ENCERRADO_CLASSIFICADO"
     lead.funnel_stage = "Triagem concluída"
-    lead.next_action = "Fora de escopo"
+    lead.next_action = proxima_acao
     lead.desfecho = "desqualificado"
     lead.concluido_em = timezone.now()
-    lead.urgencia_detalhe = {**(lead.urgencia_detalhe or {}), "motivo": "fora_de_escopo"}
+    lead.urgencia_detalhe = {**(lead.urgencia_detalhe or {}), "motivo": motivo}
     lead.save()
 
 @transaction.atomic

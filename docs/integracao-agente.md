@@ -172,7 +172,7 @@ Não use `Q:necessidade_humana` nem essa ID como
 - `action="NO_REPLY"` → **não envie nada ao contato**, nem literalmente a
   palavra NO_REPLY. Acontece em mensagem duplicada, lead já encerrado/em
   atendimento humano, entrega anterior ainda pendente, ou falta de
-  `question_id`/`Question` cadastrado. Erros de marcador e triagem travada removem
+  `question_id`/`Question` cadastrado. Erros de marcador removem
   o lead (`lead_apagado=true`, sem `event_id`); falta de conteúdo aprovado no
   Roteiro continua encaminhando para revisão humana. BlackList devolve
   `{"action":"NO_REPLY","blacklist":true}` sem criar lead ou evento.
@@ -480,10 +480,11 @@ chame `/incoming/`). É exatamente a regra que `/incoming/` usa para decidir
 }
 ```
 
-`repeticoes` existe para o agente não ficar preso repetindo a mesma pergunta:
-com 2 ou mais, avance (ou encerre antecipadamente) em vez de mandar outro
-`REPETIR`. O CRM é o último recurso: o **4º `REPETIR` seguido** não é
-reenviado — o CRM remove a triagem travada e libera o número para recomeçar na próxima mensagem.
+`repeticoes` conta os `REPETIR` seguidos na pergunta atual (zera quando o contato
+avança para outra pergunta). O agente pode repetir **até 3 vezes**. O CRM é quem
+encerra: o **4º `REPETIR` seguido** não é reenviado, e o lead é **desqualificado**
+(`desfecho="desqualificado"`, `urgencia_detalhe.motivo="sem_resposta"`, fora do
+Kanban, sem mensagem ao contato) e o número é liberado para recomeçar na próxima mensagem.
 
 | `motivo` | `aceita_agente` | Quando |
 | --- | --- | --- |
