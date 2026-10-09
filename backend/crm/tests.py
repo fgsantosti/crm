@@ -3702,3 +3702,99 @@ class HistoricoDeConversaTests(TestCase):
         Company.objects.filter(pk=self.company.pk).update(coletar_historico_conversa=False)
         self.company.refresh_from_db()
         self.assertFalse(contexto_agente(self.company)["coletar_historico"])
+
+
+import tempfile
+from django.test import override_settings
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="crm-test-media-"))
+class IdentidadeVisualTests(TestCase):
+    """Identidade visual da empresa: nome, logo e gradiente da barra lateral (só a conta Empresa edita)."""
+    def setUp(self):
+        User = get_user_model()
+        self.company = Company.objects.create(name="Marca Teste")
+        self.outra = Company.objects.create(name="Outra Marca")
+        self.empresa = User.objects.create_user(username="m-emp@x.com", email="m-emp@x.com", is_staff=True)
+        self.atendente = User.objects.create_user(username="m-at@x.com", email="m-at@x.com")
+        self.estranho = User.objects.create_user(username="m-ext@x.com", email="m-ext@x.com", is_staff=True)
+        for u in (self.empresa, self.atendente):
+            self.company.members.add(u)
+        self.outra.members.add(self.estranho)
+        self.url = f"/api/companies/{self.company.pk}/identidade/"
+
+    def client_de(self, user):
+        c = APIClient(); c.force_authenticate(user); return c
+
+    def png(self, tamanho=(600, 300), formato="PNG", nome="logo.png"):
+        from io import BytesIO
+        from PIL import Image
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        buf = BytesIO(); Image.new("RGBA", tamanho, (200, 30, 30, 255)).save(buf, formato)
+        return SimpleUploadedFile(nome, buf.getvalue(), content_type=f"image/{formato.lower()}")
+
+    def test_padrao_e_vazio_e_atendente_da_empresa_enxerga_a_identidade(self):
+        r = self.client_de(self.atendente).get(f"/api/companies/{self.company.pk}/").json()["identidade_visual"]
+        self.assertEqual(r, {"nome": "", "logo_url": None, "cor_principal": None, "cor_contraste": None})
+        self.client_de(self.empresa).post(self.url, {"nome": "Silva Advogados", "cor_principal": "#112233", "cor_contraste": "#ABCDEF"}, format="json")
+        r = self.client_de(self.atendente).get(f"/api/companies/{self.company.pk}/").json()["identidade_visual"]
+        self.assertEqual((r["nome"], r["cor_principal"], r["cor_contraste"]), ("Silva Advogados", "#112233", "#abcdef"))
+
+    def test_so_a_conta_empresa_da_propria_empresa_altera(self):
+        dados = {"nome": "X", "cor_principal": "#112233", "cor_contraste": "#445566"}
+        self.assertEqual(self.client_de(self.atendente).post(self.url, dados, format="json").status_code, 403)
+        self.assertEqual(self.client_de(self.estranho).post(self.url, dados, format="json").status_code, 404)  # outra empresa
+        self.assertEqual(self.client_de(self.empresa).post(self.url, dados, format="json").status_code, 200)
+        # E a identidade de uma empresa nunca aparece para quem é de outra.
+        self.assertEqual(self.client_de(self.estranho).get(f"/api/companies/{self.company.pk}/").status_code, 404)
+        self.assertEqual([c["id"] for c in self.client_de(self.estranho).get("/api/companies/").json()["results"]], [self.outra.pk])
+
+    def test_duas_cores_obrigatorias_formato_e_nome(self):
+        c = self.client_de(self.empresa)
+        for dados in ({"cor_principal": "#112233"}, {"cor_contraste": "#112233"}):
+            self.assertEqual(c.post(self.url, dados, format="json").status_code, 400)
+        self.assertEqual(c.post(self.url, {"cor_principal": "azul", "cor_contraste": "#112233"}, format="json").status_code, 400)
+        self.assertEqual(c.post(self.url, {"cor_principal": "#12345", "cor_contraste": "#112233"}, format="json").status_code, 400)
+        self.assertEqual(c.post(self.url, {"nome": "x" * 31}, format="json").status_code, 400)
+        self.assertEqual(c.post(self.url, {"nome": "  Meu   Escritório "}, format="json").status_code, 200)
+        self.company.refresh_from_db()
+        self.assertEqual((self.company.marca_nome, self.company.marca_cor_principal), ("Meu Escritório", ""))
+
+    def test_logo_e_redimensionado_substituido_e_removido(self):
+        c = self.client_de(self.empresa)
+        r = c.post(self.url, {"nome": "A", "logo": self.png()}, format="multipart")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()["identidade_visual"]["logo_url"].endswith(f"/media/marcas/{self.company.pk}.png"))
+        self.company.refresh_from_db()
+        from PIL import Image
+        self.assertLessEqual(max(Image.open(self.company.marca_logo.path).size), 256)
+        # Reenviar sem logo mantém o atual; remover_logo tira.
+        c.post(self.url, {"nome": "B"}, format="multipart")
+        self.company.refresh_from_db()
+        self.assertTrue(self.company.marca_logo)
+        c.post(self.url, {"nome": "B", "remover_logo": "1"}, format="multipart")
+        self.company.refresh_from_db()
+        self.assertFalse(self.company.marca_logo)
+
+    def test_logo_invalido_e_grande_demais_sao_recusados(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        c = self.client_de(self.empresa)
+        falso = SimpleUploadedFile("logo.png", b"nao e imagem", content_type="image/png")
+        self.assertEqual(c.post(self.url, {"logo": falso}, format="multipart").status_code, 400)
+        gif = self.png(formato="GIF", nome="logo.gif")
+        self.assertEqual(c.post(self.url, {"logo": gif}, format="multipart").status_code, 400)
+        grande = SimpleUploadedFile("logo.png", b"0" * (2 * 1024 * 1024 + 1), content_type="image/png")
+        self.assertEqual(c.post(self.url, {"logo": grande}, format="multipart").status_code, 400)
+
+    def test_restaurar_volta_ao_padrao_conecta(self):
+        c = self.client_de(self.empresa)
+        c.post(self.url, {"nome": "A", "cor_principal": "#112233", "cor_contraste": "#445566", "logo": self.png()}, format="multipart")
+        r = c.post(self.url, {"restaurar": "1"}, format="json")
+        self.assertEqual(r.json()["identidade_visual"], {"nome": "", "logo_url": None, "cor_principal": None, "cor_contraste": None})
+
+    def test_conta_do_agente_nao_acessa(self):
+        from django.contrib.auth.models import Group
+        agente = get_user_model().objects.create_user(username="agente.marca", is_staff=True)
+        agente.groups.add(Group.objects.get_or_create(name="agente")[0])
+        self.company.members.add(agente)
+        self.assertEqual(self.client_de(agente).post(self.url, {"nome": "X"}, format="json").status_code, 403)

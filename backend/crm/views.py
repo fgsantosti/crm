@@ -5,7 +5,7 @@ from django.db.models import Case, When, Value, IntegerField, Q
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action, api_view, permission_classes, parser_classes
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.parsers import MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
@@ -243,7 +243,21 @@ class CompanyViewSet(viewsets.ModelViewSet):
         if self.action == "equipe":
             # Lista e-mails da equipe: nunca para a conta de serviço do agente.
             return [permissions.IsAuthenticated(), NotAgentAccount()]
+        if self.action == "identidade":
+            # Identidade visual: só a conta Empresa da própria empresa altera.
+            return [permissions.IsAdminUser(), NotAgentAccount()]
         return [permissions.IsAuthenticated()]
+    @action(detail=True, methods=["post"], parser_classes=[MultiPartParser, FormParser, JSONParser])
+    def identidade(self, request, pk=None):
+        """Identidade visual da empresa: nome e logo exibidos na barra lateral e as duas cores do gradiente
+        de fundo (obrigatórias juntas). `restaurar=1` volta ao padrão Conecta; `remover_logo=1` tira só o logo."""
+        from .services import atualizar_identidade_visual
+        company = self.get_object()
+        erro = atualizar_identidade_visual(company, request.data, request.FILES.get("logo"))
+        if erro:
+            return Response({"detail": erro}, status=400)
+        company.refresh_from_db()
+        return Response(CompanySerializer(company, context={"request": request}).data)
     @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated, NotAgentAccount])
     def equipe(self, request, pk=None):
         """Só atendentes ATIVOS (is_staff=False) -- nem a conta de serviço do

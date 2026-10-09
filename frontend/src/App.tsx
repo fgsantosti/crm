@@ -8,6 +8,7 @@ import { Dashboard } from './views/Dashboard';
 import { Leads } from './views/Leads';
 import { Pendencias } from './views/Pendencias';
 import { OutrasSituacoes } from './views/OutrasSituacoes';
+import { IdentidadeVisualDialog } from './components/IdentidadeVisualDialog';
 import { AtendimentoHumano } from './views/AtendimentoHumano';
 import { BlackList } from './views/BlackList';
 import { Roteiro } from './views/Roteiro';
@@ -32,6 +33,7 @@ export function App() {
   const [error, setError] = useState('');
   const [leadsCount, setLeadsCount] = useState(0);
   const [especialCount, setEspecialCount] = useState(0);
+  const [identidadeAberta, setIdentidadeAberta] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [humanCount, setHumanCount] = useState(0);
   const [companiesRetry, setCompaniesRetry] = useState(0);
@@ -219,6 +221,7 @@ export function App() {
         onLogout={logout}
         leadsCount={leadsCount}
         especialCount={especialCount}
+        onOpenIdentidade={() => setIdentidadeAberta(true)}
         pendingCount={pendingCount}
         humanCount={humanCount}
         api={api}
@@ -246,6 +249,14 @@ export function App() {
           {view === 'equipe' && <Equipe api={api} company={company} />}
         </div>
       </main>
+      {identidadeAberta && role === 'empresa' && (
+        <IdentidadeVisualDialog
+          api={api}
+          company={company}
+          onSaved={(atualizada) => setCompanies((v) => v.map((c) => (c.id === atualizada.id ? { ...c, ...atualizada } : c)))}
+          onClose={() => setIdentidadeAberta(false)}
+        />
+      )}
     </div>
   );
 }

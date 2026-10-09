@@ -1845,3 +1845,65 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
         "por_mes": sorted(por_mes.items()),
         "por_owner": sorted(por_owner.values(), key=lambda o: -o["atendimentos"]),
     }
+
+
+# --- Identidade visual da empresa (nome, logo e gradiente da barra lateral) ---
+MARCA_LOGO_MAX_BYTES = 2 * 1024 * 1024
+MARCA_LOGO_LADO = 256
+_COR_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+def _logo_da_marca(arquivo):
+    """Valida e normaliza o logo (PNG/JPEG/WEBP até 2 MB, no máximo 256 px). Devolve (ContentFile, erro)."""
+    from io import BytesIO
+    from django.core.files.base import ContentFile
+    from PIL import Image, UnidentifiedImageError
+    if arquivo.size > MARCA_LOGO_MAX_BYTES:
+        return None, "Logo muito grande (máximo 2MB)."
+    try:
+        imagem = Image.open(arquivo)
+        formato = imagem.format
+        imagem.load()
+    except (UnidentifiedImageError, OSError, ValueError):
+        return None, "Imagem inválida. Use PNG, JPEG ou WEBP."
+    if formato not in {"PNG", "JPEG", "WEBP"}:
+        return None, "Formato não suportado. Use PNG, JPEG ou WEBP."
+    imagem = imagem.convert("RGBA")
+    imagem.thumbnail((MARCA_LOGO_LADO, MARCA_LOGO_LADO))
+    saida = BytesIO()
+    imagem.save(saida, "PNG")
+    return ContentFile(saida.getvalue()), None
+
+@transaction.atomic
+def atualizar_identidade_visual(company, dados, logo=None):
+    """Grava a identidade visual da empresa. As duas cores (#RRGGBB) vêm juntas ou ficam vazias (padrão
+    Conecta); nome vazio = "Conecta". Retorna uma mensagem de erro (str) ou None."""
+    company = Company.objects.select_for_update().get(pk=company.pk)
+    if str(dados.get("restaurar") or "") in ("1", "true", "True"):
+        if company.marca_logo:
+            company.marca_logo.delete(save=False)
+        company.marca_nome, company.marca_cor_principal, company.marca_cor_contraste = "", "", ""
+        company.save(update_fields=["marca_nome", "marca_logo", "marca_cor_principal", "marca_cor_contraste"])
+        return None
+    nome = re.sub(r"\s+", " ", str(dados.get("nome") or "")).strip()
+    if len(nome) > 30:
+        return "O nome pode ter no máximo 30 caracteres."
+    principal = str(dados.get("cor_principal") or "").strip().lower()
+    contraste = str(dados.get("cor_contraste") or "").strip().lower()
+    if bool(principal) != bool(contraste):
+        return "Selecione as duas cores (principal e de contraste) para formar o gradiente."
+    for cor in (principal, contraste):
+        if cor and not _COR_HEX.match(cor):
+            return "Cor inválida. Use o formato #RRGGBB."
+    novo_logo = None
+    if logo is not None:
+        novo_logo, erro = _logo_da_marca(logo)
+        if erro:
+            return erro
+    if novo_logo is not None or str(dados.get("remover_logo") or "") in ("1", "true", "True"):
+        if company.marca_logo:
+            company.marca_logo.delete(save=False)
+        if novo_logo is not None:
+            company.marca_logo.save(f"{company.pk}.png", novo_logo, save=False)
+    company.marca_nome, company.marca_cor_principal, company.marca_cor_contraste = nome, principal, contraste
+    company.save(update_fields=["marca_nome", "marca_logo", "marca_cor_principal", "marca_cor_contraste"])
+    return None

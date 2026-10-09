@@ -13,6 +13,12 @@ class Company(models.Model):
     # Portão do Admin: com ele ligado, o CRM guarda as mensagens do cliente (e transcrições de áudio) de cada
     # lead, da primeira até a que o classificou, para a equipe consultar em "Histórico de conversa".
     coletar_historico_conversa = models.BooleanField(default=False)
+    # Identidade visual da empresa (barra lateral): vazio = padrão Conecta (logo e nome do produto).
+    # Só a conta Empresa edita; as duas cores formam o gradiente de fundo e são obrigatórias juntas.
+    marca_nome = models.CharField(max_length=30, blank=True, default="")
+    marca_logo = models.ImageField(upload_to="marcas/", blank=True)
+    marca_cor_principal = models.CharField(max_length=7, blank=True, default="")
+    marca_cor_contraste = models.CharField(max_length=7, blank=True, default="")
     numero_agente = models.CharField(
         max_length=16, blank=True,
         help_text="Número de WhatsApp (E.164) conectado ao agente. Normalmente é o mesmo número em que a equipe "

@@ -1,4 +1,5 @@
 import { Logo } from './Logo';
+import { paletaDaEmpresa } from '../identidade';
 import { ProfileMenu } from './ProfileMenu';
 import type { Api } from '../api';
 import type { Company, Me } from '../types';
@@ -23,6 +24,7 @@ export function Sidebar({
   onAccountDeleted,
   onOpenTrocarEmail,
   onOpenTrocarSenha,
+  onOpenIdentidade,
 }: {
   role: 'atendente' | 'empresa';
   companies: Company[];
@@ -41,8 +43,10 @@ export function Sidebar({
   onAccountDeleted: () => void;
   onOpenTrocarEmail: () => void;
   onOpenTrocarSenha: () => void;
+  /** Abre o popup de identidade visual (só a conta Empresa). */
+  onOpenIdentidade: () => void;
 }) {
-  const items: { key: View; label: string; count?: number }[] = [{ key: 'dashboard', label: 'Dashboard' }];
+  const items: { key: View | 'identidade'; label: string; count?: number }[] = [{ key: 'dashboard', label: 'Dashboard' }];
   if (role === 'atendente') {
     items.push({ key: 'leads', label: 'Todos os leads', count: leadsCount });
     items.push({ key: 'especiais', label: 'Outras situações', count: especialCount });
@@ -55,15 +59,20 @@ export function Sidebar({
     items.push({ key: 'roteiro', label: 'Roteiro do agente' });
     items.push({ key: 'dados-empresa', label: 'Dados da empresa' });
     items.push({ key: 'equipe', label: 'Equipe' });
+    items.push({ key: 'identidade', label: 'Identidade visual' });
   }
 
+  // Identidade visual da empresa selecionada (só ela e a equipe dela a recebem do CRM); sem ela, padrão Conecta.
+  const identidade = companies.find((c) => String(c.id) === companyId)?.identidade_visual;
+  const paleta = paletaDaEmpresa(identidade);
+
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${paleta ? ' sidebar-custom' : ''}`} style={paleta ? ({ background: paleta.fundo, color: paleta.vars['--sb-fg'], ...paleta.vars } as React.CSSProperties) : undefined}>
       <div className="sidebar-glow" />
       <div className="sidebar-dots" />
       <div className="brand">
-        <Logo />
-        <span>Conecta</span>
+        {identidade?.logo_url ? <img src={identidade.logo_url} alt="" /> : <Logo />}
+        <span>{identidade?.nome || 'Conecta'}</span>
       </div>
       <div className="workspace">
         <small>ESPAÇO DE TRABALHO</small>
@@ -78,7 +87,7 @@ export function Sidebar({
       </div>
       <nav>
         {items.map((it) => (
-          <button key={it.key} type="button" className={view === it.key ? 'nav-active' : ''} onClick={() => onNavigate(it.key)}>
+          <button key={it.key} type="button" className={view === it.key ? 'nav-active' : ''} onClick={() => (it.key === 'identidade' ? onOpenIdentidade() : onNavigate(it.key))}>
             <span>{it.label}</span>
             {it.count !== undefined && <span className="nav-count">{it.count}</span>}
           </button>

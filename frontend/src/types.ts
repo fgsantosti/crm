@@ -1,3 +1,5 @@
+import type { IdentidadeVisual } from './identidade';
+
 export type Company = {
   id: number;
   name: string;
@@ -9,6 +11,8 @@ export type Company = {
   agente_conversacional: boolean;
   /** Portão do Admin: o CRM guarda o histórico de conversa dos leads (botão "Histórico de conversa"). */
   coletar_historico_conversa: boolean;
+  /** Identidade visual da barra lateral (só a empresa e a equipe dela veem): sem as duas cores vale o padrão Conecta. */
+  identidade_visual: IdentidadeVisual;
   etapa_inicial: boolean;
   /** SPIN única quando só uma está habilitada na Etapa Inicial (derivado de spins_iniciais). */
   spin_inicial: number | null;

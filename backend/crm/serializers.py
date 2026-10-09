@@ -9,9 +9,20 @@ FIXED_QUESTION_IDS = {"nome", "situacao"}
 class CompanySerializer(serializers.ModelSerializer):
     # Etapa Inicial: SPINs que o cliente pode acessar (várias -> o agente escolhe a área pela mensagem inicial).
     spins_iniciais = serializers.PrimaryKeyRelatedField(many=True, queryset=Area.objects.all(), required=False)
+    # Só leitura: a empresa edita pela action POST /companies/{id}/identidade/ (conta Empresa).
+    identidade_visual = serializers.SerializerMethodField()
+    def get_identidade_visual(self, obj):
+        request = self.context.get("request")
+        logo = obj.marca_logo.url if obj.marca_logo else None
+        if logo and request:
+            logo = request.build_absolute_uri(logo)
+        return {
+            "nome": obj.marca_nome, "logo_url": logo,
+            "cor_principal": obj.marca_cor_principal or None, "cor_contraste": obj.marca_cor_contraste or None,
+        }
     class Meta:
         model = Company
-        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional", "mensagens_audio", "voz_tts", "etapa_inicial", "spin_inicial", "spins_iniciais", "coletar_historico_conversa"]
+        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional", "mensagens_audio", "voz_tts", "etapa_inicial", "spin_inicial", "spins_iniciais", "coletar_historico_conversa", "identidade_visual"]
         # Só as opções do agente (tela Roteiro, aba "Opções do Agente") são editáveis
         # por aqui -- os demais campos de Company continuam no Painel Admin.
         read_only_fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "coletar_historico_conversa"]
