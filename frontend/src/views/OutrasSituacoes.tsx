@@ -3,6 +3,13 @@ import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Company, Lead, Me } from '../types';
 import { LeadDetalheDialog, ObservacoesLead } from '../components/LeadDetalheDialog';
 import { Spinner } from '../components/Skeleton';
+import { AreaSelect } from '../components/AreaSelect';
+
+const DESFECHO_OPTIONS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string; help: string }[] = [
+  { value: 'encerrado', label: 'Encerrado', color: 'var(--success)', help: 'Sucesso de comunicação — o cliente conseguiu realizar o que desejava.' },
+  { value: 'comprometido', label: 'Comprometido', color: 'var(--warn)', help: 'Algo não saiu conforme o planejado; o cliente pode voltar ou não dar continuidade.' },
+  { value: 'falha', label: 'Falha durante o atendimento', color: 'var(--danger)', help: 'O cliente desistiu ou cessou o contato durante o atendimento.' },
+];
 
 const ROTULOS: Record<string, string> = { acompanhamento: 'Acompanhamento de processo' };
 export const rotuloSituacao = (valor: string) => ROTULOS[valor] ?? valor;
@@ -19,6 +26,8 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
   const [error, setError] = useState('');
   const [detalhe, setDetalhe] = useState<Lead | null>(null);
   const [novo, setNovo] = useState(false);
+  const [despachandoId, setDespachandoId] = useState<string | null>(null);
+  const [areaDespacho, setAreaDespacho] = useState('');
   const [busca, setBusca] = useState('');
   const [salvandoNovo, setSalvandoNovo] = useState(false);
 
@@ -69,12 +78,11 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
     }
   }
 
-  async function acao(lead: Lead, caminho: 'assumir' | 'concluir') {
-    if (caminho === 'concluir' && !window.confirm(`Concluir o acompanhamento de "${lead.name || lead.contact}"? O número é liberado e sai desta lista.`)) return;
+  async function assumir(lead: Lead) {
     setAcaoId(lead.id);
     setError('');
     try {
-      await api(`/leads/${lead.id}/especial/${caminho}/?company=${company.id}`, { method: 'POST' });
+      await api(`/leads/${lead.id}/especial/assumir/?company=${company.id}`, { method: 'POST' });
       await carregar(true);
     } catch (e) {
       setError((e as Error).message);
@@ -83,10 +91,54 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
     }
   }
 
+  // Mesma regra de despacho de Meus Atendimentos: classifica o desfecho (e a área); entra nas
+  // contagens de concluídos/despachos do Dashboard e libera o número.
+  async function despachar(lead: Lead, desfecho: 'encerrado' | 'comprometido' | 'falha' | 'bloqueado') {
+    if (desfecho === 'bloqueado' && !window.confirm(`Despachar e bloquear "${lead.name || lead.contact}"? O número vai para a BlackList até você removê-lo de lá.`)) return;
+    setAcaoId(lead.id);
+    setError('');
+    try {
+      await api(`/leads/${lead.id}/especial/despachar/?company=${company.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ desfecho, especialidade: desfecho === 'bloqueado' ? undefined : areaDespacho || undefined }),
+      });
+      setDespachandoId(null);
+      await carregar(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setAcaoId(null);
+    }
+  }
+
+  function abrirDespacho(l: Lead) {
+    setAreaDespacho(l.especialidade || '');
+    setDespachandoId((v) => (v === l.id ? null : l.id));
+  }
+
+  function painelDespacho(l: Lead) {
+    return (
+      <div className="panel" style={{ padding: 16, marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <h3 style={{ margin: 0, fontSize: 15 }}>Classificar desfecho</h3>
+        <AreaSelect api={api} companyId={company.id} value={areaDespacho} onChange={setAreaDespacho} />
+        {DESFECHO_OPTIONS.map((opt) => (
+          <button key={opt.value} type="button" className="desfecho-option" onClick={() => despachar(l, opt.value)} disabled={acaoId === l.id} style={{ '--cor': opt.color } as React.CSSProperties}>
+            {acaoId === l.id && <Spinner />}
+            <strong style={{ display: 'block' }}>{opt.label}</strong>
+            <small style={{ color: 'var(--muted)', fontWeight: 400 }}>{opt.help}</small>
+          </button>
+        ))}
+        <button type="button" className="block-button" onClick={() => despachar(l, 'bloqueado')} disabled={acaoId === l.id} title="Conclui o acompanhamento e bloqueia o número. Remova-o da BlackList para liberar uma nova triagem.">
+          Despachar e bloquear
+        </button>
+      </div>
+    );
+  }
+
   const termo = busca.trim().toLowerCase();
   const visiveis = termo ? leads.filter((l) => `${l.name} ${l.contact} ${l.demand} ${l.notes}`.toLowerCase().includes(termo)) : leads;
   const podeAssumir = role === 'atendente';
-  const podeConcluir = (l: Lead) => role === 'empresa' || !l.owner || l.owner === me.id;
+  const podeDespachar = (l: Lead) => role === 'empresa' || !l.owner || l.owner === me.id;
 
   return (
     <>
@@ -185,18 +237,19 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
                   </a>
                 )}
                 {podeAssumir && !l.owner && (
-                  <button type="button" onClick={() => acao(l, 'assumir')} disabled={acaoId !== null}>
+                  <button type="button" onClick={() => assumir(l)} disabled={acaoId !== null}>
                     {acaoId === l.id && <Spinner />}
                     Assumir
                   </button>
                 )}
-                {podeConcluir(l) && (
-                  <button type="button" className="danger-outline" onClick={() => acao(l, 'concluir')} disabled={acaoId !== null}>
-                    Concluir
+                {podeDespachar(l) && (
+                  <button type="button" className="danger-outline" onClick={() => abrirDespacho(l)} disabled={acaoId !== null}>
+                    Despachar
                   </button>
                 )}
               </div>
             </div>
+            {despachandoId === l.id && painelDespacho(l)}
           </article>
         ))}
       {detalhe && <LeadDetalheDialog lead={detalhe} estagio={rotuloSituacao(detalhe.situacao_especial)} onClose={() => setDetalhe(null)} />}

@@ -1454,19 +1454,49 @@ def assumir_situacao_especial(lead_id, user):
     return None
 
 @transaction.atomic
-def concluir_situacao_especial(lead_id, user):
-    """Encerra o acompanhamento e libera o número (a próxima mensagem abre um lead novo)."""
+def despachar_situacao_especial(lead_id, user, desfecho="encerrado", especialidade=None, motivo=""):
+    """Outras situações segue a regra de despacho: o responsável (ou a conta Empresa) classifica o
+    desfecho (encerrado/comprometido/falha, ou bloqueado -- que também põe o número na BlackList) e
+    opcionalmente a área. O lead entra nas contagens de concluídos e despachos e o número é liberado.
+    Quem despacha sem responsável vira o responsável. Retorna erro (str) ou None."""
+    company_id = Lead.objects.filter(pk=lead_id).values_list("company_id", flat=True).first()
+    if company_id is None:
+        return "Lead não encontrado."
+    # Mesma ordem de locks do incoming: nenhuma mensagem cria lead novo entre o despacho e a BlackList.
+    Company.objects.select_for_update().get(pk=company_id)
     lead, erro = _lead_especial_com_acesso(lead_id, user)
     if erro:
         return erro
+    if desfecho not in Lead.DESFECHO_CONCLUIDO:
+        return "Classificação de despacho inválida."
     if lead.owner_id and lead.owner_id != user.pk and not user.is_staff:
-        return "Só o responsável (ou a conta Empresa) conclui este acompanhamento."
-    lead.desfecho = "encerrado"
+        return "Só quem assumiu este acompanhamento (ou a conta Empresa) pode despachá-lo."
+    campos = ["desfecho", "concluido_em", "desfecho_pendente", "etapa_atendimento", "next_action"]
+    if especialidade:
+        if not isinstance(especialidade, str) or not Area.objects.filter(company_id=lead.company_id, name=especialidade).exists():
+            return "Área inválida: escolha uma das áreas cadastradas pela empresa."
+        lead.especialidade = especialidade
+        campos.append("especialidade")
+    if not lead.owner_id and not user.is_staff:
+        lead.owner = user
+        campos.append("owner")
+    if desfecho == "bloqueado":
+        Blacklist.objects.get_or_create(
+            company=lead.company, contact=lead.contact,
+            defaults={"motivo": motivo or "Despachado e bloqueado pelo atendente", "adicionado_por": user},
+        )
+    lead.desfecho = desfecho
     lead.concluido_em = timezone.now()
+    lead.desfecho_pendente = ""
+    lead.etapa_atendimento = ""
     lead.next_action = ""
-    lead.save(update_fields=["desfecho", "concluido_em", "next_action"])
-    Event.objects.create(lead=lead, message_id=f"especial-concluir:{secrets.token_hex(16)}", summary="Acompanhamento concluído")
+    lead.save(update_fields=campos)
+    Event.objects.create(lead=lead, message_id=f"especial-despachar:{secrets.token_hex(16)}", summary=f"Acompanhamento despachado: {desfecho}")
     return None
+
+def concluir_situacao_especial(lead_id, user):
+    """Compatibilidade: despacho com o desfecho padrão (encerrado)."""
+    return despachar_situacao_especial(lead_id, user, "encerrado")
 
 def desqualificar_sem_resposta(lead):
     """A mesma pergunta foi repetida MAX_REPETICOES vezes sem resposta utilizável: desqualifica
@@ -1596,8 +1626,8 @@ def _categoria_status(lead):
     especial (Outras situações), desqualificado, despachado, automatico (em triagem), aguardando
     (Qualificados + Atendimentos em espera = a fila de Pendências, "Triagem concluída") e equipe
     (Em negociação, Despacho e cadastros manuais dos atendentes)."""
-    if lead.get("situacao_especial"):
-        return "especial"
+    if lead.get("situacao_especial") and not lead["desfecho"]:
+        return "especial"  # Outras situações em aberto; depois do despacho conta como despachado
     if lead["desfecho"] == "desqualificado":
         return "desqualificado"
     if lead["desfecho"]:
@@ -1659,8 +1689,6 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
     tz = timezone.get_current_timezone()
     for r in rows:
         status[_categoria_status(r)] += 1
-        if r["situacao_especial"]:
-            continue  # Outras situações não entram em desfechos, áreas nem produtividade
         if r["desfecho"] in desfechos:
             desfechos[r["desfecho"]] += 1
         chave_area = r["especialidade"] or "Sem especialidade"
@@ -1681,7 +1709,7 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
     # Despachados pela equipe (encerrado/comprometido/falha), mais recentes primeiro --
     # mesmos filtros de período/área/busca de todo o resto do resumo.
     concluidos = sorted(
-        (r for r in rows if r["desfecho"] in Lead.DESFECHO_CONCLUIDO and not r["situacao_especial"]),
+        (r for r in rows if r["desfecho"] in Lead.DESFECHO_CONCLUIDO),
         key=lambda r: r["concluido_em"] or r["created_at"], reverse=True,
     )
     return {

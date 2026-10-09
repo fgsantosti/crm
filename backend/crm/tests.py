@@ -3285,14 +3285,53 @@ class SituacaoEspecialTests(TestCase):
         r = self.client_de(self.empresa).post(f"/api/leads/{lead.pk}/especial/concluir/?company={self.company.pk}")
         self.assertEqual(r.status_code, 200)
 
-    def test_dashboard_tem_categoria_propria_e_nao_conta_desfecho(self):
+    def test_dashboard_aberto_e_especial_e_depois_do_despacho_conta_como_despachado(self):
         from .services import resumo_dashboard
         self.send("a0", marker="Q"); self.especial()
         lead = Lead.objects.get()
-        self.client_de(self.atendente).post(f"/api/leads/{lead.pk}/especial/concluir/?company={self.company.pk}")
-        resumo = resumo_dashboard(self.company)
-        self.assertEqual((resumo["status"]["especial"], resumo["status"]["despachado"], resumo["desfechos"]["encerrado"]), (1, 0, 0))
-        self.assertEqual(resumo["atendimentos"] and [a["categoria_status"] for a in resumo["atendimentos"]], ["especial"])
+        aberto = resumo_dashboard(self.company)
+        self.assertEqual((aberto["status"]["especial"], aberto["status"]["despachado"]), (1, 0))
+        self.assertEqual([a["categoria_status"] for a in aberto["atendimentos"]], ["especial"])
+        r = self.client_de(self.atendente).post(f"/api/leads/{lead.pk}/especial/despachar/?company={self.company.pk}", {"desfecho": "comprometido"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        fechado = resumo_dashboard(self.company)
+        self.assertEqual((fechado["status"]["especial"], fechado["status"]["despachado"]), (0, 1))
+        self.assertEqual((fechado["desfechos"]["comprometido"], len(fechado["concluidos"])), (1, 1))
+        self.assertEqual(fechado["por_owner"][0]["concluidos"], 1)
+        self.assertEqual(sum(fechado["status"].values()), fechado["total"])
+
+    def test_despachar_classifica_desfecho_e_area_e_valida_entradas(self):
+        Area.objects.create(company=self.company, name="Previdenciário")
+        self.send("a0", marker="Q"); self.especial()
+        lead = Lead.objects.get()
+        url = f"/api/leads/{lead.pk}/especial/despachar/?company={self.company.pk}"
+        c = self.client_de(self.atendente)
+        self.assertEqual(c.post(url, {"desfecho": "inexistente"}, format="json").status_code, 400)
+        self.assertEqual(c.post(url, {"desfecho": "encerrado", "especialidade": "Area Falsa"}, format="json").status_code, 400)
+        self.assertEqual(self.client_de(self.outro).post(url, {"desfecho": "encerrado"}, format="json").status_code, 200)  # sem responsável: quem despacha assume
+        lead.refresh_from_db()
+        self.assertEqual((lead.desfecho, lead.owner_id, lead.etapa_atendimento), ("encerrado", self.outro.pk, ""))
+
+    def test_despachar_com_area_e_so_o_responsavel_ou_empresa(self):
+        Area.objects.create(company=self.company, name="Previdenciário")
+        self.send("a0", marker="Q"); self.especial()
+        lead = Lead.objects.get()
+        url = f"/api/leads/{lead.pk}/especial/despachar/?company={self.company.pk}"
+        self.client_de(self.atendente).post(f"/api/leads/{lead.pk}/especial/assumir/?company={self.company.pk}")
+        self.assertEqual(self.client_de(self.outro).post(url, {"desfecho": "falha"}, format="json").status_code, 400)
+        r = self.client_de(self.empresa).post(url, {"desfecho": "falha", "especialidade": "Previdenciário"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        lead.refresh_from_db()
+        self.assertEqual((lead.desfecho, lead.especialidade, lead.owner_id), ("falha", "Previdenciário", self.atendente.pk))
+
+    def test_despachar_e_bloquear_poe_o_numero_na_blacklist(self):
+        from .models import Blacklist
+        self.send("a0", marker="Q"); self.especial()
+        lead = Lead.objects.get()
+        r = self.client_de(self.atendente).post(f"/api/leads/{lead.pk}/especial/despachar/?company={self.company.pk}", {"desfecho": "bloqueado"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(Blacklist.objects.filter(company=self.company, contact=self.contact).exists())
+        self.assertEqual(self.send("b1", marker="Q")["action"], "NO_REPLY")
 
     def test_contexto_lista_situacoes_e_texto_obrigatorio_nao_pode_ser_excluido(self):
         ctx = contexto_agente(self.company)

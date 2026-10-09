@@ -18,7 +18,7 @@ from .serializers import BlacklistSerializer, CompanySerializer, LeadSerializer,
 from .services import (
     aplicar_audio,
     assumir_situacao_especial as assumir_situacao_especial_service,
-    concluir_situacao_especial as concluir_situacao_especial_service,
+    despachar_situacao_especial as despachar_situacao_especial_service,
     receive, escalate, create_invite, contexto_agente, status_contato,
     validar_convite as validar_convite_service,
     trocar_senha as trocar_senha_service,
@@ -466,13 +466,23 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
         if erro:
             return Response({"detail": erro}, status=400)
         return Response(LeadSerializer(self.get_object()).data)
-    @action(detail=True, methods=["post"], url_path="especial/concluir")
-    def especial_concluir(self, request, pk=None):
-        """Outras situações: conclui o acompanhamento e libera o número (responsável ou conta Empresa)."""
-        erro = concluir_situacao_especial_service(self.get_object().pk, request.user)
+    def _despachar_especial(self, request):
+        erro = despachar_situacao_especial_service(
+            self.get_object().pk, request.user, request.data.get("desfecho") or "encerrado",
+            especialidade=request.data.get("especialidade") or None, motivo=(request.data.get("motivo") or "")[:200],
+        )
         if erro:
             return Response({"detail": erro}, status=400)
         return Response(LeadSerializer(self.get_object()).data)
+    @action(detail=True, methods=["post"], url_path="especial/despachar")
+    def especial_despachar(self, request, pk=None):
+        """Outras situações: mesma regra de despacho -- desfecho (encerrado/comprometido/falha/bloqueado) e
+        área opcional; entra nas contagens de concluídos/despachos e libera o número."""
+        return self._despachar_especial(request)
+    @action(detail=True, methods=["post"], url_path="especial/concluir")
+    def especial_concluir(self, request, pk=None):
+        """Compatível com a versão anterior: despacha com o desfecho padrão (encerrado)."""
+        return self._despachar_especial(request)
     @action(detail=True, methods=["post"], url_path="preparar-despacho")
     def preparar_despacho(self, request, pk=None):
         """Qualificados, Em espera ou Em negociação -> Despacho (ainda não definitivo)."""
