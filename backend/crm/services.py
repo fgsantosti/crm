@@ -13,7 +13,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.authtoken.models import Token
 from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
-from .models import Profile, Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, DEFAULT_HUMAN_MESSAGE, SITUACOES_ESPECIAIS, ESPECIAL_QUESTION_IDS, ContagemDiaria
+from .models import Profile, Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, VARIAVEL_DETALHAMENTO, PESO_PADRAO_DETALHAMENTO, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, DEFAULT_HUMAN_MESSAGE, SITUACOES_ESPECIAIS, ESPECIAL_QUESTION_IDS, ContagemDiaria
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,16 @@ BUILTIN_VARIAVEL_ROTEIRO = {
 
 TEXTOS_PADRAO_ESPECIAIS = {v["question_id"]: v["texto_padrao"] for v in SITUACOES_ESPECIAIS.values()}
 
+def variavel_detalhamento(company):
+    """Variável do sistema "Detalhamento" (obrigatória em toda empresa): o CRM calcula a nota dela a partir
+    do quanto o cliente contou (calcular_detalhamento) e ela entra na média da urgência com o peso
+    que a conta Empresa definir."""
+    variavel, _ = Variavel.objects.get_or_create(company=company, name=VARIAVEL_DETALHAMENTO, defaults={"peso": PESO_PADRAO_DETALHAMENTO, "builtin": True})
+    if not variavel.builtin:
+        variavel.builtin = True
+        variavel.save(update_fields=["builtin"])
+    return variavel
+
 def seed_roteiro_padrao(company):
     """Garante o mínimo pra uma empresa nova conseguir operar o funil: a Variavel
     padrão, as 3 perguntas obrigatórias de triagem (nome/situacao/demanda) já
@@ -39,6 +49,7 @@ def seed_roteiro_padrao(company):
     da empresa. Chamado na criação de empresa (AdminCompanyViewSet) e pela migração
     0012/0014 pras empresas que já existiam antes dessas features."""
     variavel, _ = Variavel.objects.get_or_create(company=company, name="Geral", defaults={"peso": 5})
+    variavel_detalhamento(company)
     for ordem, question_id in enumerate(MANDATORY_QUESTION_IDS):
         label, slug = BUILTIN_VARIAVEL_ROTEIRO[question_id]
         vr, _ = VariavelRoteiro.objects.get_or_create(company=company, slug=slug, defaults={"name": label, "builtin": True})
@@ -1394,6 +1405,30 @@ def calcular_urgencia(notas, pesos):
             return score, temperatura
     return score, FAIXAS_URGENCIA[0][2]
 
+# Chave do Detalhamento em Lead.urgencia_detalhe["notas"/"pesos"] (não é um question_id).
+CHAVE_DETALHAMENTO = "_detalhamento"
+
+def calcular_detalhamento(lead, fields=None):
+    """Nota 0-10 de quanto o cliente detalhou o caso, calculada pelo CRM com o que o agente coletou
+    (sem depender de o agente "achar" nada): demanda (até 4), observações (até 3), impacto (1),
+    variáveis de roteiro extras preenchidas (até 1) e nome informado (1). `fields` são os dados do
+    CLASSIFICADO ainda não aplicados ao lead."""
+    fields = fields or {}
+    demanda = str(fields.get("tema") or lead.demand or "").strip()
+    impacto = str(fields.get("impacto") or lead.impacto or "").strip()
+    nome = str(fields.get("nome") or lead.name or "").strip()
+    observacoes = mesclar_observacoes(lead.notes, fields.get("observacoes"))
+    n_obs = len([i for i in observacoes.split(";") if i.strip()])
+    extras = len([v for v in (lead.variaveis_roteiro or {}).values() if str(v).strip()])
+    nota = (
+        min(len(demanda) / 120, 1) * 4
+        + min(n_obs / 3, 1) * 3
+        + (1 if impacto else 0)
+        + min(extras / 2, 1)
+        + (1 if nome else 0)
+    )
+    return round(nota, 1)
+
 def _aplicar_notas_urgencia(lead, company, fields):
     """CLASSIFICADO com fields.notas: o CRM calcula temperatura (prevalece sobre a do
     agente) e, se não vier, a prioridade; grava o detalhe pra auditoria. Retorna
@@ -1415,17 +1450,28 @@ def _aplicar_notas_urgencia(lead, company, fields):
         Question.objects.filter(company=company, question_id__in=list(notas), variavel__isnull=False)
         .values_list("question_id", "variavel__peso")
     )
-    calculo = calcular_urgencia(notas, pesos)
-    if calculo is None:
+    if calcular_urgencia(notas, pesos) is None:
         return fields, "Notas de urgência sem nenhuma pergunta com variável/peso cadastrado: revisar integração do agente"
-    score, temperatura = calculo
+    usados = {qid: notas[qid] for qid in notas if qid in pesos}
+    nomes = dict(
+        Question.objects.filter(company=company, question_id__in=list(usados), variavel__isnull=False)
+        .values_list("question_id", "variavel__name")
+    )
+    # Detalhamento: variável do sistema, nota calculada pelo CRM, entra na média com o peso da empresa.
+    detalhamento = variavel_detalhamento(company)
+    pesos = {qid: pesos[qid] for qid in usados if qid in pesos}
+    if detalhamento.peso:  # a API só aceita 1-10; peso 0 só existe se alguém zerar direto no banco
+        usados[CHAVE_DETALHAMENTO] = calcular_detalhamento(lead, fields)
+        pesos[CHAVE_DETALHAMENTO] = detalhamento.peso
+        nomes[CHAVE_DETALHAMENTO] = detalhamento.name
+    score, temperatura = calcular_urgencia(usados, pesos)
     fields = {**fields, "temperatura": temperatura}
     if not fields.get("prioridade"):
         fields["prioridade"] = PRIORIDADE_POR_TEMPERATURA.get(temperatura, "Baixa")
-    usados = {qid: notas[qid] for qid in notas if qid in pesos}
     lead.urgencia_detalhe = {
         "notas": usados,
-        "pesos": {qid: pesos[qid] for qid in usados},
+        "pesos": pesos,
+        "nomes": nomes,
         "score": round(score, 2),
         "temperatura_calculada": temperatura,
     }

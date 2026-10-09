@@ -107,6 +107,20 @@ class LeadSerializer(serializers.ModelSerializer):
         # na disputa por um lead entre atendentes.
         read_only_fields = ["id", "company", "contact", "contact_name", "created_at", "state", "last_audio_id", "bot_closed", "pedido_humano_pendente", "situacao_especial", "last_contact", "owner", "mode", "desfecho", "variaveis_roteiro", "urgencia_detalhe", "etapa_atendimento", "desfecho_pendente", "origem_manual"]
 
+    def to_representation(self, obj):
+        dados = super().to_representation(obj)
+        detalhe = dados.get("urgencia_detalhe")
+        if isinstance(detalhe, dict) and detalhe.get("notas") and not detalhe.get("nomes"):
+            # Leads classificados antes de existir "nomes": completa com o nome da variável de cada pergunta.
+            cache = self.context.setdefault("_nomes_variaveis", {})
+            if obj.company_id not in cache:
+                cache[obj.company_id] = dict(
+                    Question.objects.filter(company_id=obj.company_id, variavel__isnull=False).values_list("question_id", "variavel__name")
+                )
+            todos = cache[obj.company_id]
+            dados["urgencia_detalhe"] = {**detalhe, "nomes": {qid: todos[qid] for qid in detalhe["notas"] if qid in todos}}
+        return dados
+
     def validate(self, attrs):
         if attrs.get("mode") == "AUTOMÁTICO" and self.instance and self.instance.mode == "HUMANO":
             raise serializers.ValidationError("Retomada exige comando administrativo autorizado; indisponível nesta versão.")
@@ -136,8 +150,8 @@ class LeadManualSerializer(serializers.Serializer):
 class VariavelSerializer(serializers.ModelSerializer):
     class Meta:
         model = Variavel
-        fields = ["id", "name", "peso"]
-        read_only_fields = ["id"]
+        fields = ["id", "name", "peso", "builtin"]
+        read_only_fields = ["id", "builtin"]
 
 class VariavelRoteiroSerializer(serializers.ModelSerializer):
     class Meta:

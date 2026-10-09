@@ -10,6 +10,7 @@ class AgentOptionsTests(TestCase):
     def setUp(self):
         self.company = Company.objects.create(name="Empresa SPIN")
         seed_roteiro_padrao(self.company)
+        Variavel.objects.filter(company=self.company, builtin=True).update(peso=0)  # estes testes isolam a média das notas; o Detalhamento tem testes próprios
         self.area = Area.objects.create(company=self.company, name="Consumidor")
         self.other_area = Area.objects.create(company=self.company, name="Trabalhista")
         self.variable = VariavelRoteiro.objects.create(company=self.company, name="Renda", slug="renda")

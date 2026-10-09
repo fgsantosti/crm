@@ -79,6 +79,9 @@ ESPECIAL_QUESTION_IDS = [v["question_id"] for v in SITUACOES_ESPECIAIS.values()]
 MANDATORY_OFFFLOW_QUESTION_IDS = ["apresentacao", "empresa", "validar", "encerramento", "necessidade_humana", *ESPECIAL_QUESTION_IDS]
 DEFAULT_HUMAN_MESSAGE = "Entendido. Vou encaminhar seu pedido para um atendente humano."
 
+VARIAVEL_DETALHAMENTO = "Detalhamento"
+PESO_PADRAO_DETALHAMENTO = 3
+
 class Variavel(models.Model):
     """Variável que a empresa define pra orientar a classificação de urgência
     do agente (tela "Variáveis do Agente"). Cada pergunta do roteiro fica
@@ -88,6 +91,7 @@ class Variavel(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="variaveis")
     name = models.CharField(max_length=120)
     peso = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(10)])
+    builtin = models.BooleanField(default=False, help_text="Variável do sistema (ex.: Detalhamento): existe em toda empresa, não tem pergunta própria, não pode ser renomeada nem excluída; só o peso é editável.")
     class Meta:
         constraints = [models.UniqueConstraint(fields=["company", "name"], name="unique_company_variavel")]
         ordering = ["name"]

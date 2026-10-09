@@ -612,8 +612,14 @@ class VariavelViewSet(TenantMixin, viewsets.ModelViewSet):
         base = [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
         return base + [NotAgentAccount()]
     def perform_create(self, serializer): serializer.save(company=self.company())
+    def partial_update(self, request, *args, **kwargs):
+        if self.get_object().builtin and set(request.data) - {"peso"}:
+            return Response({"detail": "Variável do sistema: só o peso pode ser alterado."}, status=400)
+        return super().partial_update(request, *args, **kwargs)
     def destroy(self, request, *args, **kwargs):
         from django.db.models import ProtectedError
+        if self.get_object().builtin:
+            return Response({"detail": "Variável do sistema (obrigatória): não pode ser excluída."}, status=400)
         try:
             return super().destroy(request, *args, **kwargs)
         except ProtectedError:

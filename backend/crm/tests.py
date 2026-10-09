@@ -1703,20 +1703,68 @@ class AgenteContextoEUrgenciaTests(TestCase):
         self.assertEqual(lead.temperature, "Qualificado")
         self.assertEqual(lead.priority, "Média")
         self.assertTrue(lead.bot_closed)
+        # Detalhamento (variável do sistema, peso 3): nota calculada pelo CRM entra na mesma média.
         self.assertEqual(lead.urgencia_detalhe, {
-            "notas": {"situacao": 8.0, "afetou_renda": 10.0, "avaliar": 6.0},
-            "pesos": {"situacao": 9, "afetou_renda": 7, "avaliar": 4},
-            "score": 8.3,
+            "notas": {"situacao": 8.0, "afetou_renda": 10.0, "avaliar": 6.0, "_detalhamento": 1.2},
+            "pesos": {"situacao": 9, "afetou_renda": 7, "avaliar": 4, "_detalhamento": 3},
+            "nomes": {"situacao": "Situação", "afetou_renda": "Renda", "avaliar": "Avaliar", "_detalhamento": "Detalhamento"},
+            "score": 7.37,
             "temperatura_calculada": "Qualificado",
         })
 
     def test_classificado_por_notas_quente_vira_prioridade_alta_e_respeita_prioridade_enviada(self):
+        from .services import variavel_detalhamento
+        Variavel.objects.filter(pk=variavel_detalhamento(self.company).pk).update(peso=0)  # isola a média das notas
         self.ate_validar()
         self.send("c", marker="CLASSIFICADO", fields={"notas": {"situacao": 10, "avaliar": 9}})
         self.assertEqual((Lead.objects.get().temperature, Lead.objects.get().priority), ("Quente", "Alta"))
         self.ate_validar(contact="+5585911114444")
         self.send("c", contact="+5585911114444", marker="CLASSIFICADO", fields={"notas": {"situacao": 10}, "prioridade": "Baixa"})
         self.assertEqual(Lead.objects.get(contact="+5585911114444").priority, "Baixa")
+
+    def test_detalhamento_nota_calculada_pelo_crm_e_peso_da_empresa_mudam_a_urgencia(self):
+        from .services import calcular_detalhamento
+        lead = Lead(company=self.company, contact="+5585900000001")
+        self.assertEqual(calcular_detalhamento(lead), 0)
+        rico = {"tema": "x" * 130, "observacoes": "um; dois; três", "impacto": "perdeu a renda", "nome": "Joana"}
+        self.assertEqual(calcular_detalhamento(lead, rico), 9)
+        self.ate_validar()
+        self.send("c", marker="CLASSIFICADO", fields={"notas": {"situacao": 10, "avaliar": 10}, **rico})
+        quente = Lead.objects.get()
+        self.assertEqual(quente.urgencia_detalhe["notas"]["_detalhamento"], 9)
+        self.assertEqual(quente.temperature, "Quente")
+        # Mesmas notas, cliente que contou pouco: o detalhamento baixo puxa a média para baixo.
+        self.ate_validar(contact="+5585911115555")
+        self.send("c", contact="+5585911115555", marker="CLASSIFICADO", fields={"notas": {"situacao": 10, "avaliar": 10}})
+        raso = Lead.objects.get(contact="+5585911115555")
+        self.assertLess(raso.urgencia_detalhe["notas"]["_detalhamento"], 3)
+        self.assertEqual(raso.temperature, "Qualificado")
+
+    def test_variavel_detalhamento_e_obrigatoria_so_o_peso_muda(self):
+        from .services import seed_roteiro_padrao
+        empresa = Company.objects.create(name="Nova")
+        seed_roteiro_padrao(empresa)
+        det = Variavel.objects.get(company=empresa, name="Detalhamento")
+        self.assertTrue(det.builtin)
+        self.assertEqual(det.peso, 3)
+        staff = get_user_model().objects.create_user("emp-det", password="x", is_staff=True)
+        empresa.members.add(staff)
+        c = APIClient(); c.force_authenticate(staff)
+        url = f"/api/variaveis/{det.pk}/?company={empresa.pk}"
+        self.assertEqual(c.patch(url, {"name": "Outro"}, format="json").status_code, 400)
+        self.assertEqual(c.delete(url).status_code, 400)
+        r = c.patch(url, {"peso": 8}, format="json")
+        self.assertEqual((r.status_code, r.json()["peso"], r.json()["builtin"]), (200, 8, True))
+        self.assertTrue(Variavel.objects.filter(pk=det.pk).exists())
+
+    def test_urgencia_detalhe_de_lead_antigo_ganha_nomes_das_variaveis(self):
+        lead = Lead.objects.create(company=self.company, contact="+5585900000002", temperature="Frio",
+                                   urgencia_detalhe={"notas": {"situacao": 6}, "pesos": {"situacao": 9}, "score": 6, "temperatura_calculada": "Frio"})
+        staff = get_user_model().objects.create_user("emp-nomes", password="x", is_staff=True)
+        self.company.members.add(staff)
+        c = APIClient(); c.force_authenticate(staff)
+        r = c.get(f"/api/leads/{lead.pk}/?company={self.company.pk}")
+        self.assertEqual(r.json()["urgencia_detalhe"]["nomes"], {"situacao": "Situação"})
 
     def test_classificado_com_notas_sem_peso_reinicia_triagem(self):
         self.ate_validar()
