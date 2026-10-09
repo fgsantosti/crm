@@ -39,7 +39,7 @@ class Company(models.Model):
     spin_inicial = models.ForeignKey("Area", on_delete=models.SET_NULL, null=True, blank=True, related_name="empresas_inicio_spin")
     spins_iniciais = models.ManyToManyField(
         "Area", blank=True, related_name="empresas_spins_iniciais",
-        help_text="Etapa Inicial: SPINs que o cliente pode acessar. Com mais de uma, o agente escolhe pela mensagem inicial (campanha).",
+        help_text="Etapa Inicial: SPINs que o cliente pode acessar. Com mais de uma, o agente escolhe a área pela mensagem inicial do cliente.",
     )
     def __str__(self): return self.name
     @property
@@ -181,9 +181,9 @@ class Area(models.Model):
     """
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="areas")
     name = models.CharField(max_length=80)
-    mensagem_campanha = models.TextField(
+    palavras_chave = models.TextField(
         blank=True, max_length=500,
-        help_text="Etapa Inicial com várias SPINs: texto fixo que a campanha faz o cliente enviar para esta área (ex.: \"Possuo descontos indevidos no meu benefício do INSS\"). Ajuda o agente a reconhecer a área.",
+        help_text="Etapa Inicial com várias SPINs: palavras-chave (separadas por vírgula) que ajudam o agente a reconhecer esta área na mensagem inicial do cliente (ex.: \"desconto, benefício, INSS\"). A mensagem da campanha não é controlada por nós.",
     )
     class Meta:
         constraints = [models.UniqueConstraint(fields=["company", "name"], name="unique_company_area")]

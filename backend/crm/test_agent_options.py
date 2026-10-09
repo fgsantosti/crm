@@ -308,12 +308,12 @@ class AgentOptionsTests(TestCase):
 
 
 class VariasSpinsIniciaisTests(TestCase):
-    """Etapa Inicial com várias SPINs: o agente escolhe a área pela mensagem da campanha."""
+    """Etapa Inicial com várias SPINs: o agente escolhe a área pela mensagem inicial, com ajuda de palavras-chave."""
     def setUp(self):
         self.company = Company.objects.create(name="Empresa Multi SPIN")
         seed_roteiro_padrao(self.company)
-        self.consumidor = Area.objects.create(company=self.company, name="Consumidor", mensagem_campanha="Possuo descontos indevidos no meu benefício do INSS")
-        self.trabalhista = Area.objects.create(company=self.company, name="Trabalhista", mensagem_campanha="Fui demitido e quero meus direitos")
+        self.consumidor = Area.objects.create(company=self.company, name="Consumidor", palavras_chave="desconto, benefício, INSS; empréstimo consignado, desconto, ")
+        self.trabalhista = Area.objects.create(company=self.company, name="Trabalhista", palavras_chave="demitido, rescisão, FGTS")
         self.sem_spin = Area.objects.create(company=self.company, name="Criminal")
         peso = Variavel.objects.create(company=self.company, name="Geral2", peso=5)
         for area, prefixo in ((self.consumidor, "cons"), (self.trabalhista, "trab")):
@@ -339,14 +339,14 @@ class VariasSpinsIniciaisTests(TestCase):
             Event.objects.filter(pk=result["event_id"]).update(delivery="SENT")
         return result
 
-    def test_contexto_lista_as_spins_habilitadas_com_a_mensagem_da_campanha(self):
+    def test_contexto_lista_as_spins_habilitadas_com_as_palavras_chave(self):
         ctx = contexto_agente(self.company)
         self.assertIsNone(ctx["spin_inicial"])
         self.assertIsNone(ctx["pergunta_inicial"])
         self.assertEqual(ctx["perguntas"], [])
         self.assertEqual(ctx["spins_iniciais"], [
-            {"area": "Consumidor", "mensagem_campanha": "Possuo descontos indevidos no meu benefício do INSS", "pergunta_inicial": "cons_situacao"},
-            {"area": "Trabalhista", "mensagem_campanha": "Fui demitido e quero meus direitos", "pergunta_inicial": "trab_situacao"},
+            {"area": "Consumidor", "palavras_chave": ["desconto", "benefício", "INSS", "empréstimo consignado"], "pergunta_inicial": "cons_situacao"},
+            {"area": "Trabalhista", "palavras_chave": ["demitido", "rescisão", "FGTS"], "pergunta_inicial": "trab_situacao"},
         ])
         self.assertEqual(set(ctx["spin"]), {"Consumidor", "Trabalhista"})  # a SPIN de Criminal não está habilitada
 
@@ -401,9 +401,9 @@ class VariasSpinsIniciaisTests(TestCase):
         area_outra = Area.objects.create(company=outra, name="X")
         self.assertEqual(self.client.patch(url, {"spins_iniciais": [area_outra.pk]}, format="json").status_code, 400)
 
-    def test_mensagem_da_campanha_edita_pela_area_e_nome_nao_muda(self):
-        r = self.client.patch(f"/api/areas/{self.consumidor.pk}/?company={self.company.pk}", {"mensagem_campanha": "Novo texto"}, format="json")
+    def test_palavras_chave_editam_pela_area_e_nome_nao_muda(self):
+        r = self.client.patch(f"/api/areas/{self.consumidor.pk}/?company={self.company.pk}", {"palavras_chave": "novas, palavras"}, format="json")
         self.assertEqual(r.status_code, 200, r.content)
         self.consumidor.refresh_from_db()
-        self.assertEqual(self.consumidor.mensagem_campanha, "Novo texto")
+        self.assertEqual(self.consumidor.palavras_chave, "novas, palavras")
         self.assertEqual(self.client.patch(f"/api/areas/{self.consumidor.pk}/?company={self.company.pk}", {"name": "Outro"}, format="json").status_code, 400)

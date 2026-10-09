@@ -7,7 +7,7 @@ from .models import Blacklist, Company, Lead, Question, CompanyInfo, Event, Area
 FIXED_QUESTION_IDS = {"nome", "situacao"}
 
 class CompanySerializer(serializers.ModelSerializer):
-    # Etapa Inicial: SPINs que o cliente pode acessar (várias -> o agente escolhe pela mensagem da campanha).
+    # Etapa Inicial: SPINs que o cliente pode acessar (várias -> o agente escolhe a área pela mensagem inicial).
     spins_iniciais = serializers.PrimaryKeyRelatedField(many=True, queryset=Area.objects.all(), required=False)
     class Meta:
         model = Company
@@ -329,10 +329,10 @@ class DeliverySerializer(serializers.Serializer):
 class AreaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Area
-        fields = ["id", "name", "mensagem_campanha"]
+        fields = ["id", "name", "palavras_chave"]
         read_only_fields = ["id"]
     def validate_name(self, value):
-        # Renomear quebraria a área já gravada nos leads e nas listas SPIN: só a mensagem da campanha é editável.
+        # Renomear quebraria a área já gravada nos leads e nas listas SPIN: só as palavras-chave são editáveis.
         if self.instance and value != self.instance.name:
             raise serializers.ValidationError("O nome da área não pode ser alterado.")
         return value

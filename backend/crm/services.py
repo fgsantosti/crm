@@ -273,6 +273,16 @@ def etapa_inicial_configurada(company):
     """Etapa Inicial com ao menos uma SPIN habilitada que tem perguntas com texto."""
     return any(perguntas_da_spin(company, a) for a in spins_iniciais_habilitadas(company))
 
+def palavras_chave_da_area(area):
+    """Palavras-chave da área (texto separado por vírgula, ponto e vírgula ou quebra de linha) como lista."""
+    vistas, saida = set(), []
+    for bruta in re.split(r"[,;\n]", area.palavras_chave or ""):
+        palavra = re.sub(r"\s+", " ", bruta).strip()
+        if palavra and palavra.casefold() not in vistas:
+            vistas.add(palavra.casefold())
+            saida.append(palavra[:60])
+    return saida[:40]
+
 def area_escolhida_na_etapa_inicial(company, fields):
     """Com várias SPINs: a área habilitada que o agente informou em fields.especialidade (ou None)."""
     nome = str((fields or {}).get("especialidade") or "").strip().casefold()
@@ -1643,7 +1653,7 @@ def contexto_agente(company):
         for area in habilitadas:
             ordenadas = [q.question_id for q in perguntas_da_spin(company, area)]
             spin_filtrada[area.name] = sorted((q for q in spin.get(area.name, []) if q["question_id"] in ordenadas), key=lambda q: ordenadas.index(q["question_id"]))
-            spins_iniciais.append({"area": area.name, "mensagem_campanha": area.mensagem_campanha, "pergunta_inicial": ordenadas[0] if ordenadas else None})
+            spins_iniciais.append({"area": area.name, "palavras_chave": palavras_chave_da_area(area), "pergunta_inicial": ordenadas[0] if ordenadas else None})
         spin = spin_filtrada
     return {
         "empresa": company.name,

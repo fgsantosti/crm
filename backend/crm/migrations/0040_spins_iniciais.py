@@ -20,13 +20,13 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AddField(
             model_name='area',
-            name='mensagem_campanha',
-            field=models.TextField(blank=True, help_text='Etapa Inicial com várias SPINs: texto fixo que a campanha faz o cliente enviar para esta área (ex.: "Possuo descontos indevidos no meu benefício do INSS"). Ajuda o agente a reconhecer a área.', max_length=500),
+            name='palavras_chave',
+            field=models.TextField(blank=True, help_text='Etapa Inicial com várias SPINs: palavras-chave (separadas por vírgula) que ajudam o agente a reconhecer esta área na mensagem inicial do cliente (ex.: "desconto, benefício, INSS"). A mensagem da campanha não é controlada por nós.', max_length=500),
         ),
         migrations.AddField(
             model_name='company',
             name='spins_iniciais',
-            field=models.ManyToManyField(blank=True, help_text='Etapa Inicial: SPINs que o cliente pode acessar. Com mais de uma, o agente escolhe pela mensagem inicial (campanha).', related_name='empresas_spins_iniciais', to='crm.area'),
+            field=models.ManyToManyField(blank=True, help_text='Etapa Inicial: SPINs que o cliente pode acessar. Com mais de uma, o agente escolhe a área pela mensagem inicial do cliente.', related_name='empresas_spins_iniciais', to='crm.area'),
         ),
         migrations.RunPython(copiar_spin_inicial, migrations.RunPython.noop),
     ]

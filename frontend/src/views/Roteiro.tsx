@@ -302,11 +302,11 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
     }
   }
 
-  async function salvarMensagemCampanha(area: Area, mensagem_campanha: string) {
+  async function salvarPalavrasChave(area: Area, palavras_chave: string) {
     setSavingOpcoes(true);
     setError('');
     try {
-      const atualizada: Area = await api(`/areas/${area.id}/?company=${company.id}`, { method: 'PATCH', body: JSON.stringify({ mensagem_campanha }) });
+      const atualizada: Area = await api(`/areas/${area.id}/?company=${company.id}`, { method: 'PATCH', body: JSON.stringify({ palavras_chave }) });
       setAreas((v) => v.map((a) => (a.id === atualizada.id ? atualizada : a)));
     } catch (err) {
       setError((err as Error).message);
@@ -976,20 +976,21 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
             {spinsIniciais.length > 1 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <small style={{ color: 'var(--muted)' }}>
-                  Com mais de uma SPIN, o cliente chega por uma campanha cuja mensagem fixa indica a área, e o agente a classifica automaticamente.
-                  Cadastre abaixo o texto de cada campanha. Se a mensagem não corresponder a nenhuma área habilitada, o lead é desqualificado como fora de escopo.
+                  Com mais de uma SPIN, o cliente chega por uma campanha (o texto dela não é controlado por aqui) e o agente classifica a área
+                  pela primeira mensagem. As palavras-chave abaixo ajudam o agente a reconhecer cada área. Se a mensagem não corresponder a nenhuma
+                  área habilitada, o lead é desqualificado como fora de escopo.
                 </small>
                 {areas.filter((a) => spinsIniciais.includes(a.id)).map((a) => (
                   <label key={a.id} style={{ margin: 0 }}>
-                    Mensagem da campanha — {a.name}
+                    Palavras-chave — {a.name}
                     <textarea
                       rows={2}
                       maxLength={500}
-                      defaultValue={a.mensagem_campanha}
-                      placeholder="Ex.: Possuo descontos indevidos no meu benefício do INSS"
+                      defaultValue={a.palavras_chave}
+                      placeholder="Ex.: desconto, benefício, INSS, empréstimo consignado"
                       onBlur={(e) => {
                         const valor = e.currentTarget.value;
-                        if (valor !== a.mensagem_campanha) salvarMensagemCampanha(a, valor);
+                        if (valor !== a.palavras_chave) salvarPalavrasChave(a, valor);
                       }}
                     />
                   </label>
@@ -998,7 +999,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
             )}
             <p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>
               Marcada: o atendimento começa diretamente na SPIN habilitada (ou, com várias, na que o agente reconhecer pela
-              mensagem inicial da campanha). O agente envia somente as perguntas dela,
+              mensagem inicial do cliente). O agente envia somente as perguntas dela,
               segue as etapas Situação, Problema, Implicação e Necessidade e classifica com as variáveis e pesos definidos.
               Dados reconhecidos nas mensagens do cliente preenchem as variáveis, sem perguntas extras de identificação,
               apresentação, validação ou encerramento.

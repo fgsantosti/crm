@@ -346,12 +346,13 @@ humana com placeholders, para que a fala inclua os dados reais do contato.
 `spin_inicial`, uma só, continua aceito e equivale a `spins_iniciais=[id]`). Para
 ativar o início direto, habilite SPINs que tenham perguntas com texto cadastrado.
 A opção começa desligada nas empresas existentes. Cada área tem
-`mensagem_campanha` (`PATCH /api/areas/{id}/`): o texto fixo que a campanha faz o
-cliente enviar para aquela área.
+`palavras_chave` (`PATCH /api/areas/{id}/`, texto separado por vírgula): ajudam o
+agente a reconhecer a área na mensagem inicial. O texto da campanha não é
+controlado por nós.
 
 **Várias SPINs habilitadas.** O lead nasce **sem área** (`especialidade=""`) e o
 contexto traz `spin_inicial=null`, `pergunta_inicial=null` e
-`spins_iniciais=[{area, mensagem_campanha, pergunta_inicial}]`, além de `spin` com
+`spins_iniciais=[{area, palavras_chave: [...], pergunta_inicial}]`, além de `spin` com
 as listas das áreas habilitadas. Na primeira mensagem o agente (modelo) escolhe a
 área e envia `ATUALIZAR` com `fields.especialidade` (nome de uma área habilitada,
 sem diferenciar maiúsculas) e `proxima`; o CRM grava a área, envia a primeira
