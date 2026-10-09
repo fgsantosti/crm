@@ -1,14 +1,12 @@
-import { ObservacoesLead } from '../components/LeadDetalheDialog';
 import { HistoricoConversaDialog } from '../components/HistoricoConversaDialog';
 import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Company, Lead, LeadEvent, Me } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 import { AreaSelect } from '../components/AreaSelect';
-import { LeadNameField } from '../components/LeadNameField';
 import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
 import { IconeWhatsapp } from '../components/Icones';
+import { CadastroAtendimentoDialog, Overlay, TriagemResumo } from '../components/CadastroAtendimento';
 
 // Mesma ordem de services.FAIXAS_URGENCIA no backend (menos urgente -> mais urgente).
 export const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Frio: 2, Qualificado: 3, Quente: 4 };
@@ -60,55 +58,6 @@ export function ordenarColuna(key: ColumnKey, items: Lead[]): Lead[] {
   return items;
 }
 
-function Overlay({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-  return createPortal(
-    <div
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(20,14,9,0.6)', backdropFilter: 'blur(2px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}
-    >
-      <div className="panel" style={{ position: 'relative', width: 520, maxWidth: '100%', padding: 24, borderRadius: 16, boxShadow: '0 32px 70px rgba(0,0,0,0.4)' }}>
-        {children}
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-function TriagemResumo({ lead, api, onUpdated }: { lead: Lead; api?: Api; onUpdated?: (lead: Lead) => void }) {
-  return (
-    <div className="fields" style={{ marginBottom: 16 }}>
-      {api && onUpdated ? <LeadNameField key={lead.id} lead={lead} api={api} onUpdated={onUpdated} /> : <label style={{ margin: 0 }}>
-        Nome
-        <input readOnly value={lead.name || 'Sem nome informado'} />
-      </label>}
-      <label style={{ margin: 0 }}>
-        Contato
-        <input readOnly value={lead.contact} />
-      </label>
-      <label style={{ margin: 0 }}>
-        Área
-        <input readOnly value={lead.especialidade || '—'} />
-      </label>
-      <label style={{ margin: 0 }}>
-        Temperatura
-        <input readOnly value={lead.temperature || '—'} />
-      </label>
-      <label style={{ margin: 0, gridColumn: '1 / -1' }}>
-        Demanda
-        <input readOnly value={lead.demand || '—'} />
-      </label>
-      {lead.notes && (
-        <div style={{ gridColumn: '1 / -1', fontSize: 14 }}>
-          <small style={{ display: 'block', color: 'var(--muted)', marginBottom: 2 }}>Observações</small>
-          <ObservacoesLead notes={lead.notes} />
-        </div>
-      )}
-    </div>
-  );
-}
-
 /** Como o CRM chegou à temperatura: nota do agente × peso da variável de cada pergunta. */
 function UrgenciaDetalhe({ lead }: { lead: Lead }) {
   const d = lead.urgencia_detalhe;
@@ -144,6 +93,7 @@ function UrgenciaDetalhe({ lead }: { lead: Lead }) {
 
 export function Leads({ api, company, role, me }: { api: Api; company: Company; role: 'atendente' | 'empresa' | 'admin'; me: Me }) {
   const confirmar = useConfirmar();
+  const historicoDe = company.coletar_historico_conversa ? { api, companyId: company.id } : undefined;
   const [leads, setLeads] = useState<Lead[]>([]);
   const [search, setSearch] = useState('');
   const [mostrarNovasLeads, setMostrarNovasLeads] = useState(true);
@@ -576,32 +526,22 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
       )}
 
       {negociacaoModal && (
-        <Overlay onClose={() => setNegociacaoModal(null)}>
-          <h2 style={{ marginTop: 0 }}>Cadastro do atendimento</h2>
-          <p style={{ color: 'var(--muted)', marginBottom: 16 }}>Dados coletados pelo agente durante a triagem.</p>
-          <TriagemResumo lead={negociacaoModal} api={api} onUpdated={aplicarAtualizacao} />
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button type="button" onClick={() => confirmarNegociacao(negociacaoModal)} disabled={actionBusy} style={{ background: '#2563EB', borderColor: '#2563EB' }}>
-              {actionBusy && <Spinner />}
-              Acompanhar
-            </button>
-            <a href={`https://wa.me/${negociacaoModal.contact.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-              <button type="button" style={{ background: '#25D366', borderColor: '#25D366' }}>
-                Contatar
-              </button>
-            </a>
-            <button type="button" className="secondary" onClick={() => setNegociacaoModal(null)}>
-              Cancelar
-            </button>
-          </div>
-        </Overlay>
+        <CadastroAtendimentoDialog
+          lead={negociacaoModal}
+          api={api}
+          historico={historicoDe}
+          busy={actionBusy}
+          onUpdated={aplicarAtualizacao}
+          onConfirm={confirmarNegociacao}
+          onClose={() => setNegociacaoModal(null)}
+        />
       )}
 
       {cadastroSemAtendimentoModal && (
         <Overlay onClose={() => setCadastroSemAtendimentoModal(null)}>
           <h2 style={{ marginTop: 0 }}>Cadastrar sem atendimento</h2>
           <p style={{ color: 'var(--muted)', marginBottom: 16 }}>Dados coletados pelo agente durante a triagem.</p>
-          <TriagemResumo lead={cadastroSemAtendimentoModal} api={api} onUpdated={aplicarAtualizacao} />
+          <TriagemResumo lead={cadastroSemAtendimentoModal} api={api} onUpdated={aplicarAtualizacao} historico={historicoDe} />
           <p style={{ fontSize: 13, color: 'var(--danger)', marginBottom: 16 }}>
             Este lead será marcado automaticamente como <strong>Falha durante o atendimento</strong> — ele vai para a coluna
             Despacho, pendente do botão "Enviar Despachos".

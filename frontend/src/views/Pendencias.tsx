@@ -3,7 +3,7 @@ import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Company, Lead } from '../types';
 import { SkeletonRows } from '../components/Skeleton';
 import { LeadDetalheDialog } from '../components/LeadDetalheDialog';
-import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
+import { CadastroAtendimentoDialog } from '../components/CadastroAtendimento';
 
 // Pendências = Kanban "Qualificados" + "Atendimentos em espera" (backend: ?pending=1, já ordenado
 // com Em espera antes de Classificado). "Pegar Lead" assume o atendimento e leva o lead para
@@ -13,7 +13,6 @@ function estagio(l: Lead): 'Em espera' | 'Classificado' {
 }
 
 export function Pendencias({ api, company }: { api: Api; company: Company }) {
-  const confirmar = useConfirmar();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
@@ -21,6 +20,7 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
   const [error, setError] = useState('');
   const [recarregar, setRecarregar] = useState(0);
   const [detalhe, setDetalhe] = useState<Lead | null>(null);
+  const [cadastro, setCadastro] = useState<Lead | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -41,27 +41,31 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
     };
   }, [company.id, recarregar]);
 
-  async function pegarLead(lead: Lead) {
-    const ok = await confirmar({
-      titulo: 'Pegar este lead?',
-      mensagem: 'Você passa a ser o responsável e o lead vai para Meus Atendimentos.',
-      detalhe: <ConfirmPessoa nome={lead.name || 'Sem nome informado'} sub={lead.contact} chips={[lead.temperature, lead.especialidade].filter(Boolean)} />,
-      icone: 'pessoa',
-      confirmar: 'Pegar lead',
-    });
-    if (!ok) return;
+  // Pegar Lead abre o mesmo "Cadastro do atendimento" do Kanban; "Acompanhar" move para Em negociação.
+  function pegarLead(lead: Lead) {
+    setDetalhe(null);
+    setCadastro(lead);
+  }
+
+  async function confirmarPegar(lead: Lead) {
     setPegandoId(lead.id);
     setError('');
     try {
       await api(`/leads/${lead.id}/negociar/?company=${company.id}`, { method: 'POST' });
       setLeads((v) => v.filter((l) => l.id !== lead.id));
-      setDetalhe(null);
+      setCadastro(null);
     } catch (e) {
       setError((e as Error).message);
+      setCadastro(null);
       setRecarregar((n) => n + 1);
     } finally {
       setPegandoId(null);
     }
+  }
+
+  function aplicarAtualizacao(updated: Lead) {
+    setLeads((v) => v.map((l) => (l.id === updated.id ? updated : l)));
+    setCadastro((c) => (c && c.id === updated.id ? updated : c));
   }
 
   const visible = leads.filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()));
@@ -133,9 +137,7 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
                           }}
                           disabled={pegandoId !== null}
                           title="Assumir e levar para Meus Atendimentos"
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
                         >
-                          <span aria-hidden="true">⏫</span>
                           {pegandoId === l.id ? 'Pegando…' : 'Pegar Lead'}
                         </button>
                     </td>
@@ -149,6 +151,17 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
         <p className="table-note">Clique em uma linha para ver a demanda e as observações. Casos em negociação ou despacho não aparecem aqui — veja em “Meus Atendimentos”.</p>
       </section>
       {detalhe && <LeadDetalheDialog lead={detalhe} estagio={estagio(detalhe)} historico={company.coletar_historico_conversa ? { api, companyId: company.id } : undefined} onClose={() => setDetalhe(null)} onPegar={pegarLead} pegando={pegandoId === detalhe.id} />}
+      {cadastro && (
+        <CadastroAtendimentoDialog
+          lead={cadastro}
+          api={api}
+          historico={company.coletar_historico_conversa ? { api, companyId: company.id } : undefined}
+          busy={pegandoId === cadastro.id}
+          onUpdated={aplicarAtualizacao}
+          onConfirm={confirmarPegar}
+          onClose={() => setCadastro(null)}
+        />
+      )}
     </>
   );
 }

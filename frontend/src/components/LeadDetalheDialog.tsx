@@ -115,8 +115,7 @@ export function LeadDetalheDialog({ lead, estagio, onClose, onPegar, pegando, hi
           <button type="button" className="secondary" onClick={() => ref.current?.close()}>
             Voltar
           </button>
-          <button type="button" onClick={() => onPegar(lead)} disabled={pegando} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <span aria-hidden="true">⏫</span>
+          <button type="button" onClick={() => onPegar(lead)} disabled={pegando}>
               {pegando ? 'Pegando…' : 'Pegar Lead'}
             </button>
         </div>
