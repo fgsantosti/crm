@@ -1,5 +1,7 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import type { Api } from '../api';
 import type { Lead } from '../types';
+import { HistoricoConversaDialog } from './HistoricoConversaDialog';
 
 /** Observações do agente = itens curtos separados por ";" (services.mesclar_observacoes). */
 export function itensObservacao(notes: string): string[] {
@@ -32,14 +34,17 @@ function Campo({ rotulo, children, largo }: { rotulo: string; children: ReactNod
  * Popup com os dados do lead (tela Pendências): ajuda a atendente a decidir se consegue atender.
  * Demanda = situação-problema; observações = dados auxiliares não sensíveis gravados pelo agente.
  */
-export function LeadDetalheDialog({ lead, estagio, onClose, onPegar, pegando }: {
+export function LeadDetalheDialog({ lead, estagio, onClose, onPegar, pegando, historico }: {
   lead: Lead;
+  /** Presente só quando a empresa liga a coleta de histórico no Admin: mostra o botão "Histórico de conversa". */
+  historico?: { api: Api; companyId: number };
   estagio: string;
   onClose: () => void;
   onPegar?: (lead: Lead) => void;
   pegando?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const [verHistorico, setVerHistorico] = useState(false);
 
   useEffect(() => {
     const dialog = ref.current!;
@@ -91,6 +96,11 @@ export function LeadDetalheDialog({ lead, estagio, onClose, onPegar, pegando }: 
           </Campo>
           <Campo rotulo="Observações" largo>
             <ObservacoesLead notes={lead.notes} />
+            {historico && (
+              <button type="button" className="secondary" style={{ marginTop: 10 }} onClick={() => setVerHistorico(true)}>
+                Histórico de conversa
+              </button>
+            )}
           </Campo>
           {lead.impacto && (
             <Campo rotulo="Impacto" largo>
@@ -99,6 +109,7 @@ export function LeadDetalheDialog({ lead, estagio, onClose, onPegar, pegando }: 
           )}
         </div>
       </div>
+      {verHistorico && historico && <HistoricoConversaDialog api={historico.api} companyId={historico.companyId} lead={lead} onClose={() => setVerHistorico(false)} />}
       {onPegar && (
         <div className="lead-dialog-footer">
           <button type="button" className="secondary" onClick={() => ref.current?.close()}>

@@ -11,10 +11,10 @@ class CompanySerializer(serializers.ModelSerializer):
     spins_iniciais = serializers.PrimaryKeyRelatedField(many=True, queryset=Area.objects.all(), required=False)
     class Meta:
         model = Company
-        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional", "mensagens_audio", "voz_tts", "etapa_inicial", "spin_inicial", "spins_iniciais"]
+        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional", "mensagens_audio", "voz_tts", "etapa_inicial", "spin_inicial", "spins_iniciais", "coletar_historico_conversa"]
         # Só as opções do agente (tela Roteiro, aba "Opções do Agente") são editáveis
         # por aqui -- os demais campos de Company continuam no Painel Admin.
-        read_only_fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente"]
+        read_only_fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "coletar_historico_conversa"]
     def validate(self, attrs):
         # Compatibilidade: spin_inicial (uma só) equivale a spins_iniciais=[essa].
         if "spin_inicial" in attrs and "spins_iniciais" not in attrs:
@@ -50,7 +50,7 @@ class AdminCompanySerializer(serializers.ModelSerializer):
     numero_agente = serializers.CharField(max_length=40, allow_blank=True, required=False)
     class Meta:
         model = Company
-        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "member_count", "tem_agente_ativo"]
+        fields = ["id", "name", "initial_state", "allow_transcription", "coletar_historico_conversa", "numero_agente", "member_count", "tem_agente_ativo"]
         read_only_fields = ["id", "member_count", "tem_agente_ativo"]
     def validate_numero_agente(self, value):
         # Aceita como a pessoa digita ("+55 (86) 9423-8125", "5586...") e grava em E.164.
@@ -307,6 +307,8 @@ class IncomingSerializer(serializers.Serializer):
     contact_name = serializers.CharField(max_length=160, required=False, allow_blank=True, default="")
     message_id = serializers.CharField(max_length=160)
     kind = serializers.ChoiceField(choices=["text", "audio"], default="text")
+    # Texto do cliente (ou transcrição do áudio); só é guardado com a coleta de histórico ligada na empresa.
+    mensagem = serializers.CharField(max_length=4000, required=False, allow_blank=True, default="")
     marker = serializers.ChoiceField(choices=["Q", "REPETIR", "ATUALIZAR", "VALIDAR", "CLASSIFICADO", "RESPONDER"])
     question_id = serializers.CharField(max_length=80, required=False, allow_blank=True, default="")
     fields = AgentFieldsSerializer(required=False, default=dict)

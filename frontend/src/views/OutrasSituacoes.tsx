@@ -252,7 +252,7 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
             {despachandoId === l.id && painelDespacho(l)}
           </article>
         ))}
-      {detalhe && <LeadDetalheDialog lead={detalhe} estagio={rotuloSituacao(detalhe.situacao_especial)} onClose={() => setDetalhe(null)} />}
+      {detalhe && <LeadDetalheDialog lead={detalhe} estagio={rotuloSituacao(detalhe.situacao_especial)} historico={company.coletar_historico_conversa ? { api, companyId: company.id } : undefined} onClose={() => setDetalhe(null)} />}
     </section>
     </>
   );

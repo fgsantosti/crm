@@ -137,7 +137,7 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
         {!busy && !visible.length && <div className="empty">Nenhuma pendência nesta empresa.</div>}
         <p className="table-note">Clique em uma linha para ver a demanda e as observações. Casos em negociação ou despacho não aparecem aqui — veja em “Meus Atendimentos”.</p>
       </section>
-      {detalhe && <LeadDetalheDialog lead={detalhe} estagio={estagio(detalhe)} onClose={() => setDetalhe(null)} onPegar={pegarLead} pegando={pegandoId === detalhe.id} />}
+      {detalhe && <LeadDetalheDialog lead={detalhe} estagio={estagio(detalhe)} historico={company.coletar_historico_conversa ? { api, companyId: company.id } : undefined} onClose={() => setDetalhe(null)} onPegar={pegarLead} pegando={pegandoId === detalhe.id} />}
     </>
   );
 }

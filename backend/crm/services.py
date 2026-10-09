@@ -135,6 +135,31 @@ def mesclar_observacoes(atual, novas):
         vistos.add(item.casefold())
     return "; ".join(itens)
 
+_NUMERO_LONGO = re.compile(r"\d(?:[\s.\-/]?\d){7,}")
+_SENHA_DITA = re.compile(r"\b((?:senha|código|codigo|token)\b\s*(?:é|e|:|=)\s*)\S+", re.I)
+
+def redigir_dados_sensiveis(texto):
+    """Histórico de conversa: o texto do cliente é guardado sem sequências longas de dígitos (CPF,
+    telefone, conta, cartão) nem senha/código ditos no chat."""
+    texto = _SENHA_DITA.sub(lambda m: m.group(1) + "[omitido]", str(texto or ""))
+    return _NUMERO_LONGO.sub("[número omitido]", texto).strip()
+
+def historico_da_conversa(lead):
+    """Mensagens do cliente e respostas do agente, em ordem, da primeira até a que classificou o lead."""
+    mensagens = []
+    for evento in lead.events.order_by("created_at", "pk"):
+        if evento.mensagem_cliente:
+            mensagens.append({"quem": "cliente", "texto": evento.mensagem_cliente, "quando": evento.created_at})
+        resultado = evento.result if isinstance(evento.result, dict) else {}
+        if resultado.get("action") in ("TEXTO", "AUDIO") and (resultado.get("content") or "").strip():
+            mensagens.append({
+                "quem": "agente", "texto": resultado["content"], "quando": evento.created_at,
+                "audio": resultado.get("action") == "AUDIO", "entregue": evento.delivery in ("SENT", "NOT_REQUIRED"),
+            })
+        if evento.marker == "CLASSIFICADO":
+            break
+    return mensagens
+
 def apply_fields(lead, company, fields):
     """Grava os campos recebidos no lead; retorna uma mensagem de erro (str) se
     `especialidade` não for uma Area cadastrada para a empresa, ou None se ok.
@@ -528,6 +553,7 @@ def receive(company, data):
     event = Event.objects.create(
         lead=lead, message_id=data["message_id"], marker=data["marker"],
         summary=f"Marcador recebido: {data['marker']}",
+        mensagem_cliente=redigir_dados_sensiveis(data.get("mensagem"))[:4000] if company.coletar_historico_conversa else "",
     )
     result = dict(NO_REPLY)
     # Triagem que não pode continuar (travada ou erro do agente) nunca vai pra equipe:
@@ -1658,6 +1684,8 @@ def contexto_agente(company):
     return {
         "empresa": company.name,
         "agente_conversacional": company.agente_conversacional,
+        # Com a coleta de histórico ligada, a ponte envia o texto/transcrição do cliente em cada /incoming/.
+        "coletar_historico": company.coletar_historico_conversa,
         "etapa_inicial": company.etapa_inicial,
         "atendimento_humano_habilitado": not company.etapa_inicial,
         "classificacao_antecipada": {"campos": ["nome", "tema", "especialidade"], "nome_perfil_permitido": True},

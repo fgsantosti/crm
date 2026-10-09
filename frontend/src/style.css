@@ -417,3 +417,9 @@ button.block-button {
 .lead-dialog-footer { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--line); flex-shrink: 0; }
 tr.linha-clicavel { cursor: pointer; }
 tr.linha-clicavel:hover { background: var(--accent-soft, rgba(0,0,0,.04)); }
+.conversa-lista { display: flex; flex-direction: column; gap: 10px; }
+.conversa-msg { max-width: 82%; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-muted); }
+.conversa-msg small { display: block; color: var(--muted); font-size: 11.5px; margin-bottom: 2px; }
+.conversa-msg p { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 14px; color: var(--ink); }
+.conversa-cliente { align-self: flex-start; }
+.conversa-agente { align-self: flex-end; background: var(--accent-soft); border-color: transparent; }

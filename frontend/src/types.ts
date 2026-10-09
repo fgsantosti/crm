@@ -7,6 +7,8 @@ export type Company = {
   numero_agente: string;
   /** Marcado: agente conversa livremente sobre a empresa antes do funil. Desmarcado: vai direto pro funil com texto próprio. */
   agente_conversacional: boolean;
+  /** Portão do Admin: o CRM guarda o histórico de conversa dos leads (botão "Histórico de conversa"). */
+  coletar_historico_conversa: boolean;
   etapa_inicial: boolean;
   /** SPIN única quando só uma está habilitada na Etapa Inicial (derivado de spins_iniciais). */
   spin_inicial: number | null;
@@ -182,6 +184,7 @@ export type AdminCompany = {
   name: string;
   initial_state: string;
   allow_transcription: boolean;
+  coletar_historico_conversa: boolean;
   numero_agente: string;
   member_count: number;
   tem_agente_ativo: boolean;

@@ -10,6 +10,9 @@ class Company(models.Model):
     members = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="companies")
     initial_state = models.CharField(max_length=80, default="apresentacao", help_text="question_id inicial enviado no primeiro contato.")
     allow_transcription = models.BooleanField(default=False)
+    # Portão do Admin: com ele ligado, o CRM guarda as mensagens do cliente (e transcrições de áudio) de cada
+    # lead, da primeira até a que o classificou, para a equipe consultar em "Histórico de conversa".
+    coletar_historico_conversa = models.BooleanField(default=False)
     numero_agente = models.CharField(
         max_length=16, blank=True,
         help_text="Número de WhatsApp (E.164) conectado ao agente. Normalmente é o mesmo número em que a equipe "
@@ -369,6 +372,9 @@ class Event(models.Model):
     delivery = models.CharField(max_length=15, default="NOT_REQUIRED")
     # Marcador do agente que gerou o evento (Q/REPETIR/...); base da contagem de repetições.
     marker = models.CharField(max_length=20, blank=True, default="")
+    # Texto (ou transcrição do áudio) que o cliente enviou nesta entrada; só preenchido com
+    # Company.coletar_historico_conversa ligado, já sem dados sensíveis (services.redigir_dados_sensiveis).
+    mensagem_cliente = models.TextField(blank=True, default="")
     class Meta:
         constraints = [models.UniqueConstraint(fields=["lead", "message_id"], name="unique_lead_message")]
         ordering = ["created_at"]

@@ -121,9 +121,18 @@ Corpo da requisição — um por marcador emitido pelo agent:
   "question_id": "apresentacao",     // obrigatório só quando marker="Q"
   "fields": {},                      // obrigatório (pode ser {}) para ATUALIZAR/VALIDAR/CLASSIFICADO
   "human_required": false,           // true trata reason antes do marcador (exceções abaixo)
-  "reason": "pedido humano"          // só relevante quando human_required=true
+  "reason": "pedido humano",         // só relevante quando human_required=true
+  "mensagem": "texto do cliente"     // opcional: texto (ou transcrição do áudio) que o cliente enviou
 }
 ```
+
+`mensagem` (até 4000 caracteres) só é guardada quando a empresa tem **"Permitir coleta de
+histórico de conversa"** ligado no Painel Admin (`Company.coletar_historico_conversa`;
+`/agente/contexto/` informa `coletar_historico`, e a ponte só envia o texto nesse caso). O CRM
+a grava em `Event.mensagem_cliente` **sem dados sensíveis** (sequências de 8+ dígitos viram
+`[número omitido]` e "senha/código/token é X" vira `[omitido]`). A equipe lê o histórico
+(cliente e agente, da primeira mensagem até a que classificou o lead) em
+`GET /api/leads/{id}/conversa/` → `{coleta_ativa, mensagens:[{quem, texto, quando, audio?, entregue?}]}`.
 
 Resposta (sempre 200, mesmo em `NO_REPLY`):
 

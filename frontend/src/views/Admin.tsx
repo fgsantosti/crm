@@ -74,6 +74,7 @@ export function Admin({ api }: { api: Api }) {
           initial_state: form.get('initial_state') || 'apresentacao',
           numero_agente: form.get('numero_agente') || '',
           allow_transcription: form.get('allow_transcription') === 'on',
+          coletar_historico_conversa: form.get('coletar_historico_conversa') === 'on',
         }),
       });
       setCompanies((v) => [...v, created].sort((a, b) => a.name.localeCompare(b.name)));
@@ -100,6 +101,7 @@ export function Admin({ api }: { api: Api }) {
           initial_state: form.get('initial_state'),
           numero_agente: form.get('numero_agente'),
           allow_transcription: form.get('allow_transcription') === 'on',
+          coletar_historico_conversa: form.get('coletar_historico_conversa') === 'on',
         }),
       });
       setCompanies((v) => v.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
@@ -215,6 +217,9 @@ export function Admin({ api }: { api: Api }) {
               <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
                 <input type="checkbox" name="allow_transcription" style={{ width: 'auto' }} /> Habilitar áudio (transcrição/voz)
               </label>
+              <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
+                <input type="checkbox" name="coletar_historico_conversa" style={{ width: 'auto' }} /> Permitir coleta de histórico de conversa
+              </label>
               <button disabled={savingCompany}>
                 {savingCompany && <Spinner />}
                 Criar empresa
@@ -294,6 +299,9 @@ export function Admin({ api }: { api: Api }) {
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 20 }}>
                   <input type="checkbox" name="allow_transcription" defaultChecked={selected.allow_transcription} style={{ width: 'auto' }} /> Habilitar áudio (transcrição/voz)
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 20 }}>
+                  <input type="checkbox" name="coletar_historico_conversa" defaultChecked={selected.coletar_historico_conversa} style={{ width: 'auto' }} /> Permitir coleta de histórico de conversa
                 </label>
               </div>
               <button disabled={savingCompany} style={{ marginTop: 12 }}>

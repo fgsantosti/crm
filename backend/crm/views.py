@@ -19,7 +19,7 @@ from .services import (
     aplicar_audio,
     assumir_situacao_especial as assumir_situacao_especial_service,
     despachar_situacao_especial as despachar_situacao_especial_service,
-    receive, escalate, create_invite, contexto_agente, status_contato,
+    receive, escalate, historico_da_conversa, create_invite, contexto_agente, status_contato,
     validar_convite as validar_convite_service,
     trocar_senha as trocar_senha_service,
     solicitar_troca_email, confirmar_troca_email as confirmar_troca_email_service,
@@ -417,6 +417,12 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
             busca=request.query_params.get("q", "").strip(),
             **periodo.validated_data,
         ))
+    @action(detail=True, methods=["get"], url_path="conversa")
+    def conversa(self, request, pk=None):
+        """Histórico de conversa do lead (cliente x agente), se a empresa tem a coleta ligada no Admin."""
+        lead = self.get_object()
+        ativa = bool(lead.company.coletar_historico_conversa)
+        return Response({"coleta_ativa": ativa, "mensagens": historico_da_conversa(lead) if ativa else []})
     @action(detail=True)
     def events(self, request, pk=None):
         return Response(EventSerializer(self.get_object().events.all(), many=True).data)

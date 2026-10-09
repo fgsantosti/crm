@@ -1,4 +1,5 @@
 import { ObservacoesLead } from '../components/LeadDetalheDialog';
+import { HistoricoConversaDialog } from '../components/HistoricoConversaDialog';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchTodasAsPaginas, type Api } from '../api';
@@ -156,6 +157,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
   // Área escolhida no Despacho ('' = manter a atual do lead).
   const [areaDespacho, setAreaDespacho] = useState('');
   const [desqualificadosCount, setDesqualificadosCount] = useState(0);
+  const [historicoAberto, setHistoricoAberto] = useState(false);
 
   const podeAtender = role === 'atendente';
 
@@ -182,6 +184,10 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
         if (!silent) setBusy(false);
       });
   }
+
+  useEffect(() => {
+    setHistoricoAberto(false);
+  }, [selected?.id]);
 
   useEffect(() => {
     load();
@@ -527,6 +533,11 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
                   Conversar
                 </button>
               </a>
+              {company.coletar_historico_conversa && (
+                <button type="button" className="secondary" onClick={() => setHistoricoAberto(true)}>
+                  Histórico de conversa
+                </button>
+              )}
               {podeAtender && columnOf(selected) === 'novos' && (
                 <button
                   type="button" onClick={() => acompanhar(selected)} disabled={actionBusy}
@@ -556,6 +567,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
           ) : (
             <p>Nenhum evento registrado.</p>
           )}
+          {historicoAberto && <HistoricoConversaDialog api={api} companyId={company.id} lead={selected} onClose={() => setHistoricoAberto(false)} />}
         </section>
       )}
 

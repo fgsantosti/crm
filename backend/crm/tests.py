@@ -3601,3 +3601,104 @@ class DashboardTotalComNaoProsseguiramTests(TestCase):
         por_contato = {a["contact"]: a["categoria_status"] for a in r["atendimentos"]}
         self.assertEqual([por_contato[f"+55859999200{n}"] for n in range(1, 6)], ["aguardando", "aguardando", "equipe", "equipe", "equipe"])
         self.assertEqual(sum(r["status"].values()), r["total"])
+
+
+class HistoricoDeConversaTests(TestCase):
+    """Coleta do histórico de conversa (portão do Admin) e endpoint /leads/{id}/conversa/."""
+    def setUp(self):
+        self.company = Company.objects.create(name="Historico Teste", coletar_historico_conversa=True)
+        seed_roteiro_padrao(self.company)
+        Question.objects.filter(company=self.company, question_id="apresentacao").update(text="Olá! Quer ser atendido?")
+        Question.objects.filter(company=self.company, question_id="nome").update(text="Qual é o seu nome?")
+        User = get_user_model()
+        self.atendente = User.objects.create_user(username="h1@x.com", email="h1@x.com")
+        self.estranho = User.objects.create_user(username="h2@x.com", email="h2@x.com")
+        self.company.members.add(self.atendente)
+        self.contact = "+5585911112001"
+
+    def send(self, mid, mensagem="", marker="ATUALIZAR", company=None, **fields):
+        data = {"contact": self.contact, "message_id": mid, "kind": "text", "marker": marker,
+                "question_id": "apresentacao" if marker == "Q" else "", "fields": fields, "mensagem": mensagem,
+                "human_required": False, "reason": "pedido humano"}
+        r = receive(company or self.company, data)
+        if r.get("event_id"):
+            Event.objects.filter(pk=r["event_id"]).update(delivery="SENT")
+        return r
+
+    def conversa(self, user, lead):
+        c = APIClient(); c.force_authenticate(user)
+        return c.get(f"/api/leads/{lead.pk}/conversa/?company={lead.company_id}")
+
+    def test_guarda_mensagens_do_cliente_e_respostas_em_ordem(self):
+        self.send("m1", "Olá, boa tarde", marker="Q")
+        self.send("m2", "Meu nome é Ana, desconto indevido no benefício", proxima="nome", nome="Ana")
+        lead = Lead.objects.get()
+        r = self.conversa(self.atendente, lead).json()
+        self.assertTrue(r["coleta_ativa"])
+        self.assertEqual([(m["quem"], m["texto"]) for m in r["mensagens"]], [
+            ("cliente", "Olá, boa tarde"), ("agente", "Olá! Quer ser atendido?"),
+            ("cliente", "Meu nome é Ana, desconto indevido no benefício"), ("agente", "Qual é o seu nome?"),
+        ])
+
+    def test_redige_numeros_longos_e_senhas_no_historico(self):
+        from .services import redigir_dados_sensiveis
+        self.assertEqual(redigir_dados_sensiveis("CPF 123.456.789-09, minha senha é abc123 e recebo R$ 1.600"), "CPF [número omitido], minha senha é [omitido] e recebo R$ 1.600")
+        self.send("m1", "meu telefone é 86 99999 8888 e o código: 889977", marker="Q")
+        lead = Lead.objects.get()
+        textos = [m["texto"] for m in self.conversa(self.atendente, lead).json()["mensagens"] if m["quem"] == "cliente"]
+        self.assertEqual(textos, ["meu telefone é [número omitido] e o código: [omitido]"])
+
+    def test_com_a_coleta_desligada_nada_e_guardado_e_o_endpoint_diz_isso(self):
+        Company.objects.filter(pk=self.company.pk).update(coletar_historico_conversa=False)
+        self.company.refresh_from_db()
+        self.send("m1", "Olá", marker="Q")
+        lead = Lead.objects.get()
+        self.assertFalse(Event.objects.filter(lead=lead).exclude(mensagem_cliente="").exists())
+        self.assertEqual(self.conversa(self.atendente, lead).json(), {"coleta_ativa": False, "mensagens": []})
+
+    def test_historico_termina_na_mensagem_que_classificou(self):
+        self.send("m1", "Olá", marker="Q")
+        lead = Lead.objects.get()
+        Event.objects.create(lead=lead, message_id="c1", marker="CLASSIFICADO", mensagem_cliente="Última resposta", result={"action": "TEXTO", "content": "Obrigado."})
+        Event.objects.create(lead=lead, message_id="c2", marker="", mensagem_cliente="Depois de classificado")
+        textos = [m["texto"] for m in self.conversa(self.atendente, lead).json()["mensagens"]]
+        self.assertIn("Última resposta", textos)
+        self.assertIn("Obrigado.", textos)
+        self.assertNotIn("Depois de classificado", textos)
+
+    def test_so_membros_da_empresa_veem_o_historico(self):
+        self.send("m1", "Olá", marker="Q")
+        lead = Lead.objects.get()
+        self.assertEqual(self.conversa(self.estranho, lead).status_code, 404)
+        self.assertEqual(self.conversa(self.atendente, lead).status_code, 200)
+
+    def test_mensagem_duplicada_nao_duplica_o_historico(self):
+        self.send("m1", "Olá", marker="Q")
+        self.send("m1", "Olá", marker="Q")
+        lead = Lead.objects.get()
+        self.assertEqual(len([m for m in self.conversa(self.atendente, lead).json()["mensagens"] if m["quem"] == "cliente"]), 1)
+
+    def test_admin_liga_e_empresa_nao_altera_e_serializer_aceita_mensagem(self):
+        from .serializers import IncomingSerializer
+        admin = get_user_model().objects.create_superuser(username="adm@x.com", email="adm@x.com", password="x")
+        ca = APIClient(); ca.force_authenticate(admin)
+        r = ca.patch(f"/api/admin-companies/{self.company.pk}/", {"coletar_historico_conversa": False}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.company.refresh_from_db()
+        self.assertFalse(self.company.coletar_historico_conversa)
+        empresa = get_user_model().objects.create_user(username="emp@x.com", email="emp@x.com", is_staff=True)
+        self.company.members.add(empresa)
+        ce = APIClient(); ce.force_authenticate(empresa)
+        ce.patch(f"/api/companies/{self.company.pk}/", {"coletar_historico_conversa": True}, format="json")
+        self.company.refresh_from_db()
+        self.assertFalse(self.company.coletar_historico_conversa)
+        self.assertEqual(ce.get(f"/api/companies/{self.company.pk}/").json()["coletar_historico_conversa"], False)
+        s = IncomingSerializer(data={"contact": self.contact, "message_id": "x", "marker": "Q", "question_id": "apresentacao", "mensagem": "oi"})
+        self.assertTrue(s.is_valid(), s.errors)
+        self.assertEqual(s.validated_data["mensagem"], "oi")
+
+    def test_contexto_avisa_a_ponte_para_enviar_o_texto(self):
+        self.assertTrue(contexto_agente(self.company)["coletar_historico"])
+        Company.objects.filter(pk=self.company.pk).update(coletar_historico_conversa=False)
+        self.company.refresh_from_db()
+        self.assertFalse(contexto_agente(self.company)["coletar_historico"])
