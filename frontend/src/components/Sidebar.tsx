@@ -108,7 +108,14 @@ export function Sidebar({
           onOpenTrocarSenha={onOpenTrocarSenha}
           onLogout={onLogout}
         />
-        <button type="button" className="logout" style={{ flex: 1 }} onClick={onLogout}>
+        <button
+          type="button"
+          className="logout"
+          style={{ flex: 1 }}
+          onClick={() => {
+            if (window.confirm('Deseja sair da conta?')) onLogout();
+          }}
+        >
           Sair
         </button>
       </div>

@@ -32,6 +32,9 @@ export function Avatar({ me, size }: { me: Pick<Me, 'display_name' | 'username' 
   );
 }
 
+// Excluir conta / Sair da conta: botões discretos lado a lado, para não competir com as ações de edição.
+const botaoPequeno: React.CSSProperties = { padding: '7px 14px', fontSize: 13, whiteSpace: 'nowrap' };
+
 const ghostLightBtn: React.CSSProperties = {
   width: '100%',
   background: 'rgba(255,255,255,0.12)',
@@ -276,8 +279,8 @@ export function ProfileMenu({
                         </button>
                       )}
                       <div style={{ flex: 1 }} />
-                      <button type="button" style={{ ...ghostLightBtn, marginBottom: 0 }} onClick={onLogout}>
-                        Sair da conta
+                      <button type="button" style={{ ...ghostLightBtn, marginBottom: 0 }} onClick={close}>
+                        Voltar
                       </button>
                     </div>
                   </div>
@@ -337,9 +340,21 @@ export function ProfileMenu({
                       </div>
                     </div>
 
-                    <button type="button" style={{ width: '100%', background: 'var(--danger)', border: '1px solid var(--danger)', color: '#fff' }} onClick={() => setSection('excluir')}>
-                      Excluir conta
-                    </button>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button type="button" style={{ ...botaoPequeno, background: 'var(--danger)', border: '1px solid var(--danger)', color: '#fff' }} onClick={() => setSection('excluir')}>
+                        Excluir conta
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        style={botaoPequeno}
+                        onClick={() => {
+                          if (window.confirm('Deseja sair da conta?')) onLogout();
+                        }}
+                      >
+                        Sair da conta
+                      </button>
+                    </div>
                   </div>
                 </>
               )}
