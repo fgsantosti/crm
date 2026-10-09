@@ -375,6 +375,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
           {!carregou ? (
             <SkeletonTiles />
           ) : (
+            <div className="kb-container-dash">
             <div className="kb-board kb-board-compacto">
               {COLUMNS.map((col) => {
                 const items = ordenarColuna(col.key, kanbanLeads.filter((l) => columnOf(l) === col.key));
@@ -402,6 +403,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                   </section>
                 );
               })}
+            </div>
             </div>
           )}
         </section>

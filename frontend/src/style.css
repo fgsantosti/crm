@@ -670,3 +670,18 @@ tr.linha-clicavel:hover { background: var(--accent-soft, rgba(0,0,0,.04)); }
 .kb-etapa { display: inline-block; margin-top: 4px; font-size: 11px; font-weight: 600; color: #4E4136; background: #F1E8DB; border-radius: 999px; padding: 2px 8px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
 .dash-filtros label, .dash-busca-atendente, .kb-controles label { margin: 0; }
 .kb-enviar { padding: 0 12px; white-space: nowrap; font-size: 13.5px; }
+/* Container do Kanban (Central de leads e Dashboard): painel branco com rolagem lateral e colunas largas. */
+.kb-container { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; overflow: hidden; box-shadow: 0 1px 2px rgba(36,26,18,.04), 0 12px 32px -22px rgba(36,26,18,.2); }
+.kb-container-topo { display: flex; flex-direction: column; gap: 14px; padding: 18px 22px; border-bottom: 1px solid var(--line-soft); }
+.kb-container .kb-board, .kb-container-dash .kb-board { grid-auto-columns: 300px; padding: 18px 22px 16px; }
+.kb-container .empty { padding: 40px 25px; }
+.kb-container-dash { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; overflow: hidden; }
+.kb-board { scrollbar-width: auto; scrollbar-color: #CDBBA6 var(--panel-muted); }
+.kb-board::-webkit-scrollbar { height: 12px; }
+.kb-board::-webkit-scrollbar-track { background: var(--panel-muted); border-radius: 999px; }
+.kb-board::-webkit-scrollbar-thumb { background: #CDBBA6; border-radius: 999px; border: 3px solid var(--panel-muted); }
+.kb-board::-webkit-scrollbar-thumb:hover { background: #B9A48C; }
+@media (max-width: 600px) {
+  .kb-container .kb-board, .kb-container-dash .kb-board { grid-auto-columns: 270px; padding: 14px; }
+  .kb-container-topo { padding: 14px; }
+}

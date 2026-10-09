@@ -330,6 +330,8 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
         </p>
       )}
 
+      <section className="kb-container" aria-label="Quadro de leads">
+        <div className="kb-container-topo">
       <div className="kb-controles">
           <label className="kb-toggle">
             <input type="checkbox" checked={mostrarNovasLeads} onChange={(e) => setMostrarNovasLeads(e.target.checked)} />
@@ -368,6 +370,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
           ))}
         </li>
       </ol>
+        </div>
 
       {busy && !visible.length ? (
         <SkeletonCards count={visibleColumns.length} height={90} />
@@ -443,6 +446,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
         </div>
       )}
       {!busy && !visible.length && <div className="empty">Nenhum lead nesta visão. Os contatos aparecerão ao receber mensagens pela integração.</div>}
+      </section>
       {desqualificadosCount > 0 && (
         <p className="table-note" style={{ padding: 0 }}>
           {desqualificadosCount} lead{desqualificadosCount === 1 ? '' : 's'} desqualificado{desqualificadosCount === 1 ? '' : 's'}/desconfiado{desqualificadosCount === 1 ? '' : 's'} fora do fluxo — veja no Dashboard.
