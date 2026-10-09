@@ -233,9 +233,9 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
                   Ver dados
                 </button>
                 {l.contact && (
-                  <a href={`https://wa.me/${l.contact.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                  <IconeWhatsapp />
-                    <button type="button" style={{ background: '#25D366', borderColor: '#25D366' }}>
+                  <a href={`https://wa.me/${l.contact.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                    <button type="button" style={{ background: '#25D366', borderColor: '#25D366', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+<IconeWhatsapp size={22} />
                       Conversar
                     </button>
                   </a>

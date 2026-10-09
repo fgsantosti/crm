@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Api } from '../api';
 import type { Lead } from '../types';
 import { HistoricoConversaDialog } from './HistoricoConversaDialog';
-import { IconeEnvio } from './Icones';
 
 /** Observações do agente = itens curtos separados por ";" (services.mesclar_observacoes). */
 export function itensObservacao(notes: string): string[] {
@@ -116,12 +115,10 @@ export function LeadDetalheDialog({ lead, estagio, onClose, onPegar, pegando, hi
           <button type="button" className="secondary" onClick={() => ref.current?.close()}>
             Voltar
           </button>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <IconeEnvio size={30} />
-            <button type="button" onClick={() => onPegar(lead)} disabled={pegando}>
+          <button type="button" onClick={() => onPegar(lead)} disabled={pegando} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <span aria-hidden="true">⏫</span>
               {pegando ? 'Pegando…' : 'Pegar Lead'}
             </button>
-          </span>
         </div>
       )}
     </dialog>

@@ -531,9 +531,9 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
 
           {selected.contact && (
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
-              <a href={`https://wa.me/${selected.contact.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                  <IconeWhatsapp />
-                <button type="button" style={{ background: '#25D366', borderColor: '#25D366' }}>
+              <a href={`https://wa.me/${selected.contact.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                <button type="button" style={{ background: '#25D366', borderColor: '#25D366', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+<IconeWhatsapp size={22} />
                   Conversar
                 </button>
               </a>

@@ -18,14 +18,3 @@ export function IconeWhatsapp({ size = 34 }: { size?: number }) {
     </svg>
   );
 }
-
-/** Dois cursores para cima sobre uma base (ícone de "enviar para o atendimento"), ao lado de "Pegar Lead". */
-export function IconeEnvio({ size = 30 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true" style={{ flex: 'none', display: 'block', color: 'var(--ink)' }}>
-      <path d="M7 3L11 8H9V16H5V8H3L7 3Z" />
-      <path d="M17 3L21 8H19V16H15V8H13L17 3Z" />
-      <rect x="3" y="19" width="18" height="3" rx="0.6" />
-    </svg>
-  );
-}
