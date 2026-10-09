@@ -13,12 +13,12 @@ from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.authtoken.models import Token
 from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
-from .models import Profile, Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, VARIAVEL_DETALHAMENTO, PESO_PADRAO_DETALHAMENTO, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, DEFAULT_HUMAN_MESSAGE, SITUACOES_ESPECIAIS, ESPECIAL_QUESTION_IDS, ContagemDiaria
+from .models import Profile, Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, VARIAVEL_DETALHAMENTO, PESO_PADRAO_DETALHAMENTO, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, TEXTO_PADRAO_LEMBRETE, DEFAULT_HUMAN_MESSAGE, SITUACOES_ESPECIAIS, ESPECIAL_QUESTION_IDS, ContagemDiaria
 
 logger = logging.getLogger(__name__)
 
 NO_REPLY = {"action": "NO_REPLY"}
-RESERVED_QUESTION_IDS = {"validar", "encerramento", "necessidade_humana", *ESPECIAL_QUESTION_IDS}
+RESERVED_QUESTION_IDS = {"validar", "encerramento", "necessidade_humana", "lembrete", *ESPECIAL_QUESTION_IDS}
 
 # question_id -> (nome de exibição, slug/placeholder fixo) das 3 Variáveis de roteiro
 # builtin: reaproveitam os placeholders já existentes (FIELD_MAP), sem precisar de
@@ -57,7 +57,7 @@ def seed_roteiro_padrao(company):
     for question_id in MANDATORY_OFFFLOW_QUESTION_IDS:
         Question.objects.get_or_create(company=company, question_id=question_id, defaults={
             "obrigatoria": True, "variavel": None,
-            "text": DEFAULT_HUMAN_MESSAGE if question_id == "necessidade_humana" else TEXTOS_PADRAO_ESPECIAIS.get(question_id, ""),
+            "text": DEFAULT_HUMAN_MESSAGE if question_id == "necessidade_humana" else TEXTO_PADRAO_LEMBRETE if question_id == "lembrete" else TEXTOS_PADRAO_ESPECIAIS.get(question_id, ""),
         })
     for title in CompanyInfo.MANDATORY_TITLES:
         CompanyInfo.objects.get_or_create(company=company, title=title, defaults={"obrigatorio": True})
@@ -162,6 +162,10 @@ def historico_da_conversa(lead):
         if evento.mensagem_cliente:
             mensagens.append({"quem": "cliente", "texto": evento.mensagem_cliente, "quando": evento.created_at})
         resultado = evento.result if isinstance(evento.result, dict) else {}
+        if evento.marker == "LEMBRETE":
+            for m in resultado.get("mensagens") or []:
+                mensagens.append({"quem": "agente", "texto": m.get("content", ""), "quando": evento.created_at, "audio": False, "entregue": evento.delivery == "SENT"})
+            continue
         if resultado.get("action") in ("TEXTO", "AUDIO") and (resultado.get("content") or "").strip():
             mensagens.append({
                 "quem": "agente", "texto": resultado["content"], "quando": evento.created_at,
@@ -1478,25 +1482,105 @@ def _aplicar_notas_urgencia(lead, company, fields):
     return fields, None
 
 TRIAGEM_ABANDONADA_APOS = timedelta(hours=24)
+# Lembrete de continuidade: 24h sem resposta -> o CRM reserva o envio (reservar_lembretes); sem retorno
+# em mais 24h depois de o lembrete ser confirmado (SENT), a triagem é apagada. Se o lembrete nunca
+# saiu (gateway parado), a triagem é apagada mesmo assim: 48h após o envio tentado, 72h sem tentativa.
+LEMBRETE_APOS = timedelta(hours=24)
+APAGAR_APOS_LEMBRETE = timedelta(hours=24)
+APAGAR_LEMBRETE_FALHO_APOS = timedelta(hours=48)
+APAGAR_SEM_LEMBRETE_APOS = timedelta(hours=72)
 
-def apagar_triagens_abandonadas(agora=None):
-    """Triagem automática parada há 24h+ sem resposta do contato: o lead (e os eventos) são
-    apagados -- triagem que não terminou nunca vai pra equipe; o número recomeça do zero.
-    Idempotente. Retorna quantos leads foram apagados."""
+def triagens_paradas(agora=None):
+    """Leads em triagem automática sem nenhuma mensagem do cliente há 24h+ (base do lembrete e da limpeza)."""
     agora = agora or timezone.now()
     limite = agora - TRIAGEM_ABANDONADA_APOS
-    leads = Lead.objects.filter(
+    return Lead.objects.filter(
         Q(last_contact__lt=limite) | Q(last_contact__isnull=True, created_at__lt=limite),
         desfecho="", bot_closed=False, origem_manual=False,
     ).exclude(mode="HUMANO")
+
+def lembrete_da_empresa(company):
+    """Texto 'lembrete' ligado (habilitado e com conteúdo); None = a empresa não envia lembrete.
+    Independe da Etapa Inicial: ela desliga os outros textos fora do fluxo, não este."""
+    q = Question.objects.filter(company=company, question_id="lembrete", habilitada=True).first()
+    return q if q and q.text.strip() else None
+
+def horario_do_lembrete(ultimo_contato, horario=None):
+    """Quando o lembrete pode sair: 24h depois do último contato ou, com horário definido pela empresa,
+    a primeira ocorrência desse horário (fuso do CRM) a partir daí."""
+    base = ultimo_contato + LEMBRETE_APOS
+    if not horario:
+        return base
+    local = timezone.localtime(base)
+    alvo = local.replace(hour=horario.hour, minute=horario.minute, second=0, microsecond=0)
+    return alvo if alvo >= local else alvo + timedelta(days=1)
+
+def _pergunta_pendente_do_lembrete(company, lead):
+    """Pergunta em que o lead parou (lead.state), pronta para reenviar; None se não houver uma de fluxo."""
+    pergunta = Question.objects.filter(company=company, question_id=lead.state).first() if lead.state else None
+    if not pergunta or pergunta.question_id in MANDATORY_OFFFLOW_QUESTION_IDS or not pergunta.text.strip():
+        return None
+    if company.etapa_inicial and (pergunta.area_id is None or pergunta.area_id != getattr(spin_efetiva(company, lead), "pk", None)):
+        return None
+    return pergunta
+
+@transaction.atomic
+def reservar_lembretes(company, agora=None):
+    """Reserva (uma única vez por lead) os lembretes que já podem sair e devolve o que a ponte precisa enviar:
+    duas mensagens, o texto do lembrete e a pergunta em que o cliente parou. Cada reserva é um Event
+    marker=LEMBRETE em PENDING; a ponte confirma em /delivery/ (SENT grava lembrete_enviado_em; FAILED não
+    apaga o lead)."""
+    agora = agora or timezone.now()
+    config = lembrete_da_empresa(company)
+    if not config:
+        return []
+    Company.objects.select_for_update().get(pk=company.pk)  # mesmo lock do receive(): não corre com uma resposta do cliente
+    reservados = []
+    candidatos = triagens_paradas(agora).filter(company=company).exclude(events__marker="LEMBRETE").order_by("last_contact", "created_at")
+    for lead in candidatos:
+        referencia = lead.last_contact or lead.created_at
+        if agora < horario_do_lembrete(referencia, config.horario_envio) or agora - referencia >= APAGAR_SEM_LEMBRETE_APOS:
+            continue
+        mensagens = [{"question_id": "lembrete", "content": render_text(config.text, lead, company)}]
+        pergunta = _pergunta_pendente_do_lembrete(company, lead)
+        if pergunta:
+            mensagens.append({"question_id": pergunta.question_id, "content": render_text(pergunta.text, lead, company)})
+        evento = Event.objects.create(
+            lead=lead, message_id=f"lembrete-{lead.pk}", marker="LEMBRETE", summary="Lembrete de continuidade (24h sem resposta)",
+            result={"action": "LEMBRETE", "mensagens": mensagens}, delivery="PENDING",
+        )
+        reservados.append({"event_id": evento.pk, "lead_id": str(lead.pk), "contact": lead.contact, "mensagens": mensagens})
+    return reservados
+
+def _deve_apagar_triagem(lead, lembrete_ativo, agora):
+    referencia = lead.last_contact or lead.created_at
+    if not lembrete_ativo:
+        return referencia < agora - TRIAGEM_ABANDONADA_APOS
+    if lead.lembrete_enviado_em:
+        return max(referencia, lead.lembrete_enviado_em) < agora - APAGAR_APOS_LEMBRETE
+    tentado = lead.events.filter(marker="LEMBRETE").exists()
+    return referencia < agora - (APAGAR_LEMBRETE_FALHO_APOS if tentado else APAGAR_SEM_LEMBRETE_APOS)
+
+def apagar_triagens_abandonadas(agora=None):
+    """Triagem automática sem resposta do contato é apagada (o lead e os eventos): triagem que não terminou
+    nunca vai pra equipe; o número recomeça do zero. Com o lembrete ligado na empresa, só depois de ele ser
+    enviado e de mais 24h sem retorno (veja reservar_lembretes); sem lembrete, 24h como antes.
+    Idempotente. Retorna quantos leads foram apagados."""
+    agora = agora or timezone.now()
+    leads = triagens_paradas(agora)
     total = 0
     company_ids = list(leads.order_by().values_list("company_id", flat=True).distinct())
     for company_id in company_ids:
         with transaction.atomic():
             # receive usa o mesmo lock: reavalia a inatividade após qualquer entrada concorrente.
-            if not Company.objects.select_for_update().filter(pk=company_id).first():
+            company = Company.objects.select_for_update().filter(pk=company_id).first()
+            if not company:
                 continue
-            da_empresa = leads.filter(company_id=company_id)
+            ativo = lembrete_da_empresa(company) is not None
+            ids = [l.pk for l in leads.filter(company_id=company_id) if _deve_apagar_triagem(l, ativo, agora)]
+            if not ids:
+                continue
+            da_empresa = Lead.objects.filter(pk__in=ids)
             # "Não prosseguiram": guarda quantos leads vão embora, no dia em que nasceram.
             por_dia = Counter(timezone.localtime(c).date() for c in da_empresa.values_list("created_at", flat=True))
             _, por_modelo = da_empresa.delete()
@@ -1696,6 +1780,8 @@ def contexto_agente(company):
     for q in Question.objects.filter(company=company).select_related("variavel", "variavel_roteiro").order_by("ordem", "id"):
         if not (q.text or "").strip():
             continue
+        if q.question_id == "lembrete":
+            continue  # mensagem proativa do CRM (reservar_lembretes): o agente não a envia nem a conhece
         if q.question_id in MANDATORY_OFFFLOW_QUESTION_IDS:
             if not texto_fora_habilitado(company, q.question_id):
                 continue

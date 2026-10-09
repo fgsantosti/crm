@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.test import Client, TestCase
@@ -556,7 +556,7 @@ class QualificationTests(TestCase):
         # seed_roteiro_padrao: empresa nova já nasce com o mínimo pro funil funcionar.
         nova = Company.objects.get(pk=company_id)
         ids = set(Question.objects.filter(company=nova).values_list("question_id", flat=True))
-        self.assertEqual(ids, {"nome", "situacao", "demanda", "apresentacao", "empresa", "validar", "encerramento", "necessidade_humana", "especial_acompanhamento"})
+        self.assertEqual(ids, {"nome", "situacao", "demanda", "apresentacao", "empresa", "validar", "encerramento", "necessidade_humana", "lembrete", "especial_acompanhamento"})
         self.assertTrue(Question.objects.filter(company=nova, question_id="nome", obrigatoria=True, variavel__isnull=False).exists())
         self.assertTrue(Question.objects.filter(company=nova, question_id="apresentacao", obrigatoria=True, variavel__isnull=True).exists())
         self.assertEqual(CompanyInfo.objects.filter(company=nova, obrigatorio=True).count(), 3)
@@ -3423,7 +3423,7 @@ class ContagemDiariaTests(TestCase):
     def test_celery_apaga_e_soma_em_nao_prosseguiram_no_dia_do_nascimento(self):
         from .services import apagar_triagens_abandonadas
         self.abrir("+5585911110010"); self.abrir("+5585911110011")
-        antigo = timezone.now() - timedelta(days=2)
+        antigo = timezone.now() - timedelta(days=4)  # passa de todos os prazos (lembrete ligado: 72h sem tentativa)
         Lead.objects.filter(contact="+5585911110010").update(created_at=antigo, last_contact=antigo)
         self.assertEqual(apagar_triagens_abandonadas(), 1)
         c = self.contagem()
@@ -3887,3 +3887,138 @@ class OrcamentoDeTempoDaVozTests(TestCase):
             r = aplicar_audio(company, resultado, lambda p: p)
         self.assertEqual((r["action"], r["content"]), ("TEXTO", "Resposta livre longa"))
         self.assertIn("audio_erro", r)
+
+
+
+class LembreteDeContinuidadeTests(TestCase):
+    """24h sem resposta -> lembrete (texto + pergunta pendente) no horário da empresa; 24h depois, sem retorno, apaga."""
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        from rest_framework.authtoken.models import Token
+        self.company = Company.objects.create(name="Lembrete Ltda")
+        seed_roteiro_padrao(self.company)
+        Question.objects.filter(company=self.company, question_id="nome").update(text="Qual seu nome, por favor?")
+        self.agora = timezone.now()
+        self.agente = get_user_model().objects.create_user("agente.lembrete", password="x")
+        self.agente.groups.add(Group.objects.get_or_create(name="agente")[0])
+        self.company.members.add(self.agente)
+        self.api = APIClient()
+        self.api.force_authenticate(self.agente)
+
+    def lead(self, contact="+5585900001111", horas=25, **extra):
+        quando = self.agora - timedelta(hours=horas)
+        return Lead.objects.create(company=self.company, contact=contact, state="nome", name="Ana", last_contact=quando, **extra)
+
+    def reservar(self, **kw):
+        from .services import reservar_lembretes
+        return reservar_lembretes(self.company, self.agora, **kw)
+
+    def test_depois_de_24h_reserva_duas_mensagens_uma_unica_vez(self):
+        lead = self.lead()
+        self.lead("+5585900002222", horas=23)
+        itens = self.reservar()
+        self.assertEqual([i["lead_id"] for i in itens], [str(lead.pk)])
+        textos = [m["content"] for m in itens[0]["mensagens"]]
+        self.assertEqual(len(textos), 2)
+        self.assertIn("Ana", textos[0])
+        self.assertIn("Lembrete Ltda", textos[0])
+        self.assertEqual(textos[1], "Qual seu nome, por favor?")
+        self.assertEqual(self.reservar(), [])  # idempotente: um lembrete por lead
+        self.assertEqual(lead.events.get(marker="LEMBRETE").delivery, "PENDING")
+
+    def test_horario_definido_pela_empresa_adia_para_a_primeira_ocorrencia(self):
+        from datetime import time
+        from .services import horario_do_lembrete
+        ultimo = timezone.make_aware(datetime(2026, 3, 10, 14, 0))
+        self.assertEqual(horario_do_lembrete(ultimo), ultimo + timedelta(hours=24))
+        self.assertEqual(horario_do_lembrete(ultimo, time(9, 0)), timezone.make_aware(datetime(2026, 3, 12, 9, 0)))
+        self.assertEqual(horario_do_lembrete(ultimo, time(15, 30)), timezone.make_aware(datetime(2026, 3, 11, 15, 30)))
+        self.assertEqual(horario_do_lembrete(ultimo, time(14, 0)), timezone.make_aware(datetime(2026, 3, 11, 14, 0)))
+
+    def test_reserva_respeita_o_horario_configurado(self):
+        local = timezone.localtime(self.agora)
+        Question.objects.filter(company=self.company, question_id="lembrete").update(horario_envio=(local + timedelta(hours=3)).time().replace(second=0, microsecond=0))
+        self.lead(horas=25)
+        self.assertEqual(self.reservar(), [])  # 24h cumpridas, mas o horário escolhido ainda não chegou
+        Question.objects.filter(company=self.company, question_id="lembrete").update(horario_envio=(local - timedelta(minutes=30)).time().replace(second=0, microsecond=0))
+        self.assertEqual(len(self.reservar()), 1)
+
+    def test_lembrete_desligado_ou_sem_texto_nao_reserva_e_mantem_a_regra_de_24h(self):
+        from .services import apagar_triagens_abandonadas
+        self.lead(horas=25)
+        Question.objects.filter(company=self.company, question_id="lembrete").update(habilitada=False)
+        self.assertEqual(self.reservar(), [])
+        self.assertEqual(apagar_triagens_abandonadas(self.agora), 1)
+
+    def test_funciona_com_etapa_inicial_ligada(self):
+        self.lead(horas=25)
+        Company.objects.filter(pk=self.company.pk).update(etapa_inicial=True)
+        self.company.refresh_from_db()
+        itens = self.reservar()
+        self.assertEqual(len(itens), 1)
+        self.assertEqual(len(itens[0]["mensagens"]), 1)  # só o lembrete: a pergunta não é de SPIN
+
+    def test_entrega_confirmada_marca_o_prazo_e_falha_nao_apaga_o_lead(self):
+        lead = self.lead()
+        evento_id = self.reservar()[0]["event_id"]
+        r = self.api.post(f"/api/companies/{self.company.pk}/delivery/", {"event_id": evento_id, "status": "SENT"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        lead.refresh_from_db()
+        self.assertIsNotNone(lead.lembrete_enviado_em)
+        outro = self.lead("+5585900003333")
+        falha_id = self.reservar()[0]["event_id"]
+        r = self.api.post(f"/api/companies/{self.company.pk}/delivery/", {"event_id": falha_id, "status": "FAILED"}, format="json")
+        self.assertEqual(r.json(), {"delivery": "FAILED"})
+        self.assertTrue(Lead.objects.filter(pk=outro.pk).exists())
+
+    def test_sem_retorno_apaga_24h_depois_do_lembrete_e_resposta_do_cliente_adia(self):
+        from .services import apagar_triagens_abandonadas
+        lead = self.lead(horas=49)
+        Lead.objects.filter(pk=lead.pk).update(lembrete_enviado_em=self.agora - timedelta(hours=23))
+        Event.objects.create(lead=lead, message_id=f"lembrete-{lead.pk}", marker="LEMBRETE", delivery="SENT", result={})
+        self.assertEqual(apagar_triagens_abandonadas(self.agora), 0)  # lembrado há 23h: ainda dentro do prazo
+        self.assertEqual(apagar_triagens_abandonadas(self.agora + timedelta(hours=2)), 1)
+        # Cliente respondeu depois do lembrete: o prazo passa a contar da resposta.
+        outro = self.lead("+5585900004444", horas=10)
+        Lead.objects.filter(pk=outro.pk).update(lembrete_enviado_em=self.agora - timedelta(hours=40))
+        Event.objects.create(lead=outro, message_id=f"lembrete-{outro.pk}", marker="LEMBRETE", delivery="SENT", result={})
+        self.assertEqual(apagar_triagens_abandonadas(self.agora), 0)
+
+    def test_lembrete_que_nunca_saiu_nao_deixa_o_lead_para_sempre(self):
+        from .services import apagar_triagens_abandonadas
+        sem_tentativa = self.lead(horas=73)
+        tentado = self.lead("+5585900005555", horas=49)
+        Event.objects.create(lead=tentado, message_id=f"lembrete-{tentado.pk}", marker="LEMBRETE", delivery="FAILED", result={})
+        espera = self.lead("+5585900006666", horas=30)
+        self.assertEqual(apagar_triagens_abandonadas(self.agora), 2)
+        self.assertTrue(Lead.objects.filter(pk=espera.pk).exists())
+        self.assertFalse(Lead.objects.filter(pk=sem_tentativa.pk).exists())
+
+    def test_endpoint_so_para_a_conta_do_agente_e_nao_aparece_no_roteiro_do_agente(self):
+        self.lead()
+        url = f"/api/companies/{self.company.pk}/agente/lembretes/"
+        humano = get_user_model().objects.create_user("humano.lembrete", password="x", is_staff=True)
+        self.company.members.add(humano)
+        c = APIClient(); c.force_authenticate(humano)
+        self.assertEqual(c.post(url).status_code, 403)
+        r = self.api.post(url)
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(len(r.json()["lembretes"]), 1)
+        self.assertNotIn("lembrete", [i["question_id"] for i in contexto_agente(self.company)["fora_do_fluxo"]])
+
+    def test_horario_so_no_lembrete_e_historico_inclui_as_mensagens(self):
+        from .services import historico_da_conversa
+        staff = get_user_model().objects.create_user("emp.lembrete", password="x", is_staff=True)
+        self.company.members.add(staff)
+        c = APIClient(); c.force_authenticate(staff)
+        q = Question.objects.get(company=self.company, question_id="lembrete")
+        r = c.patch(f"/api/questions/{q.pk}/?company={self.company.pk}", {"horario_envio": "09:30"}, format="json")
+        self.assertEqual((r.status_code, r.json()["horario_envio"]), (200, "09:30:00"))
+        outra = Question.objects.get(company=self.company, question_id="encerramento")
+        self.assertEqual(c.patch(f"/api/questions/{outra.pk}/?company={self.company.pk}", {"horario_envio": "09:30"}, format="json").status_code, 400)
+        Question.objects.filter(pk=q.pk).update(horario_envio=None)
+        lead = self.lead()
+        evento_id = self.reservar()[0]["event_id"]
+        self.api.post(f"/api/companies/{self.company.pk}/delivery/", {"event_id": evento_id, "status": "SENT"}, format="json")
+        textos = [m["texto"] for m in historico_da_conversa(lead) if m["quem"] == "agente"]
+        self.assertEqual(len(textos), 2)

@@ -545,12 +545,28 @@ Não há retry automático. Enquanto uma entrega está `PENDING`:
   o marcador novo é processado normalmente — a triagem nunca trava por isso.
   Uma confirmação que chegue depois para um evento `EXPIRADO` não muda nada.
 
-### Triagem abandonada
+### Triagem abandonada e lembrete de continuidade
 
-A cada 30 minutos o CRM remove leads em triagem automática sem mensagem do contato
-há mais de 24h. Leads manuais, classificados e em modo HUMANO são preservados.
-Triagens removidas não entram em Qualificados; a próxima mensagem cria um lead zerado.
-Desqualificado/Desconfiado permanecem só nas estatísticas e liberam o número sem quarentena.
+A cada 30 minutos o CRM remove leads em triagem automática sem mensagem do contato.
+Leads manuais, classificados e em modo HUMANO são preservados. Triagens removidas não
+entram em Qualificados; a próxima mensagem cria um lead zerado. Desqualificado/Desconfiado
+permanecem só nas estatísticas e liberam o número sem quarentena.
+
+- **Sem lembrete** (texto `lembrete` desligado ou vazio na empresa): remove com 24h sem mensagem do contato.
+- **Com lembrete** (texto fora do fluxo `lembrete`, habilitado): com 24h sem resposta (ou no horário
+  `horario_envio` definido pela empresa, a primeira ocorrência depois das 24h) o CRM reserva um lembrete;
+  sem retorno em mais 24h **depois do lembrete confirmado** (`SENT`) o lead é removido. Lembrete que nunca
+  saiu (gateway parado): removido 48h depois da tentativa ou 72h sem tentativa.
+
+`POST /api/companies/{id}/agente/lembretes/` (só a conta do agente; a ponte consulta a cada 5 min,
+`CONECTA_CRM_LEMBRETES=0` desliga) reserva os envios devidos, **um por lead**, e responde
+`{"lembretes": [{"event_id", "lead_id", "contact", "mensagens": [{"question_id", "content"}, ...]}]}`:
+a 1ª mensagem é o texto do lembrete e a 2ª (quando houver) é a pergunta em que o cliente parou
+(`lead.state`; ausente se não for pergunta de fluxo ou, com Etapa Inicial, de outra SPIN). O texto vem
+sempre do CRM; a ponte o envia pelo canal (`openclaw message send`) nesta ordem e confirma em
+`/delivery/` com o `event_id` (marcador `LEMBRETE`): `SENT` grava `Lead.lembrete_enviado_em` e `FAILED`
+**não** apaga nem escala o lead (diferente das respostas da triagem). O `lembrete` nunca aparece em
+`fora_do_fluxo` do contexto e o agente não pode emiti-lo.
 
 ### BlackList no painel
 

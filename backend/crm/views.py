@@ -13,13 +13,14 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from .models import Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, VariavelRoteiro, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
 from .serializers import BlacklistSerializer, CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer, VariavelRoteiroSerializer
 from .services import (
     aplicar_audio,
     assumir_situacao_especial as assumir_situacao_especial_service,
     despachar_situacao_especial as despachar_situacao_especial_service,
-    receive, escalate, historico_da_conversa, create_invite, contexto_agente, status_contato,
+    receive, escalate, historico_da_conversa, reservar_lembretes, create_invite, contexto_agente, status_contato,
     validar_convite as validar_convite_service,
     trocar_senha as trocar_senha_service,
     solicitar_troca_email, confirmar_troca_email as confirmar_troca_email_service,
@@ -288,6 +289,14 @@ class CompanyViewSet(viewsets.ModelViewSet):
         pura; liberado pra conta de serviço do agente e membros humanos da empresa
         (get_object já restringe às empresas do usuário -> 404 nas demais)."""
         return Response(contexto_agente(self.get_object()))
+    @action(detail=True, methods=["post"], url_path="agente/lembretes")
+    def agente_lembretes(self, request, pk=None):
+        """A ponte pergunta o que já pode ser lembrado (24h sem resposta do cliente) e recebe, por lead, as
+        duas mensagens a enviar. Reserva o envio (idempotente: um lembrete por lead) e é só da conta do agente."""
+        company = self.get_object()
+        if not request.user.groups.filter(name="agente").exists():
+            return Response({"detail": "Somente a conta de serviço do agente."}, status=403)
+        return Response({"lembretes": reservar_lembretes(company)})
     @action(detail=True, methods=["get"], url_path="agente/contato")
     def agente_contato(self, request, pk=None):
         """O agente pode atender este número agora? Mesma regra que /incoming/ usa pra
@@ -320,6 +329,12 @@ class CompanyViewSet(viewsets.ModelViewSet):
             if event.delivery == "PENDING":
                 event.delivery = value
                 event.save()
+                if event.marker == "LEMBRETE":
+                    # Lembrete é proativo: confirmar grava o marco do prazo de 24h; falhar não apaga nem escala o lead.
+                    if value == "SENT":
+                        event.lead.lembrete_enviado_em = timezone.now()
+                        event.lead.save(update_fields=["lembrete_enviado_em"])
+                    return Response({"delivery": value})
                 if value == "FAILED":
                     if event.lead.bot_closed:
                         escalate(event.lead, "Falha de envio: revisar entrega antes de qualquer retomada")

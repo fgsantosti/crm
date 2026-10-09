@@ -251,6 +251,8 @@ class QuestionSerializer(serializers.ModelSerializer):
             attrs["envio_obrigatorio"] = False
         elif envio_obrigatorio and not attrs.get("text", self.instance.text if self.instance else "").strip():
             raise serializers.ValidationError({"text": "Cadastre o texto da pergunta antes de marcar o envio obrigatório."})
+        if attrs.get("horario_envio") and question_id != "lembrete":
+            raise serializers.ValidationError({"horario_envio": "O horário de envio é exclusivo do texto de lembrete."})
         is_offflow = question_id in MANDATORY_OFFFLOW_QUESTION_IDS
         if not is_offflow and attrs.get("habilitada") is False:
             raise serializers.ValidationError({"habilitada": "O controle de envio é exclusivo dos textos fora do fluxo."})

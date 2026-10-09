@@ -76,7 +76,10 @@ SITUACOES_ESPECIAIS = {
     },
 }
 ESPECIAL_QUESTION_IDS = [v["question_id"] for v in SITUACOES_ESPECIAIS.values()]
-MANDATORY_OFFFLOW_QUESTION_IDS = ["apresentacao", "empresa", "validar", "encerramento", "necessidade_humana", *ESPECIAL_QUESTION_IDS]
+# "lembrete": mensagem proativa para quem parou de responder (ver services.reservar_lembretes);
+# o agente nunca a emite (é RESERVED) e ela não aparece no roteiro dele.
+MANDATORY_OFFFLOW_QUESTION_IDS = ["apresentacao", "empresa", "validar", "encerramento", "necessidade_humana", "lembrete", *ESPECIAL_QUESTION_IDS]
+TEXTO_PADRAO_LEMBRETE = "Olá, {nome}! Nossa conversa com {empresa} ficou parada. Quando puder, é só responder aqui que continuamos de onde paramos."
 DEFAULT_HUMAN_MESSAGE = "Entendido. Vou encaminhar seu pedido para um atendente humano."
 
 VARIAVEL_DETALHAMENTO = "Detalhamento"
@@ -146,6 +149,7 @@ class Question(models.Model):
     )
     variavel = models.ForeignKey(Variavel, on_delete=models.PROTECT, related_name="perguntas", null=True, blank=True)
     obrigatoria = models.BooleanField(default=False)
+    horario_envio = models.TimeField(null=True, blank=True, help_text="Só no texto 'lembrete': horário exato (fuso do CRM) em que o lembrete é enviado depois de 24h sem resposta; vazio = assim que completar 24h.")
     envio_obrigatorio = models.BooleanField(default=False, help_text="Pergunta SPIN que deve ser enviada mesmo quando os dados necessários à classificação já foram capturados.")
     ordem = models.PositiveIntegerField(default=0, help_text="Posição no fluxo de perguntas, definida por arrastar-e-soltar na tela Roteiro; sem efeito nos textos fora do fluxo.")
     variavel_roteiro = models.ForeignKey(
@@ -312,6 +316,7 @@ class Lead(models.Model):
     )
     temperature = models.CharField(max_length=20, choices=TEMPERATURA_CHOICES, blank=True)
     last_contact = models.DateTimeField(null=True, blank=True)
+    lembrete_enviado_em = models.DateTimeField(null=True, blank=True, help_text="Confirmação (SENT) do lembrete de 24h sem resposta; depois dele o lead sem retorno é apagado em mais 24h.")
     next_action = models.CharField(max_length=250, blank=True)
     return_at = models.DateTimeField(null=True, blank=True)
     priority = models.CharField(max_length=10, choices=[("Alta", "Alta"), ("Média", "Média"), ("Baixa", "Baixa")], default="Média")
