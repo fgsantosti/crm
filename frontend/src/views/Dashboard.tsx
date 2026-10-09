@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Area, Company, Lead, Paginated } from '../types';
-import { DonutChart } from '../components/DonutChart';
 import { SkeletonTiles } from '../components/Skeleton';
-import { COLUMNS, URGENCIA_COR, columnOf, leadsVisiveisNoKanban, ordenarColuna } from './Leads';
+import { COLUMNS, columnOf, leadsVisiveisNoKanban, ordenarColuna } from './Leads';
+import { KanbanCardConteudo, KanbanColunaHead, TEMPERATURA_VISUAL } from '../components/KanbanVisual';
 import { DashboardAtendimentosDialog, type AtendimentoResumo } from '../components/DashboardAtendimentosDialog';
 import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
 
@@ -53,20 +53,20 @@ function rotuloMes(chave: string) {
 }
 
 const STATUS_DONUT: { key: keyof Resumo['status']; label: string; color: string }[] = [
-  { key: 'despachado', label: 'Despachado', color: 'var(--success)' },
   { key: 'automatico', label: 'Em triagem', color: '#2563EB' },
-  { key: 'aguardando', label: 'Triagem concluída', color: 'var(--warn)' },
-  { key: 'equipe', label: 'Com a equipe', color: 'var(--accent)' },
-  { key: 'desqualificado', label: 'Desqualificado/desconfiado', color: 'var(--muted)' },
+  { key: 'aguardando', label: 'Triagem concluída', color: '#C88A1E' },
+  { key: 'equipe', label: 'Com a equipe', color: '#D9531A' },
+  { key: 'despachado', label: 'Despachos', color: '#2F7D5C' },
   { key: 'especial', label: 'Outras situações', color: '#7C3AED' },
-  { key: 'nao_prosseguiram', label: 'Não prosseguiram', color: 'var(--muted-soft)' },
+  { key: 'desqualificado', label: 'Desqualificados', color: '#8C7B69' },
+  { key: 'nao_prosseguiram', label: 'Não prosseguiram', color: '#D8CBBB' },
 ];
 
-const DESFECHO_LABELS: { value: LeadConcluido['desfecho']; label: string; color: string }[] = [
-  { value: 'encerrado', label: 'Encerrado', color: 'var(--success)' },
-  { value: 'comprometido', label: 'Comprometido', color: 'var(--warn)' },
-  { value: 'falha', label: 'Falha durante o atendimento', color: 'var(--danger)' },
-  { value: 'bloqueado', label: 'Bloqueado', color: '#111111' },
+const DESFECHO_LABELS: { value: LeadConcluido['desfecho']; label: string; color: string; fundo: string; borda: string }[] = [
+  { value: 'encerrado', label: 'Encerrado', color: '#245F46', fundo: '#EEF7F1', borda: '#CFE5D8' },
+  { value: 'comprometido', label: 'Comprometido', color: '#7A4F0E', fundo: '#FCF4E4', borda: '#F1DDB8' },
+  { value: 'falha', label: 'Falha durante o atendimento', color: '#93251B', fundo: '#FBEDEA', borda: '#F0CFC9' },
+  { value: 'bloqueado', label: 'Bloqueado', color: '#241A12', fundo: '#F3EFEA', borda: '#DDD5CB' },
 ];
 
 export function Dashboard({ api, company, role }: { api: Api; company: Company; role: 'atendente' | 'empresa' }) {
@@ -158,7 +158,6 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   const byArea = resumo.por_area;
   const byOwner = resumo.por_owner.filter((o) => o.owner.toLowerCase().includes(buscaAtendente.toLowerCase()));
 
-  const pct = (n: number) => (total ? ` · ${Math.round((n / total) * 100)}%` : '');
 
   const kanbanLeads = useMemo(() => {
     const ids = new Set(resumo.atendimentos.map((lead) => lead.id));
@@ -169,16 +168,22 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
     setPopup({ title, description, atendimentos: resumo.atendimentos.filter(matches), desqualificacao });
   }
 
-  const cardsResumo = [
-    { title: 'Total de atendimentos', count: total, color: 'var(--ink)', description: 'Todos os atendimentos do período selecionado.', matches: (_lead: AtendimentoResumo) => true },
-    { title: 'Triagem concluída', count: concluidos, color: 'var(--warn)', description: 'Leads classificadas que aguardam a equipe: Qualificados e Atendimentos em espera.', matches: (lead: AtendimentoResumo) => lead.triagem_concluida },
-    { title: 'Em triagem', count: automatico, color: '#2563EB', description: 'Atendimentos aguardando a conclusão da triagem automática.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'automatico' },
-    { title: 'Com a equipe', count: humano, color: 'var(--accent)', description: 'Atendimentos em negociação com um atendente (incluindo os que estão em despacho) e os cadastrados manualmente pelos atendentes.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'equipe' },
-    { title: 'Despachos', count: resumo.status.despachado, color: 'var(--success)', description: 'Atendimentos concluídos e despachados pela equipe (encerrado, comprometido, falha ou bloqueado) no período selecionado, incluindo os acompanhamentos de Outras situações.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'despachado' },
-    { title: 'Desqualificados', count: desqualificados, color: 'var(--muted)', description: 'Leads classificados como desqualificados ou desconfiados.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'desqualificado', desqualificacao: true },
-    { title: 'Outras situações', count: resumo.status.especial, color: '#7C3AED', description: 'Acompanhamentos em aberto: clientes que já têm processo e querem acompanhá-lo (não são leads novos). Depois de despachados, passam a contar em Despachos.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'especial' },
-    { title: 'Não prosseguiram', count: resumo.nao_prosseguiram, color: 'var(--muted)', description: 'Triagens abandonadas que o sistema apagou automaticamente (sem resposta por 24h).', matches: (_lead: AtendimentoResumo) => false, semLista: true, detalhe: resumo.nao_prosseguiram === null ? 'indisponível com filtro de área/busca' : 'apagadas automaticamente' },
+  // Fluxo do atendimento: as 4 etapas em ordem (cada uma abre a lista) e as saídas do fluxo.
+  const etapasFluxo = [
+    { passo: 1, title: 'Em triagem', count: automatico, cor: '#2563EB', texto: 'O agente ainda está conduzindo a conversa.', description: 'Atendimentos aguardando a conclusão da triagem automática.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'automatico' },
+    { passo: 2, title: 'Triagem concluída', count: concluidos, cor: '#9A6614', texto: 'Classificadas, aguardando a equipe: Qualificados e Em espera.', description: 'Leads classificadas que aguardam a equipe: Qualificados e Atendimentos em espera.', matches: (lead: AtendimentoResumo) => lead.triagem_concluida },
+    { passo: 3, title: 'Com a equipe', count: humano, cor: '#C2461A', texto: 'Em negociação ou em despacho com um atendente.', description: 'Atendimentos em negociação com um atendente (incluindo os que estão em despacho) e os cadastrados manualmente pelos atendentes.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'equipe' },
+    { passo: 4, title: 'Despachos', count: resumo.status.despachado, cor: '#2F7D5C', texto: 'Concluídos pela equipe, com desfecho definido.', description: 'Atendimentos concluídos e despachados pela equipe (encerrado, comprometido, falha ou bloqueado) no período selecionado, incluindo os acompanhamentos de Outras situações.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'despachado' },
   ];
+  const saidasFluxo = [
+    { title: 'Desqualificados', count: desqualificados, cor: '#8C7B69', description: 'Leads classificados como desqualificados ou desconfiados.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'desqualificado', desqualificacao: true },
+    { title: 'Outras situações', count: resumo.status.especial, cor: '#7C3AED', description: 'Acompanhamentos em aberto: clientes que já têm processo e querem acompanhá-lo (não são leads novos). Depois de despachados, passam a contar em Despachos.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'especial', desqualificacao: false },
+  ];
+  const segmentos = STATUS_DONUT.map((st) => ({ ...st, value: resumo.status[st.key] })).filter((st) => st.value > 0);
+  const descricaoBarra = `Distribuição dos ${total} atendimentos: ${segmentos.map((st) => `${st.value} ${st.label.toLowerCase()}`).join(', ')}`;
+  const pctNum = (n: number) => (total ? `${Math.round((n / total) * 100)}%` : '0%');
+  const maxArea = Math.max(1, ...byArea.map(([, v]) => v));
+  const bloqueado = busy || !!erroPeriodo;
 
   // "Fechar lead": apaga o lead (e o histórico dele) no CRM. A próxima mensagem desse número
   // abre um lead novo e o agente recomeça a triagem do zero.
@@ -205,37 +210,39 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
     }
   }
 
+  const chevron = (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+
   return (
     <>
-      <header>
-        <small className="eyebrow">{role === 'empresa' ? 'Visão consolidada' : 'Visão geral'}</small>
-        <h1>{role === 'empresa' ? 'Dashboard da empresa' : 'Dashboard de atendimentos'}</h1>
-        <p>{role === 'empresa' ? 'Volume, status e desempenho de toda a equipe.' : 'Volume e status de qualificação da sua empresa.'}</p>
-      </header>
-
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
-
-      <section className="section">
-        <div className="section-head">
-          <h2>Filtros</h2>
-          <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-            {total} atendimento{total === 1 ? '' : 's'} no período selecionado
-          </span>
+      <header className="dash-head">
+        <div className="dash-head-top">
+          <div>
+            <small className="eyebrow">{role === 'empresa' ? 'Visão consolidada' : 'Visão geral'}</small>
+            <h1>{role === 'empresa' ? 'Dashboard da empresa' : 'Dashboard de atendimentos'}</h1>
+            <p>{role === 'empresa' ? 'Volume, status e desempenho de toda a equipe.' : 'Volume e status de qualificação da sua empresa.'}</p>
+          </div>
+          <div className="segmentado" role="group" aria-label="Período">
+            {([['30', 'Últimos 30 dias'], ['all', 'Todo o período'], ['custom', 'Período específico']] as const).map(([valor, rotulo]) => (
+              <button key={valor} type="button" aria-pressed={periodo === valor} onClick={() => setPeriodo(valor)}>
+                {rotulo}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="filters-bar">
+        <div className="dash-filtros">
           <label className="search-field">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-              <circle cx="7" cy="7" r="5" stroke="#8A7A68" strokeWidth="1.5" />
-              <path d="M11 11l3.5 3.5" stroke="#8A7A68" strokeWidth="1.5" strokeLinecap="round" />
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="7" cy="7" r="5" stroke="#6E5F4F" strokeWidth="1.5" />
+              <path d="M11 11l3.5 3.5" stroke="#6E5F4F" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
             <input placeholder="Buscar lead, contato ou responsável" aria-label="Buscar atendimentos" value={search} onChange={(e) => setSearch(e.target.value)} />
           </label>
           <label className="select-field">
-            <select value={area} onChange={(e) => setArea(e.target.value)}>
+            <select aria-label="Área" value={area} onChange={(e) => setArea(e.target.value)}>
               <option value="">Todas as áreas</option>
               {areas.map((a) => (
                 <option key={a.id} value={a.name}>
@@ -243,18 +250,8 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                 </option>
               ))}
             </select>
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-              <path d="M4 6l4 4 4-4" stroke="#8A7A68" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </label>
-          <label className="select-field">
-            <select aria-label="Período" value={periodo} onChange={(e) => setPeriodo(e.target.value as '30' | 'all' | 'custom')}>
-              <option value="30">Últimos 30 dias</option>
-              <option value="all">Todo o período</option>
-              <option value="custom">Período específico</option>
-            </select>
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-              <path d="M4 6l4 4 4-4" stroke="#8A7A68" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M4 6l4 4 4-4" stroke="#6E5F4F" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </label>
           {periodo === 'custom' && (
@@ -265,8 +262,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
           )}
           <button
             type="button"
-            className="secondary"
-            style={{ marginLeft: 'auto' }}
+            className="dash-link"
             onClick={() => {
               setSearch('');
               setArea('');
@@ -276,305 +272,332 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
               setDataFim(hoje);
             }}
           >
-            Limpar
+            Limpar filtros
           </button>
         </div>
-        {erroPeriodo && <p role="alert" className="error" style={{ marginTop: 12 }}>{erroPeriodo}</p>}
-      </section>
+        {erroPeriodo && <p role="alert" className="error" style={{ margin: 0 }}>{erroPeriodo}</p>}
+      </header>
 
-      <section className="section">
-        <h2>Resumo</h2>
-        {busy && !carregou ? (
-          <SkeletonTiles />
-        ) : (
-          <div className="tiles">
-            {cardsResumo.map((card) =>
-              card.semLista ? (
-                <div key={card.title} className="tile" title={card.description}>
-                  <small>{card.title}</small>
-                  <strong style={{ color: card.color }}>{card.count ?? '—'}</strong>
-                  {card.detalhe && <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>{card.detalhe}</small>}
-                </div>
-              ) : (
-                <button key={card.title} type="button" className="tile tile-button" disabled={busy || !!erroPeriodo} aria-haspopup="dialog" onClick={() => abrirPopup(card.title, card.description, card.matches, 'desqualificacao' in card && card.desqualificacao === true)}>
-                  <small>{card.title}</small>
-                  <strong style={{ color: card.color }}>{card.count}</strong>
-                  {card.detalhe && <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>{card.detalhe}</small>}
-                </button>
-              ),
-            )}
-          </div>
-        )}
-        {!busy && desqualificados > 0 && (
-          <p style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>
-            Leads desqualificados/desconfiados são classificados diretamente pelo agente e nunca entram no Kanban de atendimento humano.
-          </p>
-        )}
-      </section>
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
 
-      {role === 'empresa' && (
+      {busy && !carregou ? (
+        <SkeletonTiles />
+      ) : (
         <>
-          <div className="section-divider" />
-          <section className="section">
-            <div className="section-head">
-              <h2>Kanban de atendimento</h2>
-              <span style={{ fontSize: 12, color: 'var(--muted)' }}>Somente visualização — a empresa não assume nem contata leads.</span>
-            </div>
-            {!carregou ? (
-              <SkeletonTiles />
-            ) : (
-              <div className="kanban">
-                {COLUMNS.map((col) => {
-                  const items = ordenarColuna(col.key, kanbanLeads.filter((l) => columnOf(l) === col.key));
-                  return (
-                    <div key={col.key} className="kanban-col">
-                      <div className="kanban-col-head">
-                        <h3>{col.label}</h3>
-                        <small>
-                          {items.length} lead{items.length === 1 ? '' : 's'}
-                        </small>
-                      </div>
-                      <div className="kanban-col-body">
-                        {items.map((l) => (
-                          <article key={l.id} className="kanban-card" style={{ cursor: 'default', position: 'relative' }}>
-                            <button
-                              type="button"
-                              aria-label={`Fechar lead ${l.name || l.contact} (apaga e reinicia a triagem)`}
-                              title="Fechar lead (apaga e reinicia a triagem)"
-                              onClick={() => removerLead(l)}
-                              disabled={excluindoId === l.id}
-                              style={{
-                                position: 'absolute', top: 6, right: 6, width: 22, height: 22, padding: 0,
-                                borderRadius: '50%', background: 'var(--panel-muted)', color: 'var(--danger)',
-                                fontSize: 13, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              }}
-                            >
-                              ×
-                            </button>
-                            <span
-                              className="priority-dot"
-                              style={URGENCIA_COR[l.temperature] ? { background: URGENCIA_COR[l.temperature] } : undefined}
-                            />
-                            <div style={{ minWidth: 0, flex: 1 }}>
-                              <div style={{ fontWeight: 600, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {l.name || 'Sem nome informado'}
-                              </div>
-                              <small style={{ display: 'block', fontFamily: "'DM Mono',monospace" }}>{l.contact}</small>
-                              {col.key === 'novos' && <small style={{ display: 'block', marginTop: 4, color: 'var(--accent)' }}>etapa: {l.state}</small>}
-                              {l.temperature && col.key !== 'novos' && (
-                                <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>{l.temperature}</small>
-                              )}
-                              {l.owner && col.key !== 'qualificados' && (
-                                <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>owner: {l.owner_nome}</small>
-                              )}
-                            </div>
-                          </article>
-                        ))}
-                        {!items.length && <p style={{ fontSize: 12.5, color: 'var(--muted-soft)', padding: '4px 2px' }}>Nenhum lead aqui.</p>}
-                      </div>
-                    </div>
-                  );
-                })}
+          <section className="dash-panorama" aria-labelledby="dash-panorama-t">
+            <div className="dash-panorama-top">
+              <div>
+                <h2 id="dash-panorama-t">Atendimentos no período</h2>
+                <div className="dash-total">
+                  <strong>{total}</strong>
+                  {resumo.novas_hoje > 0 && <span>{resumo.novas_hoje} novo{resumo.novas_hoje === 1 ? '' : 's'} hoje</span>}
+                </div>
               </div>
+              <button type="button" className="dash-botao-claro" aria-haspopup="dialog" disabled={bloqueado} onClick={() => abrirPopup('Total de atendimentos', 'Todos os atendimentos do período selecionado.', () => true)}>
+                Ver todos
+                {chevron}
+              </button>
+            </div>
+            {total > 0 && (
+              <div className="dash-barra" role="img" aria-label={descricaoBarra}>
+                {segmentos.map((st) => (
+                  <span key={st.key} style={{ flexGrow: st.value, background: st.color }} title={`${st.label}: ${st.value} (${pctNum(st.value)})`} />
+                ))}
+              </div>
+            )}
+            <ul className="dash-legenda">
+              {STATUS_DONUT.map((st) => (
+                <li key={st.key}>
+                  <span className="dash-quadrado" style={{ background: st.color }} aria-hidden="true" />
+                  {st.label}
+                  <strong>{resumo.status[st.key]}</strong>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="section" aria-labelledby="dash-fluxo-t">
+            <div className="section-head">
+              <h2 id="dash-fluxo-t">Fluxo do atendimento</h2>
+              <span className="dash-nota">Clique em uma etapa para ver a lista</span>
+            </div>
+            <div className="dash-etapas">
+              {etapasFluxo.map((e) => (
+                <button key={e.title} type="button" className="dash-etapa" aria-haspopup="dialog" disabled={bloqueado} onClick={() => abrirPopup(e.title, e.description, e.matches)}>
+                  <span className="dash-etapa-titulo">
+                    <span className="dash-passo">{e.passo}</span>
+                    {e.title}
+                  </span>
+                  <span className="dash-etapa-valor">
+                    <strong style={{ color: e.cor }}>{e.count}</strong>
+                    <span>{pctNum(e.count)}</span>
+                  </span>
+                  <span className="dash-etapa-texto">{e.texto}</span>
+                  <span className="dash-etapa-seta">{chevron}</span>
+                </button>
+              ))}
+            </div>
+            <div className="dash-saidas">
+              <span className="dash-saidas-rotulo">Saíram do fluxo</span>
+              {saidasFluxo.map((sd) => (
+                <button key={sd.title} type="button" className="dash-saida" aria-haspopup="dialog" disabled={bloqueado} onClick={() => abrirPopup(sd.title, sd.description, sd.matches, sd.desqualificacao)}>
+                  <span className="dash-quadrado" style={{ background: sd.cor }} aria-hidden="true" />
+                  {sd.title}
+                  <strong>{sd.count}</strong>
+                </button>
+              ))}
+              <span className="dash-saida dash-saida-fixa" title="Triagens abandonadas que o sistema apagou automaticamente (sem resposta).">
+                <span className="dash-quadrado" style={{ background: '#D8CBBB' }} aria-hidden="true" />
+                Não prosseguiram
+                <strong>{resumo.nao_prosseguiram ?? '—'}</strong>
+                <small>{resumo.nao_prosseguiram === null ? 'indisponível com filtro de área/busca' : 'apagadas automaticamente'}</small>
+              </span>
+            </div>
+            {desqualificados > 0 && (
+              <p className="dash-nota" style={{ margin: 0 }}>
+                Leads desqualificados/desconfiados são classificados diretamente pelo agente e nunca entram no Kanban de atendimento humano.
+              </p>
             )}
           </section>
         </>
       )}
 
-      <div className="section-divider" />
-
-      <section className="section">
-        <h2>Status e distribuição</h2>
-        <div className="card-grid2">
-          <article className="card">
-            <h3>Status dos atendimentos</h3>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 28, alignItems: 'center', justifyContent: 'center' }}>
-              <DonutChart
-                segments={[
-                  ...STATUS_DONUT.map((st) => ({ label: st.label, value: resumo.status[st.key], color: st.color })),
-                ].filter((s) => s.value > 0)}
-              />
-              <ul className="legend">
-                {STATUS_DONUT.map((st) => (
-                  <li key={st.key}>
-                    <span className="legend-dot" style={{ background: st.color }} />
-                    <span style={{ flex: 1 }}>{st.label}</span>
-                    <strong style={{ fontFamily: "'DM Mono',monospace" }}>
-                      {resumo.status[st.key]}
-                      {pct(resumo.status[st.key])}
-                    </strong>
-                  </li>
-                ))}
-              </ul>
+      {role === 'empresa' && (
+        <section className="section" aria-labelledby="dash-kanban-t">
+          <div className="section-head">
+            <h2 id="dash-kanban-t">Kanban de atendimento</h2>
+            <span className="dash-nota">Somente visualização — a empresa não assume nem contata leads.</span>
+          </div>
+          {!carregou ? (
+            <SkeletonTiles />
+          ) : (
+            <div className="kb-board kb-board-compacto">
+              {COLUMNS.map((col) => {
+                const items = ordenarColuna(col.key, kanbanLeads.filter((l) => columnOf(l) === col.key));
+                return (
+                  <section key={col.key} className="kb-col" aria-label={col.label}>
+                    <KanbanColunaHead coluna={col} total={items.length} />
+                    <div className="kb-col-body">
+                      {items.map((l) => (
+                        <article key={l.id} className="kb-card kb-card-estatico">
+                          <button
+                            type="button"
+                            className="kb-fechar"
+                            aria-label={`Fechar lead ${l.name || l.contact} (apaga e reinicia a triagem)`}
+                            title="Fechar lead (apaga e reinicia a triagem)"
+                            onClick={() => removerLead(l)}
+                            disabled={excluindoId === l.id}
+                          >
+                            ×
+                          </button>
+                          <KanbanCardConteudo lead={l} coluna={col.key} compacto />
+                        </article>
+                      ))}
+                      {!items.length && <div className="kb-vazio">Nenhum lead aqui</div>}
+                    </div>
+                  </section>
+                );
+              })}
             </div>
-          </article>
+          )}
+        </section>
+      )}
 
-          <article className="card">
-            <h3>Atendimentos por área</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {byArea.map(([name, count]) => (
-                <div key={name} className="bar-row">
-                  <div className="bar-labels">
-                    <span>{name}</span>
-                    <strong style={{ fontFamily: "'DM Mono',monospace", color: 'var(--ink)' }}>
-                      {count}
-                      {pct(count)}
-                    </strong>
-                  </div>
-                  <div className="bar-track">
-                    <div className="bar-fill" style={{ width: `${total ? Math.round((count / total) * 100) : 0}%` }} />
-                  </div>
-                </div>
-              ))}
-              {!byArea.length && <p style={{ fontSize: 13 }}>Sem dados para o período.</p>}
-            </div>
-            <p style={{ marginTop: 'auto', fontSize: 12, color: 'var(--muted)' }}>Área vem da especialidade classificada pelo agente — ainda sem área quer dizer que a triagem não chegou lá.</p>
-          </article>
-        </div>
-      </section>
-
-      <div className="section-divider" />
-
-      <section className="section">
-        <h2>Tendência</h2>
-        <div className="card">
-          <h3>Atendimentos por mês</h3>
-          <div className="trend">
-            {monthly.map(([label, value]) => (
-              <div key={label} className="trend-col">
-                {value === maxMonthly && <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 12.5, fontWeight: 500 }}>{value}</span>}
-                <div className={`trend-bar ${value === maxMonthly ? 'active' : ''}`} style={{ height: Math.max(8, Math.round((value / maxMonthly) * 120)) }} />
-                <small>{label}</small>
+      <div className="dash-duas">
+        <article className="dash-card" aria-labelledby="dash-area-t">
+          <div>
+            <h2 id="dash-area-t">Atendimentos por área</h2>
+            <small>Especialidade classificada pelo agente</small>
+          </div>
+          <div className="dash-areas">
+            {byArea.map(([name, count]) => (
+              <div key={name} className="dash-area">
+                <span>{name}</span>
+                <span className="dash-trilho">
+                  <span style={{ width: `${Math.round((count / maxArea) * 100)}%`, background: name === 'Sem área' ? '#B9A893' : 'var(--accent)' }} />
+                </span>
+                <span className="dash-area-valor">
+                  <strong>{count}</strong> {pctNum(count)}
+                </span>
               </div>
             ))}
-            {!monthly.length && <p style={{ fontSize: 13 }}>Sem dados para o período.</p>}
+            {!byArea.length && <p className="dash-nota">Sem dados para o período.</p>}
           </div>
-        </div>
-      </section>
+          <p className="dash-nota" style={{ marginTop: 'auto' }}>Sem área: a triagem ainda não chegou à classificação.</p>
+        </article>
 
-      <div className="section-divider" />
+        <article className="dash-card" aria-labelledby="dash-mes-t">
+          <div>
+            <h2 id="dash-mes-t">Tendência</h2>
+            <small>Atendimentos por mês</small>
+          </div>
+          {monthly.length ? (
+            <div className="dash-meses" role="img" aria-label={`Atendimentos por mês: ${monthly.map(([m, v]) => `${m} ${v}`).join(', ')}`}>
+              {monthly.map(([label, value], i) => {
+                const atual = i === monthly.length - 1;
+                return (
+                  <div key={label} className="dash-mes">
+                    <span className={atual ? 'dash-mes-valor atual' : 'dash-mes-valor'}>{value}</span>
+                    <span className={atual ? 'dash-mes-barra atual' : 'dash-mes-barra'} style={{ height: Math.max(6, Math.round((value / maxMonthly) * 150)) }} />
+                    <small>{label}</small>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="dash-nota">Sem dados para o período.</p>
+          )}
+        </article>
+      </div>
 
-      <section className="section">
-        <div className="section-head">
-          <h2>Concluído</h2>
-          <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-            {totalDespachados} lead{totalDespachados === 1 ? '' : 's'} despachado{totalDespachados === 1 ? '' : 's'} pela equipe
-          </span>
-        </div>
-        {busy && !carregou ? (
-          <SkeletonTiles />
-        ) : (
-          <div className="tiles">
+      <section className="dash-card dash-card-tabela" aria-labelledby="dash-conc-t">
+        <div className="dash-card-topo">
+          <div className="dash-card-cab">
+            <div>
+              <h2 id="dash-conc-t">Concluído</h2>
+              <small>
+                {totalDespachados} lead{totalDespachados === 1 ? '' : 's'} despachado{totalDespachados === 1 ? '' : 's'} pela equipe
+              </small>
+            </div>
+            {totalDespachados > 0 && (
+              <div className="segmentado" role="group" aria-label="Filtrar concluídos">
+                <button type="button" aria-pressed={filtroConcluidos === 'sucesso'} onClick={() => setFiltroConcluidos('sucesso')}>
+                  Com sucesso · {resumo.sucesso}
+                </button>
+                <button type="button" aria-pressed={filtroConcluidos === 'todos'} onClick={() => setFiltroConcluidos('todos')}>
+                  Todos · {resumo.concluidos.length}
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="dash-desfechos">
             {concluidosPorDesfecho.map((d) => (
-              <button key={d.value} type="button" className="tile tile-button" disabled={busy || !!erroPeriodo} aria-haspopup="dialog" onClick={() => abrirPopup(d.label, 'Atendimentos com este desfecho no período selecionado.', (lead) => lead.desfecho === d.value)}>
+              <button
+                key={d.value}
+                type="button"
+                className="dash-desfecho"
+                style={{ background: d.fundo, borderColor: d.borda, color: d.color }}
+                disabled={bloqueado}
+                aria-haspopup="dialog"
+                onClick={() => abrirPopup(d.label, 'Atendimentos com este desfecho no período selecionado.', (lead) => lead.desfecho === d.value)}
+              >
                 <small>{d.label}</small>
-                <strong style={{ color: d.color }}>{d.count}</strong>
+                <strong>{d.count}</strong>
               </button>
             ))}
           </div>
-        )}
-        {!busy && !totalDespachados && <p style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>Nenhum atendimento despachado no período selecionado.</p>}
-        {totalDespachados > 0 && (
-          <div className="panel" style={{ marginTop: 16 }}>
-            <div className="panel-toolbar">
-              <h2>Atendimentos concluídos</h2>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button type="button" className={filtroConcluidos === 'sucesso' ? undefined : 'secondary'} onClick={() => setFiltroConcluidos('sucesso')}>
-                  Com sucesso ({resumo.sucesso})
-                </button>
-                <button type="button" className={filtroConcluidos === 'todos' ? undefined : 'secondary'} onClick={() => setFiltroConcluidos('todos')}>
-                  Todos ({resumo.concluidos.length})
-                </button>
-              </div>
-            </div>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Lead</th>
-                    <th>Área</th>
-                    <th>Temperatura</th>
-                    <th>Prioridade</th>
-                    <th>Desfecho</th>
-                    <th>Atendente</th>
-                    <th>Concluído em</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {listaConcluidos.map((c) => {
-                    const d = corDesfecho(c.desfecho);
-                    return (
-                      <tr key={c.id}>
-                        <td>
-                          <strong style={{ display: 'block' }}>{c.name || 'Sem nome informado'}</strong>
-                          <small style={{ fontFamily: "'DM Mono',monospace", color: 'var(--muted)' }}>
-                            {c.contact}
-                            {c.origem_manual ? ' · cadastro manual' : ''}
-                          </small>
-                        </td>
-                        <td>{c.especialidade || '—'}</td>
-                        <td>{c.temperature || '—'}</td>
-                        <td>{c.priority || '—'}</td>
-                        <td style={{ color: d?.color, fontWeight: 600 }}>{d?.label || c.desfecho}</td>
-                        <td>{c.owner || '—'}</td>
-                        <td style={{ fontFamily: "'DM Mono',monospace" }}>{c.concluido_em ? new Date(c.concluido_em).toLocaleString('pt-BR') : '—'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+        </div>
+        {totalDespachados > 0 ? (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Lead</th>
+                  <th>Área</th>
+                  <th>Temperatura</th>
+                  <th>Prioridade</th>
+                  <th>Desfecho</th>
+                  <th>Atendente</th>
+                  <th>Concluído em</th>
+                </tr>
+              </thead>
+              <tbody>
+                {listaConcluidos.map((c) => {
+                  const d = corDesfecho(c.desfecho);
+                  return (
+                    <tr key={c.id}>
+                      <td>
+                        <strong style={{ display: 'block' }}>{c.name || 'Sem nome informado'}</strong>
+                        <small style={{ fontFamily: "'DM Mono',monospace", color: 'var(--muted)' }}>
+                          {c.contact}
+                          {c.origem_manual ? ' · cadastro manual' : ''}
+                        </small>
+                      </td>
+                      <td>{c.especialidade || '—'}</td>
+                      <td>
+                        {c.temperature ? (
+                          <span className="dash-temp">
+                            <span className="kb-dot" style={{ background: TEMPERATURA_VISUAL[c.temperature]?.ponto ?? '#B9A893' }} aria-hidden="true" />
+                            {c.temperature}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td>{c.priority || '—'}</td>
+                      <td>{d ? <span className="dash-selo" style={{ background: d.fundo, color: d.color }}>{d.label}</span> : c.desfecho}</td>
+                      <td>{c.owner || '—'}</td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 12.5 }}>{c.concluido_em ? new Date(c.concluido_em).toLocaleString('pt-BR') : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
             {!listaConcluidos.length && <div className="empty">Nenhum atendimento concluído com sucesso no período selecionado.</div>}
           </div>
+        ) : (
+          !busy && <p className="dash-nota" style={{ padding: '0 26px 22px', margin: 0 }}>Nenhum atendimento despachado no período selecionado.</p>
         )}
       </section>
 
       {role === 'empresa' && (
-        <>
-          <div className="section-divider" />
-          <section className="section">
-            <div className="section-head">
-              <h2>Desempenho por atendente</h2>
-              <label className="search-field" style={{ flex: '0 1 220px' }}>
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-                  <circle cx="7" cy="7" r="5" stroke="#8A7A68" strokeWidth="1.5" />
-                  <path d="M11 11l3.5 3.5" stroke="#8A7A68" strokeWidth="1.5" strokeLinecap="round" />
+        <section className="dash-card dash-card-tabela" aria-labelledby="dash-desemp-t">
+          <div className="dash-card-topo">
+            <div className="dash-card-cab">
+              <h2 id="dash-desemp-t">Desempenho por atendente</h2>
+              <label className="search-field dash-busca-atendente">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <circle cx="7" cy="7" r="5" stroke="#6E5F4F" strokeWidth="1.5" />
+                  <path d="M11 11l3.5 3.5" stroke="#6E5F4F" strokeWidth="1.5" strokeLinecap="round" />
                 </svg>
-                <input placeholder="Buscar atendente" aria-label="Buscar atendente" value={buscaAtendente} onChange={(e) => setBuscaAtendente(e.target.value)} style={{ width: 220 }} />
+                <input placeholder="Buscar atendente" aria-label="Buscar atendente" value={buscaAtendente} onChange={(e) => setBuscaAtendente(e.target.value)} />
               </label>
             </div>
-            <div className="panel">
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Atendente</th>
-                      <th>Atendimentos</th>
-                      <th>Despachados</th>
-                      <th>Com sucesso</th>
-                      <th>Taxa de conclusão</th>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Atendente</th>
+                  <th style={{ textAlign: 'right' }}>Atendimentos</th>
+                  <th style={{ textAlign: 'right' }}>Despachados</th>
+                  <th style={{ textAlign: 'right' }}>Com sucesso</th>
+                  <th style={{ width: 260 }}>Taxa de conclusão</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byOwner.map((o) => {
+                  const rate = o.atendimentos ? Math.round((o.concluidos / o.atendimentos) * 100) : 0;
+                  const bom = rate >= 50;
+                  return (
+                    <tr key={o.owner_id}>
+                      <td>
+                        <span className="dash-pessoa">
+                          <span className="kb-avatar" aria-hidden="true">{o.owner.trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase()}</span>
+                          <strong>{o.owner}</strong>
+                        </span>
+                      </td>
+                      <td className="dash-num">{o.atendimentos}</td>
+                      <td className="dash-num">{o.concluidos}</td>
+                      <td className="dash-num">{o.sucesso}</td>
+                      <td>
+                        <span className="dash-taxa">
+                          <span className="dash-trilho">
+                            <span style={{ width: `${rate}%`, background: bom ? 'var(--success)' : '#C88A1E' }} />
+                          </span>
+                          <strong style={{ color: bom ? '#245F46' : '#7A4F0E' }}>{rate}%</strong>
+                        </span>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {byOwner.map((o) => {
-                      const rate = o.atendimentos ? Math.round((o.concluidos / o.atendimentos) * 100) : 0;
-                      return (
-                        <tr key={o.owner_id}>
-                          <td style={{ fontWeight: 600 }}>{o.owner}</td>
-                          <td style={{ fontFamily: "'DM Mono',monospace" }}>{o.atendimentos}</td>
-                          <td style={{ fontFamily: "'DM Mono',monospace" }}>{o.concluidos}</td>
-                          <td style={{ fontFamily: "'DM Mono',monospace" }}>{o.sucesso}</td>
-                          <td style={{ color: rate >= 50 ? 'var(--success)' : 'var(--warn)', fontWeight: 600 }}>{rate}%</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              {!byOwner.length && <div className="empty">{busy ? 'Carregando…' : 'Sem dados de equipe para o período.'}</div>}
-            </div>
-          </section>
-        </>
+                  );
+                })}
+              </tbody>
+            </table>
+            {!byOwner.length && <div className="empty">{busy ? 'Carregando…' : 'Sem dados de equipe para o período.'}</div>}
+          </div>
+        </section>
       )}
       {popup && <DashboardAtendimentosDialog {...popup} historico={company.coletar_historico_conversa ? { api, companyId: company.id } : undefined} onClose={() => setPopup(null)} />}
     </>

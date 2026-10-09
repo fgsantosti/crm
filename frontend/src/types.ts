@@ -43,6 +43,8 @@ export type Lead = {
   temperature: 'Qualificado' | 'Quente' | 'Desconfiado' | 'Frio' | 'Desqualificado' | '';
   urgencia_rank: number;
   last_contact: string | null;
+  /** Lembrete de 24h sem resposta confirmado (SENT); null se não houve. */
+  lembrete_enviado_em?: string | null;
   next_action: string;
   return_at: string | null;
   priority: 'Alta' | 'Média' | 'Baixa';

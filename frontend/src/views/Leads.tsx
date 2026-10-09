@@ -7,6 +7,7 @@ import { AreaSelect } from '../components/AreaSelect';
 import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
 import { IconeWhatsapp } from '../components/Icones';
 import { CadastroAtendimentoDialog, Overlay, TriagemResumo } from '../components/CadastroAtendimento';
+import { KanbanCardConteudo, KanbanColunaHead, TEMPERATURA_VISUAL } from '../components/KanbanVisual';
 
 // Mesma ordem de services.FAIXAS_URGENCIA no backend (menos urgente -> mais urgente).
 export const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Frio: 2, Qualificado: 3, Quente: 4 };
@@ -21,12 +22,12 @@ const DESFECHO_OPTIONS: { value: 'encerrado' | 'comprometido' | 'falha'; label: 
 
 export type ColumnKey = 'novos' | 'qualificados' | 'espera' | 'negociacao' | 'despacho';
 
-export const COLUMNS: { key: ColumnKey; label: string }[] = [
-  { key: 'novos', label: 'Novos Leads' },
-  { key: 'qualificados', label: 'Qualificados' },
-  { key: 'espera', label: 'Atendimentos em espera' },
-  { key: 'negociacao', label: 'Em negociação' },
-  { key: 'despacho', label: 'Despacho' },
+export const COLUMNS: { key: ColumnKey; label: string; cor: string; regra: string }[] = [
+  { key: 'novos', label: 'Novos Leads', cor: '#2563EB', regra: 'Triagem do agente em andamento' },
+  { key: 'qualificados', label: 'Qualificados', cor: '#C88A1E', regra: 'Maior urgência primeiro' },
+  { key: 'espera', label: 'Atendimentos em espera', cor: '#C88A1E', regra: 'Maior urgência primeiro' },
+  { key: 'negociacao', label: 'Em negociação', cor: '#D9531A', regra: 'Ordem de chegada' },
+  { key: 'despacho', label: 'Despacho', cor: '#2F7D5C', regra: 'Aguardando “Enviar Despachos”' },
 ];
 
 export function columnOf(l: Lead): ColumnKey {
@@ -317,9 +318,9 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
     <>
       <header className="page-header">
         <div>
-          <small className="eyebrow">Relacionamento · WhatsApp</small>
-          <h1>Seus leads, próximos passos claros.</h1>
-          <p>Acompanhe a qualificação de cada contato, etapa por etapa.</p>
+          <small className="eyebrow">Fluxo de atendimento</small>
+          <h1>Central de leads</h1>
+          <p>{podeAtender ? 'Arraste o card para a próxima etapa. Leads de outro atendente ficam travados.' : 'Acompanhe a qualificação de cada contato, etapa por etapa.'}</p>
         </div>
       </header>
 
@@ -329,53 +330,75 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
         </p>
       )}
 
-      <section className="panel" style={{ padding: 0 }}>
-        <div className="panel-toolbar">
-          <h2>Central de leads</h2>
-          <div className="leads-toolbar-controls">
-            <label className="leads-visibility-toggle">
-              <input type="checkbox" checked={mostrarNovasLeads} onChange={(e) => setMostrarNovasLeads(e.target.checked)} />
-              Mostrar novas leads
-            </label>
+      <div className="kb-controles">
+          <label className="kb-toggle">
+            <input type="checkbox" checked={mostrarNovasLeads} onChange={(e) => setMostrarNovasLeads(e.target.checked)} />
+            Mostrar novas leads
+          </label>
+          <label className="search-field kb-busca">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="7" cy="7" r="5" stroke="#6E5F4F" strokeWidth="1.5" />
+              <path d="M11 11l3.5 3.5" stroke="#6E5F4F" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
             <input placeholder="Buscar nome ou telefone" aria-label="Buscar leads" value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
+          </label>
         </div>
-        {busy && !visible.length ? (
-          <div style={{ padding: '18px 24px' }}>
-            <SkeletonCards count={visibleColumns.length} height={90} />
-          </div>
-        ) : (
-          <div className="kanban">
-            {visibleColumns.map((col) => {
-              const items = orderedItems(col.key);
-              return (
-                <div
-                  key={col.key}
-                  className="kanban-col"
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    // Lê o id direto do dataTransfer (sessão nativa de drag), não do state
-                    // dragId por closure -- mais robusto contra timing entre o React re-renderizar
-                    // e o navegador disparar o evento.
-                    const sourceId = e.dataTransfer.getData('text/plain');
-                    const lead = leads.find((l) => l.id === sourceId) || null;
-                    onDropEm(col.key, lead);
-                  }}
-                >
-                  <div className="kanban-col-head">
-                    <h3>{col.label}</h3>
-                    <small>
-                      {items.length} lead{items.length === 1 ? '' : 's'}
-                    </small>
-                  </div>
-                  <div className="kanban-col-body">
-                    {items.map((l) => {
-                      const bloqueado = ehDeOutroOwner(l);
-                      return (
+
+      <ol className="kb-trilha" aria-label="Etapas do fluxo">
+        {visibleColumns.map((col, i) => (
+          <li key={col.key}>
+            <span className="kb-trilha-etapa">
+              <span className="kb-dot" style={{ background: col.cor }} aria-hidden="true" />
+              {col.label}
+              <strong>{orderedItems(col.key).length}</strong>
+            </span>
+            {i < visibleColumns.length - 1 && (
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M6 4l4 4-4 4" stroke="#A8957F" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </li>
+        ))}
+        <li className="kb-legenda" aria-label="Temperatura">
+          {Object.entries(TEMPERATURA_VISUAL).map(([nome, v]) => (
+            <span key={nome}>
+              <span className="kb-dot" style={{ background: v.ponto }} aria-hidden="true" />
+              {nome}
+            </span>
+          ))}
+        </li>
+      </ol>
+
+      {busy && !visible.length ? (
+        <SkeletonCards count={visibleColumns.length} height={90} />
+      ) : (
+        <div className="kb-board">
+          {visibleColumns.map((col) => {
+            const items = orderedItems(col.key);
+            return (
+              <section
+                key={col.key}
+                className={`kb-col${dragId ? ' kb-col-alvo' : ''}`}
+                aria-label={col.label}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  // Lê o id direto do dataTransfer (sessão nativa de drag), não do state
+                  // dragId por closure -- mais robusto contra timing entre o React re-renderizar
+                  // e o navegador disparar o evento.
+                  const sourceId = e.dataTransfer.getData('text/plain');
+                  const lead = leads.find((l) => l.id === sourceId) || null;
+                  onDropEm(col.key, lead);
+                }}
+              >
+                <KanbanColunaHead coluna={col} total={items.length} />
+                <div className="kb-col-body">
+                  {items.map((l) => {
+                    const bloqueado = ehDeOutroOwner(l);
+                    return (
                       <article
                         key={l.id}
-                        className={`kanban-card${selected?.id === l.id ? ' selected' : ''}`}
+                        className={`kb-card${selected?.id === l.id ? ' selected' : ''}${bloqueado ? ' kb-card-bloqueado' : ''}${dragId === l.id ? ' kb-card-arrastando' : ''}`}
                         draggable={podeArrastar(l)}
                         onDragStart={(e) => {
                           e.dataTransfer.effectAllowed = 'move';
@@ -394,66 +417,37 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
                             setSelected(l);
                           }
                         }}
-                        style={{
-                          opacity: dragId === l.id ? 0.5 : bloqueado ? 0.45 : 1,
-                          cursor: bloqueado ? 'not-allowed' : podeArrastar(l) ? 'grab' : undefined,
-                          filter: bloqueado ? 'grayscale(1)' : undefined,
-                        }}
+                        style={{ cursor: bloqueado ? 'not-allowed' : podeArrastar(l) ? 'grab' : undefined }}
                       >
-                        <span
-                          className={`priority-dot${col.key === 'qualificados' || col.key === 'espera' || col.key === 'negociacao' || col.key === 'despacho' ? '' : ` priority-dot-${l.priority === 'Alta' ? 'alta' : l.priority === 'Média' ? 'media' : 'baixa'}`}`}
-                          style={URGENCIA_COR[l.temperature] ? { background: URGENCIA_COR[l.temperature] } : undefined}
-                        />
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ fontWeight: 600, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {l.name || 'Sem nome informado'}
-                          </div>
-                          <small style={{ display: 'block', fontFamily: "'DM Mono',monospace" }}>{l.contact}</small>
-                          {col.key === 'novos' && <small style={{ display: 'block', marginTop: 4, color: 'var(--accent)' }}>etapa: {l.state}</small>}
-                          {l.demand && col.key !== 'novos' && (
-                            <small style={{ display: 'block', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {l.demand}
-                            </small>
-                          )}
-                          {(col.key === 'qualificados' || col.key === 'espera' || col.key === 'negociacao' || col.key === 'despacho') && l.temperature && (
-                            <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>{l.temperature}</small>
-                          )}
-                          {l.owner && (col.key === 'negociacao' || col.key === 'despacho') && (
-                            <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>Responsável: {l.owner_nome}</small>
-                          )}
-                        </div>
+                        <KanbanCardConteudo lead={l} coluna={col.key} meId={me.id} />
                       </article>
-                      );
-                    })}
-                    {!items.length && <p style={{ fontSize: 12.5, color: 'var(--muted-soft)', padding: '4px 2px' }}>Nenhum lead aqui.</p>}
-                  </div>
-                  {col.key === 'despacho' && minhasNoDespacho.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={enviarDespachos}
-                      disabled={enviandoDespachos}
-                      style={{ margin: '10px 14px 14px', background: 'var(--success)', borderColor: 'var(--success)' }}
-                    >
-                      {enviandoDespachos && <Spinner />}
-                      Enviar Despachos
-                    </button>
-                  )}
+                    );
+                  })}
+                  {!items.length && <div className="kb-vazio">{podeAtender && col.key !== 'novos' ? 'Arraste um card para cá' : 'Nenhum lead aqui'}</div>}
                 </div>
-              );
-            })}
-          </div>
-        )}
-        {!busy && !visible.length && (
-          <div className="empty">
-            {'Nenhum lead nesta visão. Os contatos aparecerão ao receber mensagens pela integração.'}
-          </div>
-        )}
-        <p className="table-note">
-          {desqualificadosCount > 0 && (
-            <>{desqualificadosCount} lead{desqualificadosCount === 1 ? '' : 's'} desqualificado{desqualificadosCount === 1 ? '' : 's'}/desconfiado{desqualificadosCount === 1 ? '' : 's'} (fora do fluxo, ver Dashboard)</>
-          )}
+                {col.key === 'despacho' && minhasNoDespacho.length > 0 && (
+                  <button type="button" className="kb-enviar" onClick={enviarDespachos} disabled={enviandoDespachos}>
+                    {enviandoDespachos ? (
+                      <Spinner />
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M2.5 8.5l3.5 3.5 7.5-8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                    Enviar Despachos ({minhasNoDespacho.length})
+                  </button>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      )}
+      {!busy && !visible.length && <div className="empty">Nenhum lead nesta visão. Os contatos aparecerão ao receber mensagens pela integração.</div>}
+      {desqualificadosCount > 0 && (
+        <p className="table-note" style={{ padding: 0 }}>
+          {desqualificadosCount} lead{desqualificadosCount === 1 ? '' : 's'} desqualificado{desqualificadosCount === 1 ? '' : 's'}/desconfiado{desqualificadosCount === 1 ? '' : 's'} fora do fluxo — veja no Dashboard.
         </p>
-      </section>
+      )}
 
       {selected && (
         <section className="panel detail">

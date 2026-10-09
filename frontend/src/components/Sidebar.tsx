@@ -5,6 +5,20 @@ import type { Api } from '../api';
 import type { Company, Me } from '../types';
 import { confirmarSaida, useConfirmar } from './ConfirmDialog';
 
+// Ícones de traço da navegação (cor = texto do item, respeita a identidade visual da empresa).
+const ICONES: Record<string, React.ReactNode> = {
+  dashboard: <><rect x="2" y="2" width="5" height="6" rx="1.5" /><rect x="9" y="2" width="5" height="4" rx="1.5" /><rect x="2" y="10" width="5" height="4" rx="1.5" /><rect x="9" y="8" width="5" height="6" rx="1.5" /></>,
+  leads: <><rect x="2" y="2.5" width="3.2" height="11" rx="1" /><rect x="6.4" y="2.5" width="3.2" height="7" rx="1" /><rect x="10.8" y="2.5" width="3.2" height="9" rx="1" /></>,
+  especiais: <><circle cx="8" cy="8" r="6" /><path d="M8 5v3l2 1.5" strokeLinecap="round" /></>,
+  pendencias: <><path d="M8 2.5l5.5 10h-11z" strokeLinejoin="round" /><path d="M8 6.5v2.5" strokeLinecap="round" /></>,
+  humano: <><circle cx="8" cy="5.5" r="2.5" /><path d="M3 13.5c.8-2.4 2.7-3.6 5-3.6s4.2 1.2 5 3.6" strokeLinecap="round" /></>,
+  blacklist: <><circle cx="8" cy="8" r="6" /><path d="M4 12L12 4" /></>,
+  roteiro: <path d="M3 3h10M3 8h10M3 13h6" strokeLinecap="round" />,
+  'dados-empresa': <><rect x="3" y="2" width="10" height="12" rx="2" /><path d="M6 6h4M6 9h4" strokeLinecap="round" /></>,
+  equipe: <><circle cx="6" cy="6" r="2.5" /><path d="M1.5 13c.6-2.3 2.4-3.5 4.5-3.5s3.9 1.2 4.5 3.5" strokeLinecap="round" /><circle cx="11.5" cy="5.5" r="2" /></>,
+  identidade: <><circle cx="8" cy="8" r="6" /><circle cx="6" cy="6.5" r=".6" /><circle cx="10" cy="6.5" r=".6" /><circle cx="8" cy="10.5" r=".6" /></>,
+};
+
 export type View = 'dashboard' | 'leads' | 'especiais' | 'pendencias' | 'humano' | 'blacklist' | 'roteiro' | 'dados-empresa' | 'equipe';
 
 export function Sidebar({
@@ -90,7 +104,10 @@ export function Sidebar({
       <nav>
         {items.map((it) => (
           <button key={it.key} type="button" className={view === it.key ? 'nav-active' : ''} onClick={() => (it.key === 'identidade' ? onOpenIdentidade() : onNavigate(it.key))}>
-            <span>{it.label}</span>
+            <span className="nav-label">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">{ICONES[it.key]}</svg>
+              {it.label}
+            </span>
             {it.count !== undefined && <span className="nav-count">{it.count}</span>}
           </button>
         ))}
