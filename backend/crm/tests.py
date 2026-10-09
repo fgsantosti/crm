@@ -3820,3 +3820,22 @@ class MotivoDaDesqualificacaoTests(TestCase):
             "4": "Classificado como Desconfiado (média 4.2)",
             "5": "",
         })
+
+
+class OrcamentoDeTempoDaVozTests(TestCase):
+    """A geração de voz (TTS) precisa terminar, ou cair para texto, antes de a ponte desistir do /incoming/ (19 s)."""
+    def test_limite_de_sintese_deixa_folga_para_o_texto_de_reserva(self):
+        from . import audio
+        self.assertLessEqual(audio.TTS_TIMEOUT_SEGUNDOS, 8)
+        # síntese + conversão (no máximo o mesmo limite, já descontado o tempo da síntese) + folga de processamento
+        self.assertLess(audio.TTS_TIMEOUT_SEGUNDOS * 2 + 2, 19)
+
+    def test_voz_que_trava_cai_para_texto_sem_derrubar_a_resposta(self):
+        from unittest import mock
+        from .services import aplicar_audio
+        company = Company.objects.create(name="Voz Teste", allow_transcription=True, mensagens_audio=True)
+        resultado = {"action": "TEXTO", "content": "Resposta livre longa", "question_id": "conversa", "event_id": None}
+        with mock.patch("crm.audio.gerar_tts", side_effect=TimeoutError()):
+            r = aplicar_audio(company, resultado, lambda p: p)
+        self.assertEqual((r["action"], r["content"]), ("TEXTO", "Resposta livre longa"))
+        self.assertIn("audio_erro", r)

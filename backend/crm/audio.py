@@ -13,7 +13,10 @@ from django.core.files.storage import default_storage
 
 MAX_GRAVACAO_BYTES = 5 * 1024 * 1024
 MAX_GRAVACAO_SEGUNDOS = 120
-TTS_TIMEOUT_SEGUNDOS = 12
+# Orçamento de tempo da resposta: a ponte espera o /incoming/ por até 19 s (core.TIMEOUT_INCOMING_MS) e o
+# texto de reserva (quando a voz falha) precisa chegar antes disso: síntese <= 8 s + conversão para OGG
+# no restante (mín. 1 s) + o resto do processamento ficam bem abaixo desse limite.
+TTS_TIMEOUT_SEGUNDOS = 8
 
 
 class AudioInvalido(Exception):
