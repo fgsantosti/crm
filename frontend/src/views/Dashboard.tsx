@@ -384,6 +384,77 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
       <div className="section-divider" />
 
       <section className="section">
+        <h2>Status e distribuição</h2>
+        <div className="card-grid2">
+          <article className="card">
+            <h3>Status dos atendimentos</h3>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 28, alignItems: 'center', justifyContent: 'center' }}>
+              <DonutChart
+                segments={[
+                  ...STATUS_DONUT.map((st) => ({ label: st.label, value: resumo.status[st.key], color: st.color })),
+                ].filter((s) => s.value > 0)}
+              />
+              <ul className="legend">
+                {STATUS_DONUT.map((st) => (
+                  <li key={st.key}>
+                    <span className="legend-dot" style={{ background: st.color }} />
+                    <span style={{ flex: 1 }}>{st.label}</span>
+                    <strong style={{ fontFamily: "'DM Mono',monospace" }}>
+                      {resumo.status[st.key]}
+                      {pct(resumo.status[st.key])}
+                    </strong>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </article>
+
+          <article className="card">
+            <h3>Atendimentos por área</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {byArea.map(([name, count]) => (
+                <div key={name} className="bar-row">
+                  <div className="bar-labels">
+                    <span>{name}</span>
+                    <strong style={{ fontFamily: "'DM Mono',monospace", color: 'var(--ink)' }}>
+                      {count}
+                      {pct(count)}
+                    </strong>
+                  </div>
+                  <div className="bar-track">
+                    <div className="bar-fill" style={{ width: `${total ? Math.round((count / total) * 100) : 0}%` }} />
+                  </div>
+                </div>
+              ))}
+              {!byArea.length && <p style={{ fontSize: 13 }}>Sem dados para o período.</p>}
+            </div>
+            <p style={{ marginTop: 'auto', fontSize: 12, color: 'var(--muted)' }}>Área vem da especialidade classificada pelo agente — ainda sem área quer dizer que a triagem não chegou lá.</p>
+          </article>
+        </div>
+      </section>
+
+      <div className="section-divider" />
+
+      <section className="section">
+        <h2>Tendência</h2>
+        <div className="card">
+          <h3>Atendimentos por mês</h3>
+          <div className="trend">
+            {monthly.map(([label, value]) => (
+              <div key={label} className="trend-col">
+                {value === maxMonthly && <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 12.5, fontWeight: 500 }}>{value}</span>}
+                <div className={`trend-bar ${value === maxMonthly ? 'active' : ''}`} style={{ height: Math.max(8, Math.round((value / maxMonthly) * 120)) }} />
+                <small>{label}</small>
+              </div>
+            ))}
+            {!monthly.length && <p style={{ fontSize: 13 }}>Sem dados para o período.</p>}
+          </div>
+        </div>
+      </section>
+
+      <div className="section-divider" />
+
+      <section className="section">
         <div className="section-head">
           <h2>Concluído</h2>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>
@@ -456,77 +527,6 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
             {!listaConcluidos.length && <div className="empty">Nenhum atendimento concluído com sucesso no período selecionado.</div>}
           </div>
         )}
-      </section>
-
-      <div className="section-divider" />
-
-      <section className="section">
-        <h2>Status e distribuição</h2>
-        <div className="card-grid2">
-          <article className="card">
-            <h3>Status dos atendimentos</h3>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 28, alignItems: 'center', justifyContent: 'center' }}>
-              <DonutChart
-                segments={[
-                  ...STATUS_DONUT.map((st) => ({ label: st.label, value: resumo.status[st.key], color: st.color })),
-                ].filter((s) => s.value > 0)}
-              />
-              <ul className="legend">
-                {STATUS_DONUT.map((st) => (
-                  <li key={st.key}>
-                    <span className="legend-dot" style={{ background: st.color }} />
-                    <span style={{ flex: 1 }}>{st.label}</span>
-                    <strong style={{ fontFamily: "'DM Mono',monospace" }}>
-                      {resumo.status[st.key]}
-                      {pct(resumo.status[st.key])}
-                    </strong>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </article>
-
-          <article className="card">
-            <h3>Atendimentos por área</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {byArea.map(([name, count]) => (
-                <div key={name} className="bar-row">
-                  <div className="bar-labels">
-                    <span>{name}</span>
-                    <strong style={{ fontFamily: "'DM Mono',monospace", color: 'var(--ink)' }}>
-                      {count}
-                      {pct(count)}
-                    </strong>
-                  </div>
-                  <div className="bar-track">
-                    <div className="bar-fill" style={{ width: `${total ? Math.round((count / total) * 100) : 0}%` }} />
-                  </div>
-                </div>
-              ))}
-              {!byArea.length && <p style={{ fontSize: 13 }}>Sem dados para o período.</p>}
-            </div>
-            <p style={{ marginTop: 'auto', fontSize: 12, color: 'var(--muted)' }}>Área vem da especialidade classificada pelo agente — ainda sem área quer dizer que a triagem não chegou lá.</p>
-          </article>
-        </div>
-      </section>
-
-      <div className="section-divider" />
-
-      <section className="section">
-        <h2>Tendência</h2>
-        <div className="card">
-          <h3>Atendimentos por mês</h3>
-          <div className="trend">
-            {monthly.map(([label, value]) => (
-              <div key={label} className="trend-col">
-                {value === maxMonthly && <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 12.5, fontWeight: 500 }}>{value}</span>}
-                <div className={`trend-bar ${value === maxMonthly ? 'active' : ''}`} style={{ height: Math.max(8, Math.round((value / maxMonthly) * 120)) }} />
-                <small>{label}</small>
-              </div>
-            ))}
-            {!monthly.length && <p style={{ fontSize: 13 }}>Sem dados para o período.</p>}
-          </div>
-        </div>
       </section>
 
       {role === 'empresa' && (
