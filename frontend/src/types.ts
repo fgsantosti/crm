@@ -8,7 +8,10 @@ export type Company = {
   /** Marcado: agente conversa livremente sobre a empresa antes do funil. Desmarcado: vai direto pro funil com texto próprio. */
   agente_conversacional: boolean;
   etapa_inicial: boolean;
+  /** SPIN única quando só uma está habilitada na Etapa Inicial (derivado de spins_iniciais). */
   spin_inicial: number | null;
+  /** Etapa Inicial: SPINs (áreas) que o cliente pode acessar; com várias o agente escolhe pela mensagem da campanha. */
+  spins_iniciais: number[];
   /** Agente envia as mensagens como áudio (só vale com allow_transcription ligado pelo Admin). */
   mensagens_audio: boolean;
   /** Voz do TTS automático (Edge, pt-BR). */
@@ -148,6 +151,8 @@ export type Me = {
 export type Area = {
   id: number;
   name: string;
+  /** Etapa Inicial com várias SPINs: texto fixo que a campanha faz o cliente enviar para esta área. */
+  mensagem_campanha: string;
 };
 
 export type AtendenteInvite = {

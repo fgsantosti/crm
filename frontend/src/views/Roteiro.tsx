@@ -184,7 +184,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
   const [tab, setTab] = useState<'perguntas' | 'fora-do-fluxo' | 'variaveis' | 'opcoes-agente'>('perguntas');
   const [conversacional, setConversacional] = useState(company.agente_conversacional);
   const [etapaInicial, setEtapaInicial] = useState(company.etapa_inicial);
-  const [spinInicial, setSpinInicial] = useState<number | null>(company.spin_inicial);
+  const [spinsIniciais, setSpinsIniciais] = useState<number[]>(company.spins_iniciais ?? (company.spin_inicial ? [company.spin_inicial] : []));
   const [mensagensAudio, setMensagensAudio] = useState(company.mensagens_audio);
   const [voz, setVoz] = useState(company.voz_tts);
   const [erroOpcoes, setErroOpcoes] = useState('');
@@ -240,7 +240,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
           setAreas(Array.isArray(a) ? a : a.results);
           setConversacional(c.agente_conversacional);
           setEtapaInicial(c.etapa_inicial);
-          setSpinInicial(c.spin_inicial);
+          setSpinsIniciais(c.spins_iniciais ?? (c.spin_inicial ? [c.spin_inicial] : []));
           setMensagensAudio(c.mensagens_audio);
           setVoz(c.voz_tts);
         },
@@ -288,13 +288,26 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
     }
   }
 
-  async function salvarInicioSpin(patch: { etapa_inicial?: boolean; spin_inicial?: number | null }) {
+  async function salvarInicioSpin(patch: { etapa_inicial?: boolean; spins_iniciais?: number[] }) {
     setSavingOpcoes(true);
     setError('');
     try {
       const c: Company = await api(`/companies/${company.id}/`, { method: 'PATCH', body: JSON.stringify(patch) });
       setEtapaInicial(c.etapa_inicial);
-      setSpinInicial(c.spin_inicial);
+      setSpinsIniciais(c.spins_iniciais ?? (c.spin_inicial ? [c.spin_inicial] : []));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingOpcoes(false);
+    }
+  }
+
+  async function salvarMensagemCampanha(area: Area, mensagem_campanha: string) {
+    setSavingOpcoes(true);
+    setError('');
+    try {
+      const atualizada: Area = await api(`/areas/${area.id}/?company=${company.id}`, { method: 'PATCH', body: JSON.stringify({ mensagem_campanha }) });
+      setAreas((v) => v.map((a) => (a.id === atualizada.id ? atualizada : a)));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -939,15 +952,53 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
               <input type="checkbox" style={{ width: 'auto' }} checked={etapaInicial} disabled={!canEdit || savingOpcoes || busy} onChange={(e) => salvarInicioSpin({ etapa_inicial: e.target.checked })} />
               Etapa Inicial?
             </label>
-            <label style={{ margin: 0 }}>
-              SPIN inicial
-              <select value={spinInicial ?? ''} disabled={!canEdit || savingOpcoes || busy} onChange={(e) => salvarInicioSpin({ spin_inicial: e.target.value ? Number(e.target.value) : null })}>
-                <option value="">Selecione uma SPIN</option>
-                {areas.map((area) => <option key={area.id} value={area.id}>{area.name}-SPIN</option>)}
-              </select>
-            </label>
+            <fieldset disabled={!canEdit || savingOpcoes || busy} style={{ border: '1px solid var(--line)', borderRadius: 8, margin: 0 }}>
+              <legend>SPINs que o cliente pode acessar</legend>
+              {areas.map((area) => {
+                const temPerguntas = questions.some((q) => q.area === area.id && q.text.trim());
+                const marcada = spinsIniciais.includes(area.id);
+                return (
+                  <label key={area.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400 }}>
+                    <input
+                      type="checkbox"
+                      style={{ width: 'auto' }}
+                      checked={marcada}
+                      disabled={!marcada && !temPerguntas}
+                      onChange={(e) => salvarInicioSpin({ spins_iniciais: e.target.checked ? [...spinsIniciais, area.id] : spinsIniciais.filter((id) => id !== area.id) })}
+                    />
+                    {area.name}-SPIN
+                    {!temPerguntas && <small style={{ color: 'var(--muted)' }}>(sem perguntas com texto)</small>}
+                  </label>
+                );
+              })}
+              {!areas.length && <small style={{ color: 'var(--muted)' }}>Nenhuma área cadastrada ainda (tela Equipe).</small>}
+            </fieldset>
+            {spinsIniciais.length > 1 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <small style={{ color: 'var(--muted)' }}>
+                  Com mais de uma SPIN, o cliente chega por uma campanha cuja mensagem fixa indica a área, e o agente a classifica automaticamente.
+                  Cadastre abaixo o texto de cada campanha. Se a mensagem não corresponder a nenhuma área habilitada, o lead é desqualificado como fora de escopo.
+                </small>
+                {areas.filter((a) => spinsIniciais.includes(a.id)).map((a) => (
+                  <label key={a.id} style={{ margin: 0 }}>
+                    Mensagem da campanha — {a.name}
+                    <textarea
+                      rows={2}
+                      maxLength={500}
+                      defaultValue={a.mensagem_campanha}
+                      placeholder="Ex.: Possuo descontos indevidos no meu benefício do INSS"
+                      onBlur={(e) => {
+                        const valor = e.currentTarget.value;
+                        if (valor !== a.mensagem_campanha) salvarMensagemCampanha(a, valor);
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
             <p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>
-              Marcada: o atendimento começa diretamente na SPIN selecionada. O agente envia somente suas perguntas,
+              Marcada: o atendimento começa diretamente na SPIN habilitada (ou, com várias, na que o agente reconhecer pela
+              mensagem inicial da campanha). O agente envia somente as perguntas dela,
               segue as etapas Situação, Problema, Implicação e Necessidade e classifica com as variáveis e pesos definidos.
               Dados reconhecidos nas mensagens do cliente preenchem as variáveis, sem perguntas extras de identificação,
               apresentação, validação ou encerramento.

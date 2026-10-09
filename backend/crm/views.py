@@ -783,7 +783,7 @@ class AreaViewSet(TenantMixin, viewsets.ModelViewSet):
     """Áreas de atendimento cadastradas pela empresa (tela "Equipe")."""
     queryset = Area.objects.all()
     serializer_class = AreaSerializer
-    http_method_names = ["get", "post", "delete", "head", "options"]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
     def get_permissions(self):
         base = [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
         return base + [NotAgentAccount()]

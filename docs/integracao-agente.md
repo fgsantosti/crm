@@ -341,10 +341,26 @@ humana com placeholders, para que a fala inclua os dados reais do contato.
 
 #### Início direto na SPIN e controle de envio
 
-`PATCH /api/companies/{id}/` aceita `etapa_inicial` (booleano) e
-`spin_inicial` (ID de uma área desta empresa). Para ativar o início direto,
-selecione uma SPIN que tenha perguntas com texto cadastrado. A opção começa
-desligada nas empresas existentes.
+`PATCH /api/companies/{id}/` aceita `etapa_inicial` (booleano) e `spins_iniciais`
+(lista de IDs de áreas desta empresa: as SPINs que o cliente pode acessar;
+`spin_inicial`, uma só, continua aceito e equivale a `spins_iniciais=[id]`). Para
+ativar o início direto, habilite SPINs que tenham perguntas com texto cadastrado.
+A opção começa desligada nas empresas existentes. Cada área tem
+`mensagem_campanha` (`PATCH /api/areas/{id}/`): o texto fixo que a campanha faz o
+cliente enviar para aquela área.
+
+**Várias SPINs habilitadas.** O lead nasce **sem área** (`especialidade=""`) e o
+contexto traz `spin_inicial=null`, `pergunta_inicial=null` e
+`spins_iniciais=[{area, mensagem_campanha, pergunta_inicial}]`, além de `spin` com
+as listas das áreas habilitadas. Na primeira mensagem o agente (modelo) escolhe a
+área e envia `ATUALIZAR` com `fields.especialidade` (nome de uma área habilitada,
+sem diferenciar maiúsculas) e `proxima`; o CRM grava a área, envia a primeira
+pergunta dela e, daí em diante, só vale a SPIN dessa área. Assunto que não
+corresponde a nenhuma área habilitada: `ATUALIZAR` com `human_required=true` e
+`reason="fora de escopo"` desqualifica o lead (libera o número). Sem área válida e
+sem o sinal de fora de escopo (por exemplo, só um cumprimento) o CRM não responde
+(`NO_REPLY`, sem apagar o lead) e a mensagem seguinte tenta de novo. Com uma única
+SPIN habilitada nada muda: a área é a dela desde a primeira mensagem.
 
 Com `etapa_inicial=true`, `/agente/contexto/` retorna `perguntas=[]`,
 `fora_do_fluxo=[]` e somente a lista SPIN selecionada em `spin`, ordenada pelas

@@ -239,21 +239,53 @@ def _spin_fora_da_area(company, lead, question_id):
         return False
     return (lead.especialidade or "") != q.area.name
 
-def perguntas_spin_inicial(company):
-    if not company.spin_inicial_id:
+def spins_iniciais_habilitadas(company):
+    """Etapa Inicial: áreas cujas SPINs o cliente pode acessar (vazio sem Etapa Inicial)."""
+    if not company.etapa_inicial:
+        return []
+    spins = list(company.spins_iniciais.order_by("name"))
+    # Legado: empresa configurada só com spin_inicial (antes das várias SPINs) segue valendo.
+    if not spins and company.spin_inicial_id:
+        spins = [company.spin_inicial]
+    return spins
+
+def spin_efetiva(company, lead=None):
+    """SPIN que vale para este lead na Etapa Inicial: a única habilitada ou, com várias, a que o
+    agente escolheu pela mensagem inicial (lead.especialidade). None enquanto não foi escolhida."""
+    spins = spins_iniciais_habilitadas(company)
+    if len(spins) == 1:
+        return spins[0]
+    if lead is not None and lead.especialidade:
+        return next((a for a in spins if a.name == lead.especialidade), None)
+    return None
+
+def perguntas_da_spin(company, area):
+    if area is None:
         return []
     etapas = {"situacao": 0, "problema": 1, "implicacao": 2, "necessidade": 3, "": 4}
-    perguntas = Question.objects.filter(company=company, area_id=company.spin_inicial_id).exclude(question_id__in=MANDATORY_OFFFLOW_QUESTION_IDS)
+    perguntas = Question.objects.filter(company=company, area_id=area.pk).exclude(question_id__in=MANDATORY_OFFFLOW_QUESTION_IDS)
     return sorted((q for q in perguntas if q.text.strip()), key=lambda q: (etapas[q.etapa_spin], q.ordem, q.pk))
+
+def perguntas_spin_inicial(company, lead=None):
+    return perguntas_da_spin(company, spin_efetiva(company, lead))
+
+def etapa_inicial_configurada(company):
+    """Etapa Inicial com ao menos uma SPIN habilitada que tem perguntas com texto."""
+    return any(perguntas_da_spin(company, a) for a in spins_iniciais_habilitadas(company))
+
+def area_escolhida_na_etapa_inicial(company, fields):
+    """Com várias SPINs: a área habilitada que o agente informou em fields.especialidade (ou None)."""
+    nome = str((fields or {}).get("especialidade") or "").strip().casefold()
+    return next((a for a in spins_iniciais_habilitadas(company) if a.name.casefold() == nome), None) if nome else None
 
 def texto_fora_habilitado(company, question_id):
     if company.etapa_inicial:
         return False
     return not Question.objects.filter(company=company, question_id=question_id, habilitada=False).exists()
 
-def pergunta_inicial(company):
+def pergunta_inicial(company, lead=None):
     if company.etapa_inicial:
-        perguntas = perguntas_spin_inicial(company)
+        perguntas = perguntas_spin_inicial(company, lead)
         return perguntas[0].question_id if perguntas else None
     if company.initial_state in MANDATORY_OFFFLOW_QUESTION_IDS and not texto_fora_habilitado(company, company.initial_state):
         perguntas = Question.objects.filter(company=company, area__isnull=True).exclude(question_id__in=MANDATORY_OFFFLOW_QUESTION_IDS).order_by("ordem", "id")
@@ -266,7 +298,7 @@ def pode_classificar_sem_validar(company, lead):
     if dados_para_classificar(company, lead):
         return True
     if company.etapa_inicial:
-        perguntas = perguntas_spin_inicial(company)
+        perguntas = perguntas_spin_inicial(company, lead)
     elif not texto_fora_habilitado(company, "validar"):
         perguntas = list(Question.objects.filter(company=company, area__name=lead.especialidade).exclude(question_id__in=MANDATORY_OFFFLOW_QUESTION_IDS).exclude(text="").order_by("ordem", "id"))
         if not perguntas:
@@ -285,7 +317,7 @@ def dados_para_classificar(company, lead, fields=None):
 def perguntas_obrigatorias_pendentes(company, lead=None, fields=None):
     fields = fields or {}
     if company.etapa_inicial:
-        perguntas = perguntas_spin_inicial(company)
+        perguntas = perguntas_spin_inicial(company, lead)
     else:
         area = fields.get("especialidade") or (lead.especialidade if lead else "")
         perguntas = Question.objects.filter(company=company, area__name=area).order_by("ordem", "id") if area else []
@@ -298,7 +330,8 @@ def guardar_notas_coletadas(company, lead, fields):
         return
     perguntas = Question.objects.filter(company=company, variavel__isnull=False).exclude(variavel_roteiro__slug="nome")
     if company.etapa_inicial:
-        perguntas = perguntas.filter(area_id=company.spin_inicial_id)
+        spin = spin_efetiva(company, lead)
+        perguntas = perguntas.filter(area_id=spin.pk if spin else None)
     else:
         area = fields.get("especialidade") or lead.especialidade
         perguntas = perguntas.filter(Q(area__isnull=True) | Q(area__name=area))
@@ -307,7 +340,7 @@ def guardar_notas_coletadas(company, lead, fields):
     lead.urgencia_detalhe = {"notas": {qid: nota for qid, nota in {**anteriores, **notas}.items() if qid in ids}}
 
 def estado_spin_para_retomar(company, lead):
-    ids = [q.question_id for q in perguntas_spin_inicial(company)]
+    ids = [q.question_id for q in perguntas_spin_inicial(company, lead)]
     if lead.state in ids:
         return lead.state
     for result in lead.events.filter(delivery__in=["SENT", "EXPIRADO"]).order_by("-created_at", "-pk").values_list("result", flat=True):
@@ -359,7 +392,7 @@ def mensagem_necessidade_humana(company, lead, event, question=None):
         return dict(NO_REPLY)
     if question.question_id in MANDATORY_OFFFLOW_QUESTION_IDS and not texto_fora_habilitado(company, question.question_id):
         return dict(NO_REPLY)
-    if company.etapa_inicial and question.area_id != company.spin_inicial_id:
+    if company.etapa_inicial and question.area_id != getattr(spin_efetiva(company, lead), "pk", None):
         return dict(NO_REPLY)
     content = render_text(question.text, lead, company)
     anterior = Event.objects.filter(lead=lead, delivery__in=["SENT", "PENDING", "EXPIRADO"]).exclude(pk=event.pk).order_by("-created_at", "-pk").first()
@@ -396,7 +429,7 @@ def processar_pedido_humano(company, lead, event, fields):
             Q(area__isnull=True) | Q(area__name=lead.especialidade)
         ).exclude(question_id__in=MANDATORY_OFFFLOW_QUESTION_IDS).exclude(text="")
         if company.etapa_inicial:
-            perguntas = perguntas.filter(area_id=company.spin_inicial_id)
+            perguntas = perguntas.filter(area_id=getattr(spin_efetiva(company, lead), "pk", None))
         question = perguntas.order_by("ordem", "id").first()
     lead.state = question.question_id if question else "necessidade_humana"
     lead.save()
@@ -436,7 +469,7 @@ def status_contato(company, contact):
         "repeticoes": contar_repeticoes(lead) if lead and motivo == "em_triagem" else 0,
         # Área já classificada no lead ativo: define qual lista SPIN o agente segue.
         "especialidade": (lead.especialidade or "") if lead and not lead.desfecho else "",
-        "pergunta_inicial": pergunta_inicial(company),
+        "pergunta_inicial": pergunta_inicial(company, lead),
         "conversa_livre_restante": conversa_livre_restante(company, lead) if lead and aceita and motivo == "em_triagem" else 0,
         "campos": {key: (lead.name or lead.contact_name) if key == "nome" else getattr(lead, model_field) for key, model_field in FIELD_MAP.items()} if lead and aceita else {},
         "variaveis_roteiro": (lead.variaveis_roteiro or {}) if lead and aceita else {},
@@ -462,7 +495,9 @@ def receive(company, data):
     lead_novo = lead is None
     if lead_novo:
         # O lock da empresa acima garante que nunca nascem dois leads ativos pro mesmo contato.
-        lead = Lead.objects.create(company=company, contact=data["contact"], state=pergunta_inicial(company) or "", especialidade=company.spin_inicial.name if company.etapa_inicial and company.spin_inicial_id else "")
+        # Com várias SPINs habilitadas o lead nasce sem área: o agente a escolhe pela mensagem inicial.
+        spin_unica = spin_efetiva(company)
+        lead = Lead.objects.create(company=company, contact=data["contact"], state=pergunta_inicial(company) or "", especialidade=spin_unica.name if spin_unica else "")
         registrar_novo_lead(company)
     previous = Event.objects.filter(lead=lead, message_id=data["message_id"]).first()
     if previous:
@@ -489,10 +524,19 @@ def receive(company, data):
     # o lead é apagado e o número recomeça do zero na próxima mensagem.
     apagar_lead, motivo_apagar = False, ""
     pendentes = Event.objects.filter(lead=lead, delivery="PENDING").exclude(pk=event.pk)
+    # Etapa Inicial com várias SPINs: enquanto a área não foi escolhida, o agente a informa em
+    # fields.especialidade (ou sinaliza fora de escopo, que desqualifica).
+    area_indefinida = False
+    if aceita and company.etapa_inicial and len(spins_iniciais_habilitadas(company)) > 1 and spin_efetiva(company, lead) is None:
+        escolhida = area_escolhida_na_etapa_inicial(company, data.get("fields"))
+        if escolhida:
+            lead.especialidade = escolhida.name
+        else:
+            area_indefinida = True
 
     if not aceita:
         pass
-    elif company.etapa_inicial and not pergunta_inicial(company):
+    elif company.etapa_inicial and not etapa_inicial_configurada(company):
         escalate(lead, "Configurar SPIN inicial com perguntas no Roteiro")
         event.summary = "SPIN inicial sem perguntas disponíveis"
     elif data["human_required"] and data["reason"] == "fora de escopo":
@@ -507,6 +551,10 @@ def receive(company, data):
         event.summary = f"Encaminhado para atendimento humano: {data['reason']}"
     elif lead.pedido_humano_pendente or data["human_required"]:
         result = processar_pedido_humano(company, lead, event, data.get("fields") or {})
+    elif area_indefinida:
+        # Sem área válida entre as SPINs habilitadas não há pergunta a enviar: o agente deve informar a
+        # especialidade (ATUALIZAR) ou sinalizar fora de escopo. A mensagem seguinte tenta de novo.
+        event.summary = "Etapa Inicial: área não definida pelo agente (informe a especialidade ou fora de escopo)"
     elif pendentes.filter(created_at__gte=timezone.now() - JANELA_ENTREGA_PENDENTE).exists():
         # Contato mandou várias mensagens em sequência enquanto a resposta anterior ainda
         # está saindo: ignora esta sem escalar (escalar aqui travava o lead em HUMANO).
@@ -517,9 +565,10 @@ def receive(company, data):
         marker = data["marker"]
         fields = data.get("fields") or {}
         estado_anterior = lead.state
-        inicial = pergunta_inicial(company)
+        inicial = pergunta_inicial(company, lead)
         if company.etapa_inicial:
-            fields = {**fields, "especialidade": company.spin_inicial.name if company.spin_inicial_id else ""}
+            spin_do_lead = spin_efetiva(company, lead)
+            fields = {**fields, "especialidade": spin_do_lead.name if spin_do_lead else ""}
             field_error = apply_fields(lead, company, fields)
             if field_error:
                 event.summary = field_error
@@ -528,7 +577,7 @@ def receive(company, data):
         pula_obrigatoria = False
         if obrigatorias_pendentes and marker in {"Q", "ATUALIZAR"}:
             alvo = data.get("question_id") if marker == "Q" else fields.get("proxima")
-            perguntas_area = perguntas_spin_inicial(company) if company.etapa_inicial else Question.objects.filter(company=company, area_id=obrigatorias_pendentes[0].area_id).order_by("ordem", "id")
+            perguntas_area = perguntas_spin_inicial(company, lead) if company.etapa_inicial else Question.objects.filter(company=company, area_id=obrigatorias_pendentes[0].area_id).order_by("ordem", "id")
             ids_area = [q.question_id for q in perguntas_area]
             pula_obrigatoria = alvo in ids_area and ids_area.index(alvo) > ids_area.index(obrigatorias_pendentes[0].question_id)
         if obrigatorias_pendentes and not fields.get("encerramento_antecipado") and (marker in {"CLASSIFICADO", "VALIDAR"} or pula_obrigatoria or (pronto and marker == "ATUALIZAR")):
@@ -557,7 +606,7 @@ def receive(company, data):
             apply_fields(lead, company, fields)
             desqualificar_fora_de_escopo(lead)
             question_id = None
-        elif company.etapa_inicial and marker in {"Q", "ATUALIZAR"} and (data.get("question_id") if marker == "Q" else fields.get("proxima")) not in {q.question_id for q in perguntas_spin_inicial(company)}:
+        elif company.etapa_inicial and marker in {"Q", "ATUALIZAR"} and (data.get("question_id") if marker == "Q" else fields.get("proxima")) not in {q.question_id for q in perguntas_spin_inicial(company, lead)}:
             event.summary = "Pergunta bloqueada: somente a SPIN inicial selecionada é permitida"
             question_id = None
         elif marker == "Q":
@@ -680,7 +729,7 @@ def receive(company, data):
 
         if question_id:
             question = Question.objects.filter(company=company, question_id=question_id).first()
-            spin_ids = [q.question_id for q in perguntas_spin_inicial(company)] if company.etapa_inicial else []
+            spin_ids = [q.question_id for q in perguntas_spin_inicial(company, lead)] if company.etapa_inicial else []
             bloqueada = (question_id in MANDATORY_OFFFLOW_QUESTION_IDS and not texto_fora_habilitado(company, question_id)) or (company.etapa_inicial and question_id not in spin_ids)
             obrigatoria_antecipada = obrigatorias_pendentes and question_id == obrigatorias_pendentes[0].question_id
             fora_de_ordem = company.etapa_inicial and not obrigatoria_antecipada and question_id in spin_ids and estado_anterior in spin_ids and spin_ids.index(question_id) not in {spin_ids.index(estado_anterior), spin_ids.index(estado_anterior) + 1}
@@ -1315,7 +1364,7 @@ def _aplicar_notas_urgencia(lead, company, fields):
     (fields_atualizados, erro_ou_None)."""
     notas = {**(lead.urgencia_detalhe or {}).get("notas", {}), **(fields.get("notas") or {})}
     if company.etapa_inicial:
-        perguntas = perguntas_spin_inicial(company)
+        perguntas = perguntas_spin_inicial(company, lead)
         ids = {q.question_id for q in perguntas if not q.variavel_roteiro_id or q.variavel_roteiro.slug != "nome"}
         notas = {qid: nota for qid, nota in notas.items() if qid in ids}
         if not notas:
@@ -1586,18 +1635,25 @@ def contexto_agente(company):
             spin[nomes_area[q.area_id]].append({**item, "etapa_spin": q.etapa_spin})
         else:
             perguntas.append(item)
+    spins_iniciais = []
     if company.etapa_inicial:
-        ordenadas = [q.question_id for q in perguntas_spin_inicial(company)]
-        area_inicial = company.spin_inicial.name if company.spin_inicial_id else ""
+        habilitadas = spins_iniciais_habilitadas(company)
         perguntas = []
-        spin = {area_inicial: sorted(spin.get(area_inicial, []), key=lambda q: ordenadas.index(q["question_id"]))} if area_inicial else {}
+        spin_filtrada = {}
+        for area in habilitadas:
+            ordenadas = [q.question_id for q in perguntas_da_spin(company, area)]
+            spin_filtrada[area.name] = sorted((q for q in spin.get(area.name, []) if q["question_id"] in ordenadas), key=lambda q: ordenadas.index(q["question_id"]))
+            spins_iniciais.append({"area": area.name, "mensagem_campanha": area.mensagem_campanha, "pergunta_inicial": ordenadas[0] if ordenadas else None})
+        spin = spin_filtrada
     return {
         "empresa": company.name,
         "agente_conversacional": company.agente_conversacional,
         "etapa_inicial": company.etapa_inicial,
         "atendimento_humano_habilitado": not company.etapa_inicial,
         "classificacao_antecipada": {"campos": ["nome", "tema", "especialidade"], "nome_perfil_permitido": True},
-        "spin_inicial": company.spin_inicial.name if company.spin_inicial_id else None,
+        # SPIN única (comportamento clássico) ou None com várias: aí vale spins_iniciais (o agente escolhe).
+        "spin_inicial": getattr(spin_efetiva(company), "name", None),
+        "spins_iniciais": spins_iniciais if len(spins_iniciais) > 1 else [],
         "pergunta_inicial": pergunta_inicial(company),
         "validar_habilitado": texto_fora_habilitado(company, "validar"),
         "variaveis_roteiro": list(company.variaveis_roteiro.values("slug", "name", "builtin")),

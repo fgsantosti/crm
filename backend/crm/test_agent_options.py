@@ -305,3 +305,105 @@ class AgentOptionsTests(TestCase):
         self.assertFalse(Lead.objects.get(contact=self.contact).bot_closed)
         self.send("CLASSIFICADO", fields={"notas": {"spin_necessidade": 8}})
         self.assertTrue(Lead.objects.get(contact=self.contact).bot_closed)
+
+
+class VariasSpinsIniciaisTests(TestCase):
+    """Etapa Inicial com várias SPINs: o agente escolhe a área pela mensagem da campanha."""
+    def setUp(self):
+        self.company = Company.objects.create(name="Empresa Multi SPIN")
+        seed_roteiro_padrao(self.company)
+        self.consumidor = Area.objects.create(company=self.company, name="Consumidor", mensagem_campanha="Possuo descontos indevidos no meu benefício do INSS")
+        self.trabalhista = Area.objects.create(company=self.company, name="Trabalhista", mensagem_campanha="Fui demitido e quero meus direitos")
+        self.sem_spin = Area.objects.create(company=self.company, name="Criminal")
+        peso = Variavel.objects.create(company=self.company, name="Geral2", peso=5)
+        for area, prefixo in ((self.consumidor, "cons"), (self.trabalhista, "trab")):
+            for etapa in ("situacao", "problema"):
+                Question.objects.create(company=self.company, question_id=f"{prefixo}_{etapa}", area=area, etapa_spin=etapa,
+                                        ordem=0 if etapa == "situacao" else 1, text=f"{prefixo} {etapa}?", variavel=peso)
+        self.company.spins_iniciais.set([self.consumidor, self.trabalhista])
+        Company.objects.filter(pk=self.company.pk).update(etapa_inicial=True)
+        self.company.refresh_from_db()
+        self.user = get_user_model().objects.create_user(username="empresa-multi", is_staff=True)
+        self.company.members.add(self.user)
+        self.client = APIClient(); self.client.force_authenticate(self.user)
+        self.counter = 0
+        self.contact = "+5585999990111"
+
+    def send(self, marker="ATUALIZAR", **extra):
+        self.counter += 1
+        body = {"contact": self.contact, "message_id": f"m-{self.counter}", "marker": marker, **extra}
+        r = self.client.post(f"/api/companies/{self.company.pk}/incoming/", body, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        result = r.json()
+        if result.get("action") == "TEXTO":
+            Event.objects.filter(pk=result["event_id"]).update(delivery="SENT")
+        return result
+
+    def test_contexto_lista_as_spins_habilitadas_com_a_mensagem_da_campanha(self):
+        ctx = contexto_agente(self.company)
+        self.assertIsNone(ctx["spin_inicial"])
+        self.assertIsNone(ctx["pergunta_inicial"])
+        self.assertEqual(ctx["perguntas"], [])
+        self.assertEqual(ctx["spins_iniciais"], [
+            {"area": "Consumidor", "mensagem_campanha": "Possuo descontos indevidos no meu benefício do INSS", "pergunta_inicial": "cons_situacao"},
+            {"area": "Trabalhista", "mensagem_campanha": "Fui demitido e quero meus direitos", "pergunta_inicial": "trab_situacao"},
+        ])
+        self.assertEqual(set(ctx["spin"]), {"Consumidor", "Trabalhista"})  # a SPIN de Criminal não está habilitada
+
+    def test_primeira_mensagem_escolhe_a_area_e_recebe_a_primeira_pergunta_dela(self):
+        r = self.send(fields={"especialidade": "Trabalhista", "proxima": "trab_situacao"}, contact_name="Ana")
+        self.assertEqual((r["action"], r["question_id"], r["lead_novo"]), ("TEXTO", "trab_situacao", True))
+        lead = Lead.objects.get()
+        self.assertEqual((lead.especialidade, lead.state), ("Trabalhista", "trab_situacao"))
+        # A partir daí vale só a SPIN escolhida: a próxima pergunta e o bloqueio da outra.
+        self.assertEqual(self.send(fields={"proxima": "trab_problema"})["question_id"], "trab_problema")
+        bloqueada = self.send(fields={"proxima": "cons_problema"})
+        self.assertNotEqual(bloqueada.get("question_id"), "cons_problema")
+
+    def test_area_nao_habilitada_ou_ausente_nao_envia_nada_e_tenta_de_novo(self):
+        for campos in ({}, {"especialidade": "Criminal"}, {"especialidade": "Inventada"}):
+            r = self.send(fields={**campos, "proxima": "cons_situacao"})
+            self.assertEqual(r["action"], "NO_REPLY", campos)
+        lead = Lead.objects.get()
+        self.assertEqual((lead.especialidade, lead.desfecho), ("", ""))
+        ok = self.send(fields={"especialidade": "consumidor", "proxima": "cons_situacao"})  # sem diferenciar maiúsculas
+        self.assertEqual(ok["question_id"], "cons_situacao")
+        self.assertEqual(Lead.objects.get().especialidade, "Consumidor")
+
+    def test_fora_de_escopo_na_primeira_mensagem_desqualifica(self):
+        r = self.send(human_required=True, reason="fora de escopo")
+        self.assertEqual(r["action"], "NO_REPLY")
+        lead = Lead.objects.get()
+        self.assertEqual((lead.temperature, lead.desfecho, lead.bot_closed), ("Desqualificado", "desqualificado", True))
+        # Número livre: a próxima mensagem abre um lead novo.
+        self.assertEqual(self.send(fields={"especialidade": "Consumidor", "proxima": "cons_situacao"})["question_id"], "cons_situacao")
+
+    def test_uma_so_spin_continua_igual_ao_comportamento_antigo(self):
+        self.company.spins_iniciais.set([self.consumidor])
+        self.assertEqual(contexto_agente(self.company)["spin_inicial"], "Consumidor")
+        self.assertEqual(contexto_agente(self.company)["spins_iniciais"], [])
+        r = self.send(fields={"proxima": "nome"})  # sem escolher área: a única SPIN vale
+        self.assertEqual((r["question_id"], Lead.objects.get().especialidade), ("cons_situacao", "Consumidor"))
+
+    def test_api_da_empresa_salva_varias_spins_e_valida(self):
+        url = f"/api/companies/{self.company.pk}/"
+        # Com a Etapa Inicial ligada, SPIN sem perguntas com texto é recusada.
+        self.assertEqual(self.client.patch(url, {"spins_iniciais": [self.sem_spin.pk]}, format="json").status_code, 400)
+        self.assertEqual(self.client.patch(url, {"spins_iniciais": []}, format="json").status_code, 400)
+        r = self.client.patch(url, {"spins_iniciais": [self.consumidor.pk, self.trabalhista.pk]}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.company.refresh_from_db()
+        self.assertEqual((set(self.company.spins_iniciais.values_list("name", flat=True)), self.company.spin_inicial_id), ({"Consumidor", "Trabalhista"}, None))
+        r = self.client.patch(url, {"spins_iniciais": [self.trabalhista.pk]}, format="json")
+        self.company.refresh_from_db()
+        self.assertEqual(self.company.spin_inicial_id, self.trabalhista.pk)
+        outra = Company.objects.create(name="Outra")
+        area_outra = Area.objects.create(company=outra, name="X")
+        self.assertEqual(self.client.patch(url, {"spins_iniciais": [area_outra.pk]}, format="json").status_code, 400)
+
+    def test_mensagem_da_campanha_edita_pela_area_e_nome_nao_muda(self):
+        r = self.client.patch(f"/api/areas/{self.consumidor.pk}/?company={self.company.pk}", {"mensagem_campanha": "Novo texto"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.consumidor.refresh_from_db()
+        self.assertEqual(self.consumidor.mensagem_campanha, "Novo texto")
+        self.assertEqual(self.client.patch(f"/api/areas/{self.consumidor.pk}/?company={self.company.pk}", {"name": "Outro"}, format="json").status_code, 400)

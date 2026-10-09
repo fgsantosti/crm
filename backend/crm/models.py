@@ -34,7 +34,13 @@ class Company(models.Model):
         "livre sobre a empresa nesse meio-tempo. Configurado na tela Roteiro, aba 'Opções do Agente'.",
     )
     etapa_inicial = models.BooleanField(default=False, help_text="Iniciar diretamente na SPIN selecionada e enviar somente suas perguntas.")
+    # Legado/derivado: a SPIN única quando só uma está habilitada (None com várias). A fonte da verdade
+    # é spins_iniciais -- ver services.spin_efetiva.
     spin_inicial = models.ForeignKey("Area", on_delete=models.SET_NULL, null=True, blank=True, related_name="empresas_inicio_spin")
+    spins_iniciais = models.ManyToManyField(
+        "Area", blank=True, related_name="empresas_spins_iniciais",
+        help_text="Etapa Inicial: SPINs que o cliente pode acessar. Com mais de uma, o agente escolhe pela mensagem inicial (campanha).",
+    )
     def __str__(self): return self.name
     @property
     def audio_ativo(self):
@@ -175,6 +181,10 @@ class Area(models.Model):
     """
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="areas")
     name = models.CharField(max_length=80)
+    mensagem_campanha = models.TextField(
+        blank=True, max_length=500,
+        help_text="Etapa Inicial com várias SPINs: texto fixo que a campanha faz o cliente enviar para esta área (ex.: \"Possuo descontos indevidos no meu benefício do INSS\"). Ajuda o agente a reconhecer a área.",
+    )
     class Meta:
         constraints = [models.UniqueConstraint(fields=["company", "name"], name="unique_company_area")]
         ordering = ["name"]

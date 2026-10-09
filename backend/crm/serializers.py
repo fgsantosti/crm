@@ -7,19 +7,35 @@ from .models import Blacklist, Company, Lead, Question, CompanyInfo, Event, Area
 FIXED_QUESTION_IDS = {"nome", "situacao"}
 
 class CompanySerializer(serializers.ModelSerializer):
+    # Etapa Inicial: SPINs que o cliente pode acessar (várias -> o agente escolhe pela mensagem da campanha).
+    spins_iniciais = serializers.PrimaryKeyRelatedField(many=True, queryset=Area.objects.all(), required=False)
     class Meta:
         model = Company
-        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional", "mensagens_audio", "voz_tts", "etapa_inicial", "spin_inicial"]
+        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional", "mensagens_audio", "voz_tts", "etapa_inicial", "spin_inicial", "spins_iniciais"]
         # Só as opções do agente (tela Roteiro, aba "Opções do Agente") são editáveis
         # por aqui -- os demais campos de Company continuam no Painel Admin.
         read_only_fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente"]
     def validate(self, attrs):
-        area = attrs.get("spin_inicial", self.instance.spin_inicial if self.instance else None)
+        # Compatibilidade: spin_inicial (uma só) equivale a spins_iniciais=[essa].
+        if "spin_inicial" in attrs and "spins_iniciais" not in attrs:
+            attrs["spins_iniciais"] = [attrs["spin_inicial"]] if attrs["spin_inicial"] else []
+        if "spins_iniciais" in attrs:
+            spins = list(attrs["spins_iniciais"])
+        else:
+            spins = [self.instance.spin_inicial] if self.instance and self.instance.spin_inicial_id and not self.instance.spins_iniciais.exists() else (list(self.instance.spins_iniciais.all()) if self.instance else [])
         ativa = attrs.get("etapa_inicial", self.instance.etapa_inicial if self.instance else False)
-        if area and (not self.instance or area.company_id != self.instance.pk):
-            raise serializers.ValidationError({"spin_inicial": "Selecione uma SPIN desta empresa."})
-        if ativa and (not area or not Question.objects.filter(company=self.instance, area=area).exclude(text__regex=r"^\s*$").exists()):
-            raise serializers.ValidationError({"spin_inicial": "Selecione uma SPIN com perguntas e texto cadastrado."})
+        for area in spins:
+            if not self.instance or area.company_id != self.instance.pk:
+                raise serializers.ValidationError({"spins_iniciais": "Selecione SPINs desta empresa."})
+        if ativa:
+            if not spins:
+                raise serializers.ValidationError({"spins_iniciais": "Selecione ao menos uma SPIN com perguntas e texto cadastrado."})
+            for area in spins:
+                if not Question.objects.filter(company=self.instance, area=area).exclude(text__regex=r"^\s*$").exists():
+                    raise serializers.ValidationError({"spins_iniciais": f"A SPIN {area.name} não tem perguntas com texto cadastrado."})
+        if "spins_iniciais" in attrs:
+            # spin_inicial acompanha: a SPIN única, ou nenhuma quando há várias.
+            attrs["spin_inicial"] = spins[0] if len(spins) == 1 else None
         return attrs
     def validate_mensagens_audio(self, value):
         if value and self.instance is not None and not self.instance.allow_transcription:
@@ -313,8 +329,13 @@ class DeliverySerializer(serializers.Serializer):
 class AreaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Area
-        fields = ["id", "name"]
+        fields = ["id", "name", "mensagem_campanha"]
         read_only_fields = ["id"]
+    def validate_name(self, value):
+        # Renomear quebraria a área já gravada nos leads e nas listas SPIN: só a mensagem da campanha é editável.
+        if self.instance and value != self.instance.name:
+            raise serializers.ValidationError("O nome da área não pode ser alterado.")
+        return value
 
 class AtendenteInviteSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
