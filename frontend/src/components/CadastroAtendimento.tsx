@@ -11,6 +11,7 @@ import { IconeWhatsapp } from './Icones';
 export function Overlay({ onClose, children }: { onClose: () => void; children: ReactNode }) {
   return createPortal(
     <div
+      className="popup-overlay"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

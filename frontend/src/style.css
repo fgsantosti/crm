@@ -482,3 +482,16 @@ tr.linha-clicavel:hover { background: var(--accent-soft, rgba(0,0,0,.04)); }
   .confirm-dialog .confirm-botoes { flex-direction: column-reverse; }
   .confirm-dialog .confirm-botoes button { width: 100%; }
 }
+
+/* Entrada suave dos popups: fundo escurece e a caixa sobe e cresce levemente. */
+@keyframes popup-fundo { from { opacity: 0; } to { opacity: 1; } }
+@keyframes popup-caixa { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.dashboard-dialog[open], .lead-dialog[open], .confirm-dialog[open] { animation: popup-caixa .24s cubic-bezier(.2,.8,.2,1); }
+.dashboard-dialog[open]::backdrop, .lead-dialog[open]::backdrop, .confirm-dialog[open]::backdrop { animation: popup-fundo .2s ease-out; }
+.popup-overlay, .profile-overlay { animation: popup-fundo .2s ease-out; }
+.popup-overlay > .panel, .profile-overlay > .panel { animation: popup-caixa .24s cubic-bezier(.2,.8,.2,1); }
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-dialog[open], .lead-dialog[open], .confirm-dialog[open],
+  .dashboard-dialog[open]::backdrop, .lead-dialog[open]::backdrop, .confirm-dialog[open]::backdrop,
+  .popup-overlay, .popup-overlay > .panel, .profile-overlay, .profile-overlay > .panel { animation: none; }
+}
