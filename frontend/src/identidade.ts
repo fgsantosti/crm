@@ -51,11 +51,15 @@ export function paletaDaIdentidade(principal: string, contrasteCor: string): Pal
         '--sb-fg': TEXTO_CLARO, '--sb-fg-suave': '#E4D6C8', '--sb-mudo': '#D3C3B3',
         '--sb-pilula-bg': 'rgba(255,255,255,.14)', '--sb-pilula-borda': 'rgba(255,255,255,.28)',
         '--sb-ativo-bg': TEXTO_CLARO, '--sb-ativo-fg': TEXTO_ESCURO,
+        // Pontilhado de fundo: mesmo padrão e intensidade do visual padrão (branco sobre fundo escuro).
+        '--sb-pontos': 'rgba(255,255,255,.06)',
       }
     : {
         '--sb-fg': TEXTO_ESCURO, '--sb-fg-suave': '#3A2B20', '--sb-mudo': '#4F4034',
         '--sb-pilula-bg': 'rgba(36,26,18,.10)', '--sb-pilula-borda': 'rgba(36,26,18,.25)',
         '--sb-ativo-bg': TEXTO_ESCURO, '--sb-ativo-fg': TEXTO_CLARO,
+        // Em fundo claro o pontilhado branco sumiria: usa o tom escuro com a mesma intensidade sutil.
+        '--sb-pontos': 'rgba(36,26,18,.06)',
       };
   return { fundo: `linear-gradient(160deg, ${principal} 0%, ${contrasteCor} 100%)`, textoClaro, vars };
 }

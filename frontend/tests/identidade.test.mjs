@@ -26,6 +26,7 @@ test('fundo escuro usa texto claro e botão ativo claro', () => {
   assert.equal(p.textoClaro, true);
   assert.equal(p.vars['--sb-fg'], '#F3E9DD');
   assert.equal(p.vars['--sb-ativo-fg'], '#241A12');
+  assert.equal(p.vars['--sb-pontos'], 'rgba(255,255,255,.06)');
   assert.match(p.fundo, /linear-gradient\(160deg, #241a12 0%, #4a2410 100%\)/);
 });
 
@@ -34,6 +35,7 @@ test('fundo claro usa texto escuro', () => {
   assert.equal(p.textoClaro, false);
   assert.equal(p.vars['--sb-fg'], '#241A12');
   assert.equal(p.vars['--sb-ativo-bg'], '#241A12');
+  assert.equal(p.vars['--sb-pontos'], 'rgba(36,26,18,.06)');
 });
 
 test('gradiente com uma ponta clara e outra escura escolhe o texto de melhor pior-caso', () => {

@@ -108,12 +108,12 @@ code { font-family: 'DM Mono', monospace; background: var(--panel-muted); paddin
 }
 .sidebar-dots {
   position: absolute; inset: 0; opacity: .5; pointer-events: none;
-  background-image: radial-gradient(rgba(255,255,255,.06) 1px, transparent 1px); background-size: 14px 14px;
+  background-image: radial-gradient(var(--sb-pontos, rgba(255,255,255,.06)) 1px, transparent 1px); background-size: 14px 14px;
 }
 .brand { position: relative; display: flex; align-items: center; gap: 12px; font-family: 'Neuton', serif; font-weight: 700; font-size: 23px; }
 .brand img { height: 38px; max-width: 120px; object-fit: contain; flex: none; }
 .brand > span { min-width: 0; overflow-wrap: anywhere; }
-.sidebar-custom .sidebar-glow, .sidebar-custom .sidebar-dots { display: none; }
+.sidebar-custom .sidebar-glow { display: none; }
 .workspace { position: relative; display: flex; flex-direction: column; gap: 8px; }
 .workspace small { color: var(--sb-mudo, #C9B6A4); letter-spacing: .08em; text-transform: uppercase; font-size: 11px; }
 .company-pill {
