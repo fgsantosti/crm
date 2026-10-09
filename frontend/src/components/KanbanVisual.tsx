@@ -76,7 +76,14 @@ export function KanbanColunaHead({ coluna, total }: { coluna: ColunaVisual; tota
 }
 
 /** Miolo do card: nome/telefone com selo, demanda (2 linhas) e rodapé com tempo e responsável. */
-export function KanbanCardConteudo({ lead, coluna, meId, compacto = false }: { lead: Lead; coluna: string; meId?: number; compacto?: boolean }) {
+export function KanbanCardConteudo({ lead, coluna, meId, compacto = false, onDetalhar }: {
+  lead: Lead;
+  coluna: string;
+  meId?: number;
+  compacto?: boolean;
+  /** Botão "Detalhar" no canto inferior direito: abre o popup com os dados do lead. */
+  onDetalhar?: (lead: Lead) => void;
+}) {
   const temp = TEMPERATURA_VISUAL[lead.temperature];
   const desfecho = coluna === 'despacho' ? DESFECHO_VISUAL[lead.desfecho_pendente] : undefined;
   // Novos: a etapa vai numa linha própria (o id da pergunta é longo e cortaria o nome).
@@ -105,14 +112,30 @@ export function KanbanCardConteudo({ lead, coluna, meId, compacto = false }: { l
         </div>
       </div>
       {!compacto && coluna !== 'novos' && lead.demand && <p className="kb-card-demanda">{lead.demand}</p>}
-      {!compacto && (
-        <div className="kb-card-foot">
-          <small>{rodape(lead, coluna)}</small>
-          {mostrarDono && (
+      {(!compacto || onDetalhar) && (
+        <div className={`kb-card-foot${compacto ? ' kb-card-foot-compacto' : ''}`}>
+          {!compacto && <small>{rodape(lead, coluna)}</small>}
+          {!compacto && mostrarDono && (
             <span className="kb-dono" title={ehMeu ? 'Com você' : `Com ${lead.owner_nome}`}>
               <span className={`kb-avatar${ehMeu ? ' kb-avatar-meu' : ''}`} aria-hidden="true">{iniciais(lead.owner_nome || '?')}</span>
               {ehMeu ? 'Você' : (lead.owner_nome || '').split(/\s+/)[0]}
             </span>
+          )}
+          {onDetalhar && (
+            <button
+              type="button"
+              className="kb-detalhar"
+              aria-haspopup="dialog"
+              aria-label={`Detalhar ${lead.name || lead.contact}`}
+              draggable={false}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDetalhar(lead);
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              Detalhar
+            </button>
           )}
         </div>
       )}

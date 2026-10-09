@@ -685,3 +685,9 @@ tr.linha-clicavel:hover { background: var(--accent-soft, rgba(0,0,0,.04)); }
   .kb-container .kb-board, .kb-container-dash .kb-board { grid-auto-columns: 270px; padding: 14px; }
   .kb-container-topo { padding: 14px; }
 }
+.kb-card-foot { flex-wrap: wrap; }
+.kb-detalhar { margin-left: auto; min-height: 30px; padding: 0 12px; border-radius: 8px; background: var(--paper); color: var(--accent-deep); border: 1px solid var(--line); font-size: 12px; font-weight: 600; }
+.kb-detalhar:hover { background: var(--accent-soft); border-color: #F0C9AE; }
+.kb-detalhar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.kb-card-foot-compacto { padding-top: 6px; }
+.kb-card-bloqueado .kb-detalhar { filter: none; }

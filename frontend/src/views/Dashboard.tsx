@@ -4,6 +4,7 @@ import type { Area, Company, Lead, Paginated } from '../types';
 import { SkeletonTiles } from '../components/Skeleton';
 import { COLUMNS, columnOf, leadsVisiveisNoKanban, ordenarColuna } from './Leads';
 import { KanbanCardConteudo, KanbanColunaHead, TEMPERATURA_VISUAL } from '../components/KanbanVisual';
+import { LeadDetalheDialog } from '../components/LeadDetalheDialog';
 import { DashboardAtendimentosDialog, type AtendimentoResumo } from '../components/DashboardAtendimentosDialog';
 import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
 
@@ -85,6 +86,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   const [busy, setBusy] = useState(false);
   const [carregou, setCarregou] = useState(false);
   const [excluindoId, setExcluindoId] = useState<string | null>(null);
+  const [detalhe, setDetalhe] = useState<Lead | null>(null);
   const [error, setError] = useState('');
   const [recarregar, setRecarregar] = useState(0);
   // "Concluído com sucesso" = desfecho Encerrado (ver services.DESFECHO_SUCESSO).
@@ -395,7 +397,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                           >
                             ×
                           </button>
-                          <KanbanCardConteudo lead={l} coluna={col.key} compacto />
+                          <KanbanCardConteudo lead={l} coluna={col.key} compacto onDetalhar={setDetalhe} />
                         </article>
                       ))}
                       {!items.length && <div className="kb-vazio">Nenhum lead aqui</div>}
@@ -602,6 +604,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
         </section>
       )}
       {popup && <DashboardAtendimentosDialog {...popup} historico={company.coletar_historico_conversa ? { api, companyId: company.id } : undefined} onClose={() => setPopup(null)} />}
+      {detalhe && <LeadDetalheDialog lead={detalhe} estagio={COLUMNS.find((c) => c.key === columnOf(detalhe))?.label ?? ''} historico={company.coletar_historico_conversa ? { api, companyId: company.id } : undefined} onClose={() => setDetalhe(null)} />}
     </>
   );
 }

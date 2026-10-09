@@ -8,6 +8,7 @@ import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
 import { IconeWhatsapp } from '../components/Icones';
 import { CadastroAtendimentoDialog, Overlay, TriagemResumo } from '../components/CadastroAtendimento';
 import { KanbanCardConteudo, KanbanColunaHead, TEMPERATURA_VISUAL } from '../components/KanbanVisual';
+import { LeadDetalheDialog } from '../components/LeadDetalheDialog';
 
 // Mesma ordem de services.FAIXAS_URGENCIA no backend (menos urgente -> mais urgente).
 export const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Frio: 2, Qualificado: 3, Quente: 4 };
@@ -112,6 +113,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
   const [areaDespacho, setAreaDespacho] = useState('');
   const [desqualificadosCount, setDesqualificadosCount] = useState(0);
   const [historicoAberto, setHistoricoAberto] = useState(false);
+  const [detalhe, setDetalhe] = useState<Lead | null>(null);
 
   const podeAtender = role === 'atendente';
 
@@ -411,9 +413,10 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
                         onDragEnd={() => setDragId(null)}
                         onClick={() => !bloqueado && setSelected(l)}
                         tabIndex={bloqueado ? -1 : 0}
-                        role="button"
-                        aria-disabled={bloqueado}
-                        aria-label={bloqueado ? `${l.name || l.contact} — em atendimento com ${l.owner_nome}` : `Ver detalhes de ${l.name || l.contact}`}
+                        // Travado (outro atendente): o card não abre nem arrasta, mas o "Detalhar" continua ativo.
+                        role={bloqueado ? undefined : 'button'}
+                        aria-label={bloqueado ? undefined : `Ver detalhes de ${l.name || l.contact}`}
+                        title={bloqueado ? `Em atendimento com ${l.owner_nome}` : undefined}
                         onKeyDown={(e) => {
                           if (!bloqueado && (e.key === 'Enter' || e.key === ' ')) {
                             e.preventDefault();
@@ -422,7 +425,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
                         }}
                         style={{ cursor: bloqueado ? 'not-allowed' : podeArrastar(l) ? 'grab' : undefined }}
                       >
-                        <KanbanCardConteudo lead={l} coluna={col.key} meId={me.id} />
+                        <KanbanCardConteudo lead={l} coluna={col.key} meId={me.id} onDetalhar={setDetalhe} />
                       </article>
                     );
                   })}
@@ -588,6 +591,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
           </div>
         </Overlay>
       )}
+      {detalhe && <LeadDetalheDialog lead={detalhe} estagio={COLUMNS.find((c) => c.key === columnOf(detalhe))?.label ?? ''} historico={historicoDe} onClose={() => setDetalhe(null)} />}
     </>
   );
 }
