@@ -1734,6 +1734,23 @@ def _categoria_status(lead):
         return "aguardando"
     return "equipe"
 
+MOTIVOS_DESQUALIFICACAO = {
+    "fora_de_escopo": "Fora de escopo",
+    "sem_resposta": "Sem resposta após 3 repetições da mesma pergunta",
+}
+
+def motivo_da_desqualificacao(lead):
+    """Texto do motivo de um lead desqualificado (vazio para os demais), para o popup do Dashboard."""
+    if _categoria_status(lead) != "desqualificado":
+        return ""
+    detalhe = lead.get("urgencia_detalhe") or {}
+    if detalhe.get("motivo") in MOTIVOS_DESQUALIFICACAO:
+        return MOTIVOS_DESQUALIFICACAO[detalhe["motivo"]]
+    if lead.get("temperature") in FORA_DO_KANBAN:
+        media = f" (média {detalhe['score']})" if detalhe.get("score") is not None else ""
+        return f"Classificado como {lead['temperature']}{media}"
+    return "Desqualificado pelo agente"
+
 def _triagem_concluida_dashboard(lead):
     """Triagem concluída = leads que aguardam a equipe (colunas Qualificados e Em espera)."""
     return _categoria_status(lead) == "aguardando"
@@ -1773,6 +1790,7 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
     rows = list(qs.values(
         "id", "name", "contact", "created_at", "concluido_em", "desfecho", "bot_closed", "mode",
         "temperature", "priority", "especialidade", "owner", "origem_manual", "demand", "etapa_atendimento", "situacao_especial",
+        "urgencia_detalhe",
     ))
     User = get_user_model()
     nomes = {u.pk: _nome_usuario(u) for u in User.objects.filter(pk__in={r["owner"] for r in rows if r["owner"]}).select_related("profile")}
@@ -1829,6 +1847,7 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
                 "desfecho": r["desfecho"], "origem_manual": r["origem_manual"],
                 "categoria_status": _categoria_status(r),
                 "triagem_concluida": _triagem_concluida_dashboard(r),
+                "motivo_desqualificacao": motivo_da_desqualificacao(r),
             }
             for r in sorted(rows, key=lambda r: (r["created_at"], str(r["id"])), reverse=True)
         ],

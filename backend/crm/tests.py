@@ -3798,3 +3798,25 @@ class IdentidadeVisualTests(TestCase):
         agente.groups.add(Group.objects.get_or_create(name="agente")[0])
         self.company.members.add(agente)
         self.assertEqual(self.client_de(agente).post(self.url, {"nome": "X"}, format="json").status_code, 403)
+
+
+class MotivoDaDesqualificacaoTests(TestCase):
+    """Popup de Desqualificados: motivo de cada lead desqualificado no resumo do Dashboard."""
+    def test_motivos_por_causa_e_vazio_para_os_demais(self):
+        from .services import resumo_dashboard
+        company = Company.objects.create(name="Motivo Teste")
+        mk = lambda n, **kw: Lead.objects.create(company=company, contact=f"+55859999300{n}", bot_closed=True, **kw)
+        mk(1, temperature="Desqualificado", desfecho="desqualificado", urgencia_detalhe={"motivo": "fora_de_escopo"})
+        mk(2, temperature="Desqualificado", desfecho="desqualificado", urgencia_detalhe={"motivo": "sem_resposta"})
+        mk(3, temperature="Desqualificado", desfecho="desqualificado", urgencia_detalhe={"score": 1.5, "notas": {"a": 1}})
+        mk(4, temperature="Desconfiado", urgencia_detalhe={"score": 4.2})
+        mk(5, temperature="Quente")
+        r = resumo_dashboard(company)
+        motivos = {a["contact"][-1]: a["motivo_desqualificacao"] for a in r["atendimentos"]}
+        self.assertEqual(motivos, {
+            "1": "Fora de escopo",
+            "2": "Sem resposta após 3 repetições da mesma pergunta",
+            "3": "Classificado como Desqualificado (média 1.5)",
+            "4": "Classificado como Desconfiado (média 4.2)",
+            "5": "",
+        })

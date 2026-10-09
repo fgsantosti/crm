@@ -1,4 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { Api } from '../api';
+import { HistoricoConversaDialog } from './HistoricoConversaDialog';
 
 export type AtendimentoResumo = {
   id: string;
@@ -14,6 +16,8 @@ export type AtendimentoResumo = {
   origem_manual: boolean;
   categoria_status: 'despachado' | 'automatico' | 'aguardando' | 'equipe' | 'desqualificado' | 'especial';
   triagem_concluida: boolean;
+  /** Só para desqualificados: por que o lead foi desqualificado. */
+  motivo_desqualificacao: string;
 };
 
 const STATUS = {
@@ -25,13 +29,18 @@ const STATUS = {
   especial: { label: 'Outras situações', color: '#7C3AED' },
 };
 
-export function DashboardAtendimentosDialog({ title, description, atendimentos, onClose }: {
+export function DashboardAtendimentosDialog({ title, description, atendimentos, desqualificacao, historico, onClose }: {
   title: string;
   description: string;
   atendimentos: AtendimentoResumo[];
+  /** Popup de Desqualificados: mostra o motivo da desqualificação de cada lead. */
+  desqualificacao?: boolean;
+  /** Presente só quando a empresa liga a coleta de histórico no Admin: coluna com o botão "Histórico". */
+  historico?: { api: Api; companyId: number };
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const [conversa, setConversa] = useState<AtendimentoResumo | null>(null);
 
   useEffect(() => {
     const dialog = ref.current!;
@@ -66,7 +75,7 @@ export function DashboardAtendimentosDialog({ title, description, atendimentos, 
       <div className="table-wrap dashboard-dialog-content">
         {atendimentos.length ? (
           <table>
-            <thead><tr><th>Lead</th><th>Área</th><th>Demanda</th><th>Urgência</th><th>Status</th><th>Responsável</th><th>Entrada</th></tr></thead>
+            <thead><tr><th>Lead</th><th>Área</th><th>Demanda</th><th>Urgência</th><th>Status</th><th>Responsável</th><th>Entrada</th>{desqualificacao && <th>Motivo da desqualificação</th>}{desqualificacao && historico && <th>Histórico de mensagens</th>}</tr></thead>
             <tbody>
               {atendimentos.map((lead) => {
                 const status = STATUS[lead.categoria_status];
@@ -79,6 +88,14 @@ export function DashboardAtendimentosDialog({ title, description, atendimentos, 
                     <td style={{ color: status.color, fontWeight: 600 }}>{status.label}</td>
                     <td>{lead.owner || '—'}</td>
                     <td style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{new Date(lead.created_at).toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' })}</td>
+                    {desqualificacao && <td style={{ fontSize: 13 }}>{lead.motivo_desqualificacao || '—'}</td>}
+                    {desqualificacao && historico && (
+                      <td>
+                        <button type="button" className="secondary" onClick={() => setConversa(lead)}>
+                          Histórico
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -86,6 +103,7 @@ export function DashboardAtendimentosDialog({ title, description, atendimentos, 
           </table>
         ) : <div className="empty">Nenhum atendimento deste grupo no período selecionado.</div>}
       </div>
+      {conversa && historico && <HistoricoConversaDialog api={historico.api} companyId={historico.companyId} lead={conversa} onClose={() => setConversa(null)} />}
     </dialog>
   );
 }

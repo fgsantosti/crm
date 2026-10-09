@@ -78,7 +78,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   const [periodo, setPeriodo] = useState<'30' | 'all' | 'custom'>('30');
   const [dataInicio, setDataInicio] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' }));
   const [dataFim, setDataFim] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' }));
-  const [popup, setPopup] = useState<{ title: string; description: string; atendimentos: AtendimentoResumo[] } | null>(null);
+  const [popup, setPopup] = useState<{ title: string; description: string; atendimentos: AtendimentoResumo[]; desqualificacao?: boolean } | null>(null);
   const erroPeriodo = periodo === 'custom' ? (!dataInicio || !dataFim ? 'Selecione as datas de início e fim.' : dataInicio > dataFim ? 'A data de início deve ser anterior ou igual à data de fim.' : '') : '';
   const [busy, setBusy] = useState(false);
   const [carregou, setCarregou] = useState(false);
@@ -163,8 +163,8 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
     return leadsVisiveisNoKanban(leads).filter((lead) => ids.has(lead.id));
   }, [leads, resumo.atendimentos]);
 
-  function abrirPopup(title: string, description: string, matches: (lead: AtendimentoResumo) => boolean) {
-    setPopup({ title, description, atendimentos: resumo.atendimentos.filter(matches) });
+  function abrirPopup(title: string, description: string, matches: (lead: AtendimentoResumo) => boolean, desqualificacao = false) {
+    setPopup({ title, description, atendimentos: resumo.atendimentos.filter(matches), desqualificacao });
   }
 
   const cardsResumo = [
@@ -173,7 +173,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
     { title: 'Em triagem', count: automatico, color: '#2563EB', description: 'Atendimentos aguardando a conclusão da triagem automática.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'automatico' },
     { title: 'Com a equipe', count: humano, color: 'var(--accent)', description: 'Atendimentos em negociação com um atendente (incluindo os que estão em despacho) e os cadastrados manualmente pelos atendentes.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'equipe' },
     { title: 'Despachos', count: resumo.status.despachado, color: 'var(--success)', description: 'Atendimentos concluídos e despachados pela equipe (encerrado, comprometido, falha ou bloqueado) no período selecionado, incluindo os acompanhamentos de Outras situações.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'despachado' },
-    { title: 'Desqualificados', count: desqualificados, color: 'var(--muted)', description: 'Leads classificados como desqualificados ou desconfiados.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'desqualificado' },
+    { title: 'Desqualificados', count: desqualificados, color: 'var(--muted)', description: 'Leads classificados como desqualificados ou desconfiados.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'desqualificado', desqualificacao: true },
     { title: 'Outras situações', count: resumo.status.especial, color: '#7C3AED', description: 'Acompanhamentos em aberto: clientes que já têm processo e querem acompanhá-lo (não são leads novos). Depois de despachados, passam a contar em Despachos.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'especial' },
     { title: 'Não prosseguiram', count: resumo.nao_prosseguiram, color: 'var(--muted)', description: 'Triagens abandonadas que o sistema apagou automaticamente (sem resposta por 24h).', matches: (_lead: AtendimentoResumo) => false, semLista: true, detalhe: resumo.nao_prosseguiram === null ? 'indisponível com filtro de área/busca' : 'apagadas automaticamente' },
   ];
@@ -291,7 +291,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                   {card.detalhe && <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>{card.detalhe}</small>}
                 </div>
               ) : (
-                <button key={card.title} type="button" className="tile tile-button" disabled={busy || !!erroPeriodo} aria-haspopup="dialog" onClick={() => abrirPopup(card.title, card.description, card.matches)}>
+                <button key={card.title} type="button" className="tile tile-button" disabled={busy || !!erroPeriodo} aria-haspopup="dialog" onClick={() => abrirPopup(card.title, card.description, card.matches, 'desqualificacao' in card && card.desqualificacao === true)}>
                   <small>{card.title}</small>
                   <strong style={{ color: card.color }}>{card.count}</strong>
                   {card.detalhe && <small style={{ display: 'block', marginTop: 4, color: 'var(--muted)' }}>{card.detalhe}</small>}
@@ -571,7 +571,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
           </section>
         </>
       )}
-      {popup && <DashboardAtendimentosDialog {...popup} onClose={() => setPopup(null)} />}
+      {popup && <DashboardAtendimentosDialog {...popup} historico={company.coletar_historico_conversa ? { api, companyId: company.id } : undefined} onClose={() => setPopup(null)} />}
     </>
   );
 }

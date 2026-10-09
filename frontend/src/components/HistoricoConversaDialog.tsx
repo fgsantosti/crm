@@ -9,7 +9,7 @@ type MensagemConversa = { quem: 'cliente' | 'agente'; texto: string; quando: str
  * do áudio) e respostas do agente, da primeira mensagem até a que classificou. Só existe para empresas
  * com "Permitir coleta de histórico de conversa" ligado no Admin.
  */
-export function HistoricoConversaDialog({ api, companyId, lead, onClose }: { api: Api; companyId: number; lead: Lead; onClose: () => void }) {
+export function HistoricoConversaDialog({ api, companyId, lead, onClose }: { api: Api; companyId: number; lead: Pick<Lead, 'id' | 'name' | 'contact'>; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [mensagens, setMensagens] = useState<MensagemConversa[] | null>(null);
   const [erro, setErro] = useState('');
