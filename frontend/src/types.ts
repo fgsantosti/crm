@@ -99,6 +99,8 @@ export type Question = {
   /** nome/situacao/demanda — fixas em todo roteiro, não podem ser excluídas. */
   obrigatoria: boolean;
   /** Enviar a pergunta SPIN mesmo quando todos os dados de classificação já foram capturados. */
+  /** Só no texto 'lembrete': HH:MM:SS do envio (vazio = ao completar 24h sem resposta). */
+  horario_envio?: string | null;
   envio_obrigatorio: boolean;
   ordem: number;
   /** Opcional: guarda a resposta desta pergunta pra reusar como placeholder ({slug}) em outro texto. */

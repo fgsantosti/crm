@@ -28,7 +28,7 @@ const MANDATORY_LABELS: Record<string, string> = {
 // vendo o que o agente responde sobre a empresa), e "validar"/"encerramento" fecham
 // a triagem. "necessidade_humana" confirma o encaminhamento solicitado pelo cliente.
 // Esses textos não têm Variável de classificação (ver backend).
-const OFFFLOW_IDS = ['apresentacao', 'empresa', 'validar', 'encerramento', 'necessidade_humana', 'especial_acompanhamento'] as const;
+const OFFFLOW_IDS = ['apresentacao', 'empresa', 'validar', 'encerramento', 'necessidade_humana', 'lembrete', 'especial_acompanhamento'] as const;
 // Obrigatórias que ficam sempre nas perguntas fixas: a área só é conhecida depois delas.
 const SEMPRE_FIXAS = ['nome', 'situacao'];
 const ETAPAS_SPIN: { value: Question['etapa_spin']; label: string }[] = [
@@ -44,6 +44,7 @@ const OFFFLOW_LABELS: Record<string, { title: string; help: string }> = {
   validar: { title: 'Confirmação dos dados', help: 'Resumo enviado para o cliente confirmar antes de encerrar a triagem.' },
   encerramento: { title: 'Encerramento', help: 'Mensagem final, enviada quando a triagem é concluída e classificada.' },
   necessidade_humana: { title: 'Necessidade humana', help: 'Mensagem enviada ao cliente caso ele peça atendimento humano' },
+  lembrete: { title: 'Lembrete de continuidade', help: 'Enviada ao cliente que ficou 24 horas sem responder; logo depois o agente reenvia a pergunta em que ele parou. Se não houver retorno em mais 24 horas, a triagem é apagada. Funciona também com “Etapa Inicial?” marcada.' },
   especial_acompanhamento: { title: 'Outras situações — acompanhamento de processo', help: 'Resposta enviada ao cliente que já tem processo no escritório e quer acompanhá-lo (o lead vai para “Outras situações”). Em silêncio quando “Etapa Inicial?” está marcada.' },
 };
 
@@ -321,7 +322,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
     }
   }
 
-  async function saveQuestion(q: Question, patch: Partial<Pick<Question, 'text' | 'habilitada' | 'envio_obrigatorio' | 'variavel' | 'question_id' | 'ordem' | 'variavel_roteiro' | 'variaveis_obrigatorias' | 'area' | 'etapa_spin'>>) {
+  async function saveQuestion(q: Question, patch: Partial<Pick<Question, 'text' | 'habilitada' | 'envio_obrigatorio' | 'horario_envio' | 'variavel' | 'question_id' | 'ordem' | 'variavel_roteiro' | 'variaveis_obrigatorias' | 'area' | 'etapa_spin'>>) {
     setSavingQ(q.id);
     setError('');
     try {
@@ -805,6 +806,24 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                   <TextoComPreview value={q.text} rows={2} disabled={savingQ === q.id} variaveisRoteiro={variaveisRoteiro} onSave={(text) => saveQuestion(q, { text })} />
                 ) : (
                   <p style={{ color: 'var(--ink)', fontSize: 15 }}>“{q.text ? destacarTexto(q.text, variaveisRoteiro) : 'Sem texto cadastrado'}”</p>
+                )}
+                {q && id === 'lembrete' && (
+                  <label style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    Horário exato do envio
+                    <input
+                      type="time"
+                      style={{ width: 140 }}
+                      defaultValue={(q.horario_envio || '').slice(0, 5)}
+                      disabled={!canEdit || savingQ === q.id}
+                      onBlur={(e) => {
+                        const valor = e.currentTarget.value;
+                        if (valor !== (q.horario_envio || '').slice(0, 5)) saveQuestion(q, { horario_envio: valor || null });
+                      }}
+                    />
+                    <small style={{ color: 'var(--muted)' }}>
+                      Depois de 24 horas sem resposta, o lembrete sai neste horário (fuso de Fortaleza). Vazio = assim que completar 24 horas.
+                    </small>
+                  </label>
                 )}
                 {q && id === 'necessidade_humana' && (
                   <fieldset disabled={!canEdit || savingQ === q.id || etapaInicial} style={{ marginTop: 14, border: '1px solid var(--line)', borderRadius: 8 }}>
