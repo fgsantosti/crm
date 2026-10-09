@@ -2,6 +2,7 @@ import { Logo } from './Logo';
 import { ProfileMenu } from './ProfileMenu';
 import type { Api } from '../api';
 import type { Me } from '../types';
+import { confirmarSaida, useConfirmar } from './ConfirmDialog';
 
 export type AdminView = 'dashboard' | 'equipe' | 'painel';
 
@@ -38,6 +39,7 @@ export function AdminSidebar({
   onOpenTrocarEmail: () => void;
   onOpenTrocarSenha: () => void;
 }) {
+  const confirmar = useConfirmar();
   return (
     <aside className="sidebar">
       <div className="sidebar-glow" />
@@ -72,8 +74,8 @@ export function AdminSidebar({
           type="button"
           className="logout"
           style={{ flex: 1 }}
-          onClick={() => {
-            if (window.confirm('Deseja sair da conta?')) onLogout();
+          onClick={async () => {
+            if (await confirmarSaida(confirmar, me)) onLogout();
           }}
         >
           Sair

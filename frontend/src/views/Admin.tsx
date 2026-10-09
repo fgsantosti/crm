@@ -3,6 +3,7 @@ import { Spinner, SkeletonCards } from '../components/Skeleton';
 import { fetchTodasAsPaginas, type Api } from '../api';
 import { AdminContas } from '../components/AdminContas';
 import type { AdminCompany, AgentStatus } from '../types';
+import { useConfirmar } from '../components/ConfirmDialog';
 
 /**
  * Painel Admin interno da Axioma: cadastro de empresas e token de API do
@@ -19,6 +20,7 @@ export function Admin({ api }: { api: Api }) {
   const [creating, setCreating] = useState(false);
   const [savingCompany, setSavingCompany] = useState(false);
 
+  const confirmar = useConfirmar();
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [agentBusy, setAgentBusy] = useState(false);
   const [agentError, setAgentError] = useState('');
@@ -114,7 +116,19 @@ export function Admin({ api }: { api: Api }) {
 
   async function gerarToken() {
     if (!selected) return;
-    if (agentStatus?.masked_key && !window.confirm('Já existe uma chave ativa para esta empresa. Gerar uma nova vai invalidar a atual imediatamente. Continuar?')) return;
+    if (agentStatus?.masked_key && !(await confirmar({
+      titulo: 'Gerar nova chave do agente?',
+      mensagem: 'Já existe uma chave ativa para esta empresa. Ao gerar outra, a atual deixa de valer na hora e o agente fica sem acesso ao CRM até receber a nova.',
+      detalhe: (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <code>{agentStatus.masked_key}</code>
+          {agentStatus.validade && <small>{agentStatus.validade.expirado ? 'expirada em ' : 'válida até '}{new Date(agentStatus.validade.expires_at).toLocaleDateString('pt-BR')}</small>}
+        </div>
+      ),
+      tom: 'atencao',
+      icone: 'chave',
+      confirmar: 'Gerar nova chave',
+    }))) return;
     setAgentBusy(true);
     setAgentError('');
     try {
@@ -148,7 +162,7 @@ export function Admin({ api }: { api: Api }) {
 
   async function revogarToken() {
     if (!selected) return;
-    if (!window.confirm('Revogar a chave desta empresa? O agente para de conseguir chamar a API imediatamente.')) return;
+    if (!(await confirmar({ titulo: 'Revogar a chave desta empresa?', mensagem: 'O agente para de conseguir chamar a API imediatamente.', tom: 'perigo', icone: 'chave', confirmar: 'Revogar chave' }))) return;
     setAgentBusy(true);
     setAgentError('');
     try {

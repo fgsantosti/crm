@@ -3,6 +3,7 @@ import type { Api } from '../api';
 import type { Area, Company, Question, Paginated, Variavel, VariavelRoteiro } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 import { AudioDaPergunta } from '../components/AudioDaPergunta';
+import { useConfirmar } from '../components/ConfirmDialog';
 
 const PLACEHOLDER_LABELS: Record<string, string> = {
   empresa: 'Nome da empresa',
@@ -181,6 +182,7 @@ const VOZES_TTS = [
 ];
 
 export function Roteiro({ api, company, canEdit }: { api: Api; company: Company; canEdit: boolean }) {
+  const confirmar = useConfirmar();
   const [tab, setTab] = useState<'perguntas' | 'fora-do-fluxo' | 'variaveis' | 'opcoes-agente'>('perguntas');
   const [conversacional, setConversacional] = useState(company.agente_conversacional);
   const [etapaInicial, setEtapaInicial] = useState(company.etapa_inicial);
@@ -375,7 +377,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
   }
 
   async function removeQuestion(q: Question) {
-    if (!window.confirm(`Remover a pergunta "${q.question_id}"? As respostas já coletadas de leads continuam no histórico.`)) return;
+    if (!(await confirmar({ titulo: `Remover a pergunta "${q.question_id}"?`, mensagem: 'As respostas já coletadas de leads continuam no histórico.', tom: 'perigo', icone: 'lixeira', confirmar: 'Remover pergunta' }))) return;
     setSavingQ(q.id);
     setError('');
     try {
@@ -429,7 +431,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
   }
 
   async function removeVariavel(variavel: Variavel) {
-    if (!window.confirm(`Remover a variável "${variavel.name}"?`)) return;
+    if (!(await confirmar({ titulo: `Remover a variável "${variavel.name}"?`, mensagem: 'Se alguma pergunta do roteiro ainda usa esta variável, a remoção é recusada.', tom: 'perigo', icone: 'lixeira', confirmar: 'Remover variável' }))) return;
     setSavingV(variavel.id);
     setError('');
     try {
@@ -459,7 +461,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
   }
 
   async function removeVariavelRoteiro(variavel: VariavelRoteiro) {
-    if (!window.confirm(`Remover a variável de roteiro "${variavel.name}"?`)) return;
+    if (!(await confirmar({ titulo: `Remover a variável de roteiro "${variavel.name}"?`, mensagem: 'Se uma pergunta ainda usa esta variável de roteiro, a remoção é recusada.', tom: 'perigo', icone: 'lixeira', confirmar: 'Remover variável' }))) return;
     setSavingVR(variavel.id);
     setError('');
     try {

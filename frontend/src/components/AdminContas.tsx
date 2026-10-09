@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Api } from '../api';
 import type { ContaEmpresa, ContasDaEmpresa } from '../types';
 import { Spinner } from './Skeleton';
+import { ConfirmPessoa, useConfirmar } from './ConfirmDialog';
 
 type Credencial = { titulo: string; email: string; senha: string; emailEnviado: boolean };
 
@@ -12,6 +13,7 @@ type Credencial = { titulo: string; email: string; senha: string; emailEnviado: 
  * ao lado do formulário da empresa, e Enter aqui nunca pode salvá-la.
  */
 export function AdminContas({ api, companyId, companyName }: { api: Api; companyId: number; companyName: string }) {
+  const confirmar = useConfirmar();
   const [dados, setDados] = useState<ContasDaEmpresa | null>(null);
   const [erro, setErro] = useState('');
   const [busy, setBusy] = useState(false);
@@ -56,23 +58,23 @@ export function AdminContas({ api, companyId, companyName }: { api: Api; company
       setNome('');
     });
 
-  const redefinir = (c: ContaEmpresa) => {
-    if (!window.confirm(`Gerar uma nova senha provisória para ${c.email}? A senha atual deixa de valer e a pessoa terá de trocá-la no próximo acesso.`)) return;
+  const redefinir = async (c: ContaEmpresa) => {
+    if (!(await confirmar({ titulo: 'Gerar uma nova senha provisória?', mensagem: 'A senha atual deixa de valer e a pessoa terá de trocá-la no próximo acesso.', detalhe: <ConfirmPessoa nome={c.display_name || c.email} sub={c.email} />, tom: 'atencao', icone: 'chave', confirmar: 'Gerar nova senha' }))) return;
     return executar(async () => {
       const r = await api(`${base}/contas/empresa/${c.id}/redefinir-senha/`, { method: 'POST' });
       setCredencial({ titulo: 'Nova senha gerada', email: c.email, senha: r.senha_provisoria, emailEnviado: r.email_enviado });
     });
   };
 
-  const alternar = (c: ContaEmpresa) => {
-    if (c.is_active && !window.confirm(`Desativar o login de ${c.email}? A pessoa não consegue mais entrar; dá para reativar depois.`)) return;
+  const alternar = async (c: ContaEmpresa) => {
+    if (c.is_active && !(await confirmar({ titulo: 'Desativar este login?', mensagem: 'A pessoa não consegue mais entrar; dá para reativar depois.', detalhe: <ConfirmPessoa nome={c.display_name || c.email} sub={c.email} />, tom: 'atencao', icone: 'pessoa', confirmar: 'Desativar login' }))) return;
     return executar(async () => {
       await api(`${base}/contas/empresa/${c.id}/`, { method: 'PATCH', body: JSON.stringify({ is_active: !c.is_active }) });
     });
   };
 
-  const revogarExtra = (id: number, username: string) => {
-    if (!window.confirm(`Revogar a chave da conta ${username}? Quem usar essa chave perde o acesso à API na hora.`)) return;
+  const revogarExtra = async (id: number, username: string) => {
+    if (!(await confirmar({ titulo: 'Revogar esta chave?', mensagem: 'Quem usar essa chave perde o acesso à API na hora.', detalhe: <ConfirmPessoa nome={username} />, tom: 'perigo', icone: 'chave', confirmar: 'Revogar chave' }))) return;
     return executar(async () => {
       await api(`${base}/agente/?user_id=${id}`, { method: 'DELETE' });
     });

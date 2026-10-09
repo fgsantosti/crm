@@ -3,6 +3,7 @@ import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Company, Lead } from '../types';
 import { SkeletonRows } from '../components/Skeleton';
 import { LeadDetalheDialog } from '../components/LeadDetalheDialog';
+import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
 
 // Pendências = Kanban "Qualificados" + "Atendimentos em espera" (backend: ?pending=1, já ordenado
 // com Em espera antes de Classificado). "Pegar Lead" assume o atendimento e leva o lead para
@@ -12,6 +13,7 @@ function estagio(l: Lead): 'Em espera' | 'Classificado' {
 }
 
 export function Pendencias({ api, company }: { api: Api; company: Company }) {
+  const confirmar = useConfirmar();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
@@ -40,7 +42,14 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
   }, [company.id, recarregar]);
 
   async function pegarLead(lead: Lead) {
-    if (!window.confirm(`Pegar "${lead.name || lead.contact}"? Você passa a ser o responsável e o lead vai para "Meus Atendimentos".`)) return;
+    const ok = await confirmar({
+      titulo: 'Pegar este lead?',
+      mensagem: 'Você passa a ser o responsável e o lead vai para Meus Atendimentos.',
+      detalhe: <ConfirmPessoa nome={lead.name || 'Sem nome informado'} sub={lead.contact} chips={[lead.temperature, lead.especialidade].filter(Boolean)} />,
+      icone: 'pessoa',
+      confirmar: 'Pegar lead',
+    });
+    if (!ok) return;
     setPegandoId(lead.id);
     setError('');
     try {

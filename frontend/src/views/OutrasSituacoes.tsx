@@ -4,6 +4,7 @@ import type { Company, Lead, Me } from '../types';
 import { LeadDetalheDialog, ObservacoesLead } from '../components/LeadDetalheDialog';
 import { Spinner } from '../components/Skeleton';
 import { AreaSelect } from '../components/AreaSelect';
+import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
 
 const DESFECHO_OPTIONS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string; help: string }[] = [
   { value: 'encerrado', label: 'Encerrado', color: 'var(--success)', help: 'Sucesso de comunicação — o cliente conseguiu realizar o que desejava.' },
@@ -20,6 +21,7 @@ export const rotuloSituacao = (valor: string) => ROTULOS[valor] ?? valor;
  * Atendentes assumem e concluem; a conta Empresa vê e pode concluir.
  */
 export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api; company: Company; role: 'atendente' | 'empresa' | 'admin'; me: Me; onChange?: (abertos: number) => void }) {
+  const confirmar = useConfirmar();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [busy, setBusy] = useState(true);
   const [acaoId, setAcaoId] = useState<string | null>(null);
@@ -94,7 +96,7 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
   // Mesma regra de despacho de Meus Atendimentos: classifica o desfecho (e a área); entra nas
   // contagens de concluídos/despachos do Dashboard e libera o número.
   async function despachar(lead: Lead, desfecho: 'encerrado' | 'comprometido' | 'falha' | 'bloqueado') {
-    if (desfecho === 'bloqueado' && !window.confirm(`Despachar e bloquear "${lead.name || lead.contact}"? O número vai para a BlackList até você removê-lo de lá.`)) return;
+    if (desfecho === 'bloqueado' && !(await confirmar({ titulo: 'Despachar e bloquear?', mensagem: 'O número vai para a BlackList até você removê-lo de lá.', detalhe: <ConfirmPessoa nome={lead.name || 'Sem nome informado'} sub={lead.contact} />, tom: 'perigo', icone: 'aviso', confirmar: 'Despachar e bloquear' }))) return;
     setAcaoId(lead.id);
     setError('');
     try {

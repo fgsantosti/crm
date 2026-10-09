@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import type { Api } from '../api';
 import type { Company, CompanyInfoEntry, Paginated } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
+import { useConfirmar } from '../components/ConfirmDialog';
 
 export function DadosEmpresa({ api, company }: { api: Api; company: Company }) {
+  const confirmar = useConfirmar();
   const [entries, setEntries] = useState<CompanyInfoEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [savingId, setSavingId] = useState<number | 'new' | null>(null);
@@ -62,7 +64,7 @@ export function DadosEmpresa({ api, company }: { api: Api; company: Company }) {
   }
 
   async function remove(entry: CompanyInfoEntry) {
-    if (!window.confirm(`Excluir "${entry.title}"? Essa ação não pode ser desfeita.`)) return;
+    if (!(await confirmar({ titulo: `Excluir "${entry.title}"?`, mensagem: 'Essa ação não pode ser desfeita.', tom: 'perigo', icone: 'lixeira', confirmar: 'Excluir' }))) return;
     setSavingId(entry.id);
     setError('');
     try {

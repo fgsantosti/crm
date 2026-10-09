@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { Api } from '../api';
 import type { Me } from '../types';
 import { Spinner } from './Skeleton';
+import { confirmarSaida, useConfirmar } from './ConfirmDialog';
 
 type Section = 'menu' | 'excluir';
 
@@ -60,6 +61,7 @@ export function ProfileMenu({
   onOpenTrocarSenha: () => void;
   onLogout: () => void;
 }) {
+  const confirmar = useConfirmar();
   const [open, setOpen] = useState(false);
   const [section, setSection] = useState<Section>('menu');
   const [busy, setBusy] = useState(false);
@@ -348,8 +350,8 @@ export function ProfileMenu({
                         type="button"
                         className="secondary"
                         style={botaoPequeno}
-                        onClick={() => {
-                          if (window.confirm('Deseja sair da conta?')) onLogout();
+                        onClick={async () => {
+                          if (await confirmarSaida(confirmar, me)) onLogout();
                         }}
                       >
                         Sair da conta

@@ -5,6 +5,7 @@ import { DonutChart } from '../components/DonutChart';
 import { SkeletonTiles } from '../components/Skeleton';
 import { COLUMNS, URGENCIA_COR, columnOf, leadsVisiveisNoKanban, ordenarColuna } from './Leads';
 import { DashboardAtendimentosDialog, type AtendimentoResumo } from '../components/DashboardAtendimentosDialog';
+import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
 
 type Resumo = {
   total: number;
@@ -78,6 +79,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   const [periodo, setPeriodo] = useState<'30' | 'all' | 'custom'>('30');
   const [dataInicio, setDataInicio] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' }));
   const [dataFim, setDataFim] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' }));
+  const confirmar = useConfirmar();
   const [popup, setPopup] = useState<{ title: string; description: string; atendimentos: AtendimentoResumo[]; desqualificacao?: boolean } | null>(null);
   const erroPeriodo = periodo === 'custom' ? (!dataInicio || !dataFim ? 'Selecione as datas de início e fim.' : dataInicio > dataFim ? 'A data de início deve ser anterior ou igual à data de fim.' : '') : '';
   const [busy, setBusy] = useState(false);
@@ -181,12 +183,15 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   // "Fechar lead": apaga o lead (e o histórico dele) no CRM. A próxima mensagem desse número
   // abre um lead novo e o agente recomeça a triagem do zero.
   async function removerLead(lead: Lead) {
-    if (
-      !window.confirm(
-        `Fechar o lead "${lead.name || lead.contact}"?\n\nO lead e o histórico dele serão apagados. Se esse número mandar mensagem de novo, o agente recomeça a triagem do zero. Essa ação não pode ser desfeita.`,
-      )
-    )
-      return;
+    const ok = await confirmar({
+      titulo: `Fechar o lead "${lead.name || lead.contact}"?`,
+      mensagem: 'O lead e o histórico dele serão apagados. Se esse número mandar mensagem de novo, o agente recomeça a triagem do zero.',
+      detalhe: <ConfirmPessoa nome={lead.name || lead.contact} sub={lead.contact} selo="Irreversível" />,
+      tom: 'perigo',
+      icone: 'lixeira',
+      confirmar: 'Fechar lead',
+    });
+    if (!ok) return;
     setExcluindoId(lead.id);
     setError('');
     try {

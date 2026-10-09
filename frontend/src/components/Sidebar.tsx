@@ -3,6 +3,7 @@ import { paletaDaEmpresa } from '../identidade';
 import { ProfileMenu } from './ProfileMenu';
 import type { Api } from '../api';
 import type { Company, Me } from '../types';
+import { confirmarSaida, useConfirmar } from './ConfirmDialog';
 
 export type View = 'dashboard' | 'leads' | 'especiais' | 'pendencias' | 'humano' | 'blacklist' | 'roteiro' | 'dados-empresa' | 'equipe';
 
@@ -46,6 +47,7 @@ export function Sidebar({
   /** Abre o popup de identidade visual (só a conta Empresa). */
   onOpenIdentidade: () => void;
 }) {
+  const confirmar = useConfirmar();
   const items: { key: View | 'identidade'; label: string; count?: number }[] = [{ key: 'dashboard', label: 'Dashboard' }];
   if (role === 'atendente') {
     items.push({ key: 'leads', label: 'Todos os leads', count: leadsCount });
@@ -112,8 +114,8 @@ export function Sidebar({
           type="button"
           className="logout"
           style={{ flex: 1 }}
-          onClick={() => {
-            if (window.confirm('Deseja sair da conta?')) onLogout();
+          onClick={async () => {
+            if (await confirmarSaida(confirmar, me)) onLogout();
           }}
         >
           Sair

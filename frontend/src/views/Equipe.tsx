@@ -3,8 +3,10 @@ import type { Api } from '../api';
 import type { Area, AtendenteInvite, Company, EquipeMembro, Paginated } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 import { Avatar } from '../components/ProfileMenu';
+import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
 
 export function Equipe({ api, company }: { api: Api; company: Company }) {
+  const confirmar = useConfirmar();
   const [membros, setMembros] = useState<EquipeMembro[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
   const [convites, setConvites] = useState<AtendenteInvite[]>([]);
@@ -54,7 +56,7 @@ export function Equipe({ api, company }: { api: Api; company: Company }) {
   }
 
   async function removeArea(area: Area) {
-    if (!window.confirm(`Remover a área "${area.name}"? Leads já classificados com ela mantêm o registro.`)) return;
+    if (!(await confirmar({ titulo: `Remover a área "${area.name}"?`, mensagem: 'Leads já classificados com ela mantêm o registro.', tom: 'atencao', icone: 'lixeira', confirmar: 'Remover área' }))) return;
     setSavingArea(area.id);
     setError('');
     try {
@@ -88,7 +90,7 @@ export function Equipe({ api, company }: { api: Api; company: Company }) {
   }
 
   async function redefinirSenha(membro: EquipeMembro) {
-    if (!window.confirm(`Enviar uma nova senha por e-mail para ${membro.email}?`)) return;
+    if (!(await confirmar({ titulo: 'Enviar uma nova senha?', mensagem: 'A senha atual deixa de valer e a pessoa terá de trocá-la no próximo acesso.', detalhe: <ConfirmPessoa nome={membro.display_name || membro.username} sub={membro.email} />, icone: 'email', confirmar: 'Enviar nova senha' }))) return;
     setMembroAction(membro.id);
     setError('');
     try {
@@ -102,7 +104,7 @@ export function Equipe({ api, company }: { api: Api; company: Company }) {
   }
 
   async function desligarAtendente(membro: EquipeMembro) {
-    if (!window.confirm(`Desligar ${membro.display_name || membro.username}? A conta de acesso dele(a) será removida permanentemente.`)) return;
+    if (!(await confirmar({ titulo: `Desligar ${membro.display_name || membro.username}?`, mensagem: 'A conta de acesso será removida permanentemente. Os leads atendidos continuam no histórico da empresa.', detalhe: <ConfirmPessoa nome={membro.display_name || membro.username} sub={membro.email} selo="Irreversível" />, tom: 'perigo', icone: 'lixeira', confirmar: 'Desligar atendente' }))) return;
     setMembroAction(membro.id);
     setError('');
     try {
@@ -115,7 +117,7 @@ export function Equipe({ api, company }: { api: Api; company: Company }) {
   }
 
   async function cancelarConvite(invite: AtendenteInvite) {
-    if (!window.confirm(`Cancelar o convite enviado para ${invite.email}?`)) return;
+    if (!(await confirmar({ titulo: 'Cancelar o convite?', mensagem: `O convite enviado para ${invite.email} deixa de valer.`, tom: 'atencao', icone: 'email', confirmar: 'Cancelar convite', cancelar: 'Manter convite' }))) return;
     try {
       await api(`/convites/${invite.id}/?company=${company.id}`, { method: 'DELETE' });
       setConvites((v) => v.filter((c) => c.id !== invite.id));

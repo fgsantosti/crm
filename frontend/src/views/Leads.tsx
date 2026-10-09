@@ -7,6 +7,7 @@ import type { Company, Lead, LeadEvent, Me } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 import { AreaSelect } from '../components/AreaSelect';
 import { LeadNameField } from '../components/LeadNameField';
+import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
 
 // Mesma ordem de services.FAIXAS_URGENCIA no backend (menos urgente -> mais urgente).
 export const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Frio: 2, Qualificado: 3, Quente: 4 };
@@ -141,6 +142,7 @@ function UrgenciaDetalhe({ lead }: { lead: Lead }) {
 }
 
 export function Leads({ api, company, role, me }: { api: Api; company: Company; role: 'atendente' | 'empresa' | 'admin'; me: Me }) {
+  const confirmar = useConfirmar();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [search, setSearch] = useState('');
   const [mostrarNovasLeads, setMostrarNovasLeads] = useState(true);
@@ -266,7 +268,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
   }
 
   async function liberar(lead: Lead) {
-    if (!window.confirm('Soltar este atendimento? Ele volta para Qualificados e qualquer atendente poderá reivindicá-lo.')) return;
+    if (!(await confirmar({ titulo: 'Soltar este atendimento?', mensagem: 'Ele volta para Qualificados e qualquer atendente poderá reivindicá-lo.', detalhe: <ConfirmPessoa nome={lead.name || 'Sem nome informado'} sub={lead.contact} />, tom: 'atencao', icone: 'pessoa', confirmar: 'Soltar atendimento' }))) return;
     await chamarAcao('liberar', lead);
   }
 

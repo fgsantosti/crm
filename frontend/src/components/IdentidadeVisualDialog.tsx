@@ -4,6 +4,7 @@ import type { Company } from '../types';
 import { paletaDaIdentidade } from '../identidade';
 import { Logo } from './Logo';
 import { Spinner } from './Skeleton';
+import { useConfirmar } from './ConfirmDialog';
 
 const PADRAO_PRINCIPAL = '#241a12';
 const PADRAO_CONTRASTE = '#4a2410';
@@ -13,6 +14,7 @@ const PADRAO_CONTRASTE = '#4a2410';
  * gradiente de fundo. As duas cores são obrigatórias; o texto da barra se ajusta pela luminância.
  */
 export function IdentidadeVisualDialog({ api, company, onSaved, onClose }: { api: Api; company: Company; onSaved: (c: Company) => void; onClose: () => void }) {
+  const confirmar = useConfirmar();
   const ref = useRef<HTMLDialogElement>(null);
   const atual = company.identidade_visual;
   const [nome, setNome] = useState(atual?.nome ?? '');
@@ -70,8 +72,8 @@ export function IdentidadeVisualDialog({ api, company, onSaved, onClose }: { api
     void enviar(form);
   }
 
-  function restaurar() {
-    if (!window.confirm('Voltar ao padrão Conecta (logo, nome e cores originais)?')) return;
+  async function restaurar() {
+    if (!(await confirmar({ titulo: 'Voltar ao padrão Conecta?', mensagem: 'O logo, o nome e as cores originais serão restaurados na barra lateral.', tom: 'atencao', icone: 'aviso', confirmar: 'Restaurar padrão' }))) return;
     const form = new FormData();
     form.append('restaurar', '1');
     void enviar(form);
