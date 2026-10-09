@@ -8,6 +8,7 @@ import { SkeletonCards, Spinner } from '../components/Skeleton';
 import { AreaSelect } from '../components/AreaSelect';
 import { LeadNameField } from '../components/LeadNameField';
 import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
+import { IconeWhatsapp } from '../components/Icones';
 
 // Mesma ordem de services.FAIXAS_URGENCIA no backend (menos urgente -> mais urgente).
 export const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Frio: 2, Qualificado: 3, Quente: 4 };
@@ -530,7 +531,8 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
 
           {selected.contact && (
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
-              <a href={`https://wa.me/${selected.contact.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+              <a href={`https://wa.me/${selected.contact.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <IconeWhatsapp />
                 <button type="button" style={{ background: '#25D366', borderColor: '#25D366' }}>
                   Conversar
                 </button>

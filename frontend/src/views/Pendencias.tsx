@@ -3,6 +3,7 @@ import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Company, Lead } from '../types';
 import { SkeletonRows } from '../components/Skeleton';
 import { LeadDetalheDialog } from '../components/LeadDetalheDialog';
+import { IconeEnvio } from '../components/Icones';
 import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
 
 // Pendências = Kanban "Qualificados" + "Atendimentos em espera" (backend: ?pending=1, já ordenado
@@ -125,17 +126,20 @@ export function Pendencias({ api, company }: { api: Api; company: Company }) {
                     <td>{estagio(l)}</td>
                     <td>{l.next_action}</td>
                     <td>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          pegarLead(l);
-                        }}
-                        disabled={pegandoId !== null}
-                        title="Assumir e levar para Meus Atendimentos"
-                      >
-                        {pegandoId === l.id ? 'Pegando…' : 'Pegar Lead'}
-                      </button>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <IconeEnvio size={30} />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            pegarLead(l);
+                          }}
+                          disabled={pegandoId !== null}
+                          title="Assumir e levar para Meus Atendimentos"
+                        >
+                          {pegandoId === l.id ? 'Pegando…' : 'Pegar Lead'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );

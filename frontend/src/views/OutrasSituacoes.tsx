@@ -5,6 +5,7 @@ import { LeadDetalheDialog, ObservacoesLead } from '../components/LeadDetalheDia
 import { Spinner } from '../components/Skeleton';
 import { AreaSelect } from '../components/AreaSelect';
 import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
+import { IconeWhatsapp } from '../components/Icones';
 
 const DESFECHO_OPTIONS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string; help: string }[] = [
   { value: 'encerrado', label: 'Encerrado', color: 'var(--success)', help: 'Sucesso de comunicação — o cliente conseguiu realizar o que desejava.' },
@@ -232,7 +233,8 @@ export function OutrasSituacoes({ api, company, role, me, onChange }: { api: Api
                   Ver dados
                 </button>
                 {l.contact && (
-                  <a href={`https://wa.me/${l.contact.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                  <a href={`https://wa.me/${l.contact.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <IconeWhatsapp />
                     <button type="button" style={{ background: '#25D366', borderColor: '#25D366' }}>
                       Conversar
                     </button>

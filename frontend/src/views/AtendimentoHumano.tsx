@@ -4,6 +4,7 @@ import type { Company, Lead, Me } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 import { AreaSelect } from '../components/AreaSelect';
 import { ObservacoesLead } from '../components/LeadDetalheDialog';
+import { IconeWhatsapp } from '../components/Icones';
 
 const DESFECHO_OPTIONS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string; help: string }[] = [
   { value: 'encerrado', label: 'Encerrado', color: 'var(--success)', help: 'Sucesso de comunicação — o cliente conseguiu realizar o que desejava.' },
@@ -232,7 +233,8 @@ export function AtendimentoHumano({ api, company, me }: { api: Api; company: Com
               </div>
               <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                 {l.contact && (
-                  <a href={`https://wa.me/${l.contact.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                  <a href={`https://wa.me/${l.contact.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <IconeWhatsapp />
                     <button type="button" style={{ background: '#25D366', borderColor: '#25D366' }}>
                       Conversar
                     </button>
