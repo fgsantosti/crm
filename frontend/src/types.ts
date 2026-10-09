@@ -47,7 +47,7 @@ export type Lead = {
   return_at: string | null;
   priority: 'Alta' | 'Média' | 'Baixa';
   /** Auditoria do CLASSIFICADO por notas (vazio quando o agente mandou a temperatura direto). */
-  urgencia_detalhe: { notas?: Record<string, number>; pesos?: Record<string, number>; score?: number; temperatura_calculada?: string };
+  urgencia_detalhe: { notas?: Record<string, number>; pesos?: Record<string, number>; nomes?: Record<string, string>; score?: number; temperatura_calculada?: string };
   /** id do usuário responsável -- compare com Me.id, nunca por nome. */
   owner: number | null;
   /** Só pra exibição. */
@@ -115,6 +115,8 @@ export type Variavel = {
   name: string;
   /** 1-10, usado na média ponderada que sugere a urgência (ver services.calcular_urgencia). */
   peso: number;
+  /** Variável do sistema (Detalhamento): obrigatória, só o peso é editável. */
+  builtin?: boolean;
 };
 
 export type VariavelRoteiro = {

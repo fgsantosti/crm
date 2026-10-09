@@ -4,6 +4,7 @@ import type { Area, Company, Question, Paginated, Variavel, VariavelRoteiro } fr
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 import { AudioDaPergunta } from '../components/AudioDaPergunta';
 import { useConfirmar } from '../components/ConfirmDialog';
+import { PalavrasChaveDialog, listaDePalavras } from '../components/PalavrasChaveDialog';
 
 const PLACEHOLDER_LABELS: Record<string, string> = {
   empresa: 'Nome da empresa',
@@ -191,6 +192,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
   const [voz, setVoz] = useState(company.voz_tts);
   const [erroOpcoes, setErroOpcoes] = useState('');
   const [savingOpcoes, setSavingOpcoes] = useState(false);
+  const [palavrasArea, setPalavrasArea] = useState<Area | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [variaveis, setVariaveis] = useState<Variavel[]>([]);
   const [variaveisRoteiro, setVariaveisRoteiro] = useState<VariavelRoteiro[]>([]);
@@ -304,14 +306,16 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
     }
   }
 
-  async function salvarPalavrasChave(area: Area, palavras_chave: string) {
+  async function salvarPalavrasChave(area: Area, palavras_chave: string): Promise<boolean> {
     setSavingOpcoes(true);
     setError('');
     try {
       const atualizada: Area = await api(`/areas/${area.id}/?company=${company.id}`, { method: 'PATCH', body: JSON.stringify({ palavras_chave }) });
       setAreas((v) => v.map((a) => (a.id === atualizada.id ? atualizada : a)));
+      return true;
     } catch (err) {
       setError((err as Error).message);
+      return false;
     } finally {
       setSavingOpcoes(false);
     }
@@ -666,7 +670,7 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                       onChange={(e) => saveQuestion(q, { variavel: Number(e.target.value) })}
                       disabled={savingQ === q.id}
                     >
-                      {variaveis.map((v) => (
+                      {variaveis.filter((v) => !v.builtin).map((v) => (
                         <option key={v.id} value={v.id}>
                           {v.name} (peso {v.peso})
                         </option>
@@ -841,12 +845,31 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
           <section className="section">
             <h3 style={{ marginTop: 0 }}>Variáveis do agente</h3>
             <p style={{ marginBottom: 16, fontSize: 13.5 }}>
-              Cada pergunta do roteiro fica atrelada a uma destas, com peso de 1 a 10. O agente calcula a média ponderada
-              dos pesos respondidos e sugere a urgência do lead a partir dela.
+              Cada pergunta do roteiro fica atrelada a uma destas, com peso de 1 a 10. O CRM calcula a média ponderada
+              das notas do agente e define a urgência do lead a partir dela. <strong>Detalhamento</strong> é uma variável
+              obrigatória do sistema: o CRM mede o quanto o cliente contou (demanda, observações, impacto e dados extras) e só o
+              peso dela pode ser alterado.
             </p>
             {variaveis.map((v) => (
               <article key={v.id} className="step-card roteiro-variable-row" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                {canEdit ? (
+                {v.builtin ? (
+                  <>
+                    <strong style={{ flex: 1 }}>
+                      {v.name} <span className="chip chip-neutral" style={{ marginLeft: 6 }}>obrigatória</span>
+                    </strong>
+                    {canEdit ? (
+                      <select defaultValue={v.peso} onChange={(e) => saveVariavel(v, { peso: Number(e.target.value) })} disabled={savingV === v.id} style={{ width: 140 }} aria-label={`Peso de ${v.name}`}>
+                        {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                          <option key={n} value={n}>
+                            Peso {n}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span>peso {v.peso}</span>
+                    )}
+                  </>
+                ) : canEdit ? (
                   <>
                     <input
                       defaultValue={v.name}
@@ -960,17 +983,28 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
                 const temPerguntas = questions.some((q) => q.area === area.id && q.text.trim());
                 const marcada = spinsIniciais.includes(area.id);
                 return (
-                  <label key={area.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400 }}>
-                    <input
-                      type="checkbox"
-                      style={{ width: 'auto' }}
-                      checked={marcada}
-                      disabled={!marcada && !temPerguntas}
-                      onChange={(e) => salvarInicioSpin({ spins_iniciais: e.target.checked ? [...spinsIniciais, area.id] : spinsIniciais.filter((id) => id !== area.id) })}
-                    />
-                    {area.name}-SPIN
-                    {!temPerguntas && <small style={{ color: 'var(--muted)' }}>(sem perguntas com texto)</small>}
-                  </label>
+                  <div key={area.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400, margin: 0 }}>
+                      <input
+                        type="checkbox"
+                        style={{ width: 'auto' }}
+                        checked={marcada}
+                        disabled={!marcada && !temPerguntas}
+                        onChange={(e) => salvarInicioSpin({ spins_iniciais: e.target.checked ? [...spinsIniciais, area.id] : spinsIniciais.filter((id) => id !== area.id) })}
+                      />
+                      {area.name}-SPIN
+                      {!temPerguntas && <small style={{ color: 'var(--muted)' }}>(sem perguntas com texto)</small>}
+                    </label>
+                    <button
+                      type="button"
+                      className="chip chip-neutral"
+                      style={{ border: 'none', cursor: 'pointer' }}
+                      onClick={() => setPalavrasArea(area)}
+                      title="Palavras que levam o cliente até esta SPIN"
+                    >
+                      Palavras-chave{listaDePalavras(area.palavras_chave).length ? ` · ${listaDePalavras(area.palavras_chave).length}` : ''}
+                    </button>
+                  </div>
                 );
               })}
               {!areas.length && <small style={{ color: 'var(--muted)' }}>Nenhuma área cadastrada ainda (tela Equipe).</small>}
@@ -979,24 +1013,9 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <small style={{ color: 'var(--muted)' }}>
                   Com mais de uma SPIN, o cliente chega por uma campanha (o texto dela não é controlado por aqui) e o agente classifica a área
-                  pela primeira mensagem. As palavras-chave abaixo ajudam o agente a reconhecer cada área. Se a mensagem não corresponder a nenhuma
+                  pela primeira mensagem. As palavras-chave de cada SPIN (chip ao lado do nome) ajudam o agente a reconhecer a área. Se a mensagem não corresponder a nenhuma
                   área habilitada, o lead é desqualificado como fora de escopo.
                 </small>
-                {areas.filter((a) => spinsIniciais.includes(a.id)).map((a) => (
-                  <label key={a.id} style={{ margin: 0 }}>
-                    Palavras-chave — {a.name}
-                    <textarea
-                      rows={2}
-                      maxLength={500}
-                      defaultValue={a.palavras_chave}
-                      placeholder="Ex.: desconto, benefício, INSS, empréstimo consignado"
-                      onBlur={(e) => {
-                        const valor = e.currentTarget.value;
-                        if (valor !== a.palavras_chave) salvarPalavrasChave(a, valor);
-                      }}
-                    />
-                  </label>
-                ))}
               </div>
             )}
             <p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>
@@ -1071,6 +1090,17 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
             {erroOpcoes && <small style={{ color: 'var(--danger, #c0392b)' }}>{erroOpcoes}</small>}
           </article>
         </section>
+      )}
+      {palavrasArea && (
+        <PalavrasChaveDialog
+          area={palavrasArea.name}
+          valor={palavrasArea.palavras_chave}
+          somenteLeitura={!canEdit}
+          salvando={savingOpcoes}
+          multiplasSpins={spinsIniciais.length > 1}
+          onSalvar={(palavras) => salvarPalavrasChave(palavrasArea, palavras)}
+          onClose={() => setPalavrasArea(null)}
+        />
       )}
     </>
   );

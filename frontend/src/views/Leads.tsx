@@ -72,7 +72,7 @@ function UrgenciaDetalhe({ lead }: { lead: Lead }) {
       <table style={{ width: '100%', fontSize: 13 }}>
         <thead>
           <tr>
-            <th style={{ textAlign: 'left' }}>Pergunta</th>
+            <th style={{ textAlign: 'left' }}>Variável</th>
             <th style={{ textAlign: 'right' }}>Peso</th>
             <th style={{ textAlign: 'right' }}>Nota</th>
           </tr>
@@ -80,7 +80,7 @@ function UrgenciaDetalhe({ lead }: { lead: Lead }) {
         <tbody>
           {linhas.map(([qid, nota]) => (
             <tr key={qid}>
-              <td style={{ fontFamily: "'DM Mono',monospace" }}>{qid}</td>
+              <td title={qid}>{d.nomes?.[qid] || (qid === '_detalhamento' ? 'Detalhamento' : qid)}</td>
               <td style={{ textAlign: 'right' }}>{d.pesos?.[qid] ?? '—'}</td>
               <td style={{ textAlign: 'right' }}>{nota}</td>
             </tr>
