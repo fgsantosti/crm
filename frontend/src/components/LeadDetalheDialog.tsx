@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useSaidaDoPopup } from '../popupSaida';
 import type { Api } from '../api';
 import type { Lead } from '../types';
 import { HistoricoConversaDialog } from './HistoricoConversaDialog';
@@ -44,6 +45,7 @@ export function LeadDetalheDialog({ lead, estagio, onClose, onPegar, pegando, hi
   pegando?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  useSaidaDoPopup(ref);
   const [verHistorico, setVerHistorico] = useState(false);
 
   useEffect(() => {

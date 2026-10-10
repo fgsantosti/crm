@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSaidaDoPopup } from '../popupSaida';
 import type { Api } from '../api';
 import type { Lead } from '../types';
 
@@ -11,6 +12,7 @@ type MensagemConversa = { quem: 'cliente' | 'agente'; texto: string; quando: str
  */
 export function HistoricoConversaDialog({ api, companyId, lead, onClose }: { api: Api; companyId: number; lead: Pick<Lead, 'id' | 'name' | 'contact'>; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
+  useSaidaDoPopup(ref);
   const [mensagens, setMensagens] = useState<MensagemConversa[] | null>(null);
   const [erro, setErro] = useState('');
 

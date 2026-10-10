@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSaidaDoPopup } from '../popupSaida';
 import type { Api } from '../api';
 import type { Company } from '../types';
 import { paletaDaIdentidade } from '../identidade';
@@ -16,6 +17,7 @@ const PADRAO_CONTRASTE = '#4a2410';
 export function IdentidadeVisualDialog({ api, company, onSaved, onClose }: { api: Api; company: Company; onSaved: (c: Company) => void; onClose: () => void }) {
   const confirmar = useConfirmar();
   const ref = useRef<HTMLDialogElement>(null);
+  useSaidaDoPopup(ref);
   const atual = company.identidade_visual;
   const [nome, setNome] = useState(atual?.nome ?? '');
   const [principal, setPrincipal] = useState(atual?.cor_principal ?? PADRAO_PRINCIPAL);

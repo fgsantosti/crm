@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { SaidaAnimada } from '../popupSaida';
 import type { Api } from '../api';
 import type { Me } from '../types';
 import { Spinner } from './Skeleton';
@@ -160,6 +161,7 @@ export function ProfileMenu({
 
       {open &&
         createPortal(
+          <SaidaAnimada>
           <div
             className="profile-overlay"
             onMouseDown={(e) => {
@@ -384,7 +386,8 @@ export function ProfileMenu({
                 </form>
               )}
             </div>
-          </div>,
+          </div>
+          </SaidaAnimada>,
           document.body,
         )}
     </>

@@ -4,6 +4,7 @@ import type { Area, Company, Lead, Paginated } from '../types';
 import { SkeletonTiles } from '../components/Skeleton';
 import { COLUMNS, columnOf, leadsVisiveisNoKanban, ordenarColuna } from './Leads';
 import { KanbanCardConteudo, KanbanColunaHead, TEMPERATURA_VISUAL } from '../components/KanbanVisual';
+import { NumeroAnimado } from '../components/NumeroAnimado';
 import { LeadDetalheDialog } from '../components/LeadDetalheDialog';
 import { DashboardAtendimentosDialog, type AtendimentoResumo } from '../components/DashboardAtendimentosDialog';
 import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
@@ -402,7 +403,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
               <div>
                 <h2 id="dash-panorama-t">Atendimentos no período</h2>
                 <div className="dash-total">
-                  <strong>{total}</strong>
+                  <strong><NumeroAnimado valor={total} /></strong>
                   {periodo !== 'custom' && resumo.novas_hoje > 0 && <span>{resumo.novas_hoje} novo{resumo.novas_hoje === 1 ? '' : 's'} hoje</span>}
                 </div>
               </div>
@@ -423,7 +424,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                 <li key={st.key}>
                   <span className="dash-quadrado" style={{ background: st.cor }} aria-hidden="true" />
                   {st.label}
-                  <strong>{st.value}</strong>
+                  <strong><NumeroAnimado valor={st.value} /></strong>
                   <span className="dash-legenda-pct">{pctNum(st.value)}</span>
                 </li>
               ))}
@@ -443,7 +444,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                     {e.title}
                   </span>
                   <span className="dash-etapa-valor">
-                    <strong style={{ color: e.cor }}>{e.count}</strong>
+                    <strong style={{ color: e.cor }}><NumeroAnimado valor={e.count} /></strong>
                     <span>{pctNum(e.count)}</span>
                   </span>
                   <span className="dash-etapa-texto">{e.texto}</span>
@@ -457,7 +458,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                 <button key={sd.title} type="button" className="dash-saida" aria-haspopup="dialog" disabled={bloqueado} onClick={() => abrirPopup(sd.title, sd.description, sd.matches, sd.desqualificacao)}>
                   <span className="dash-quadrado" style={{ background: sd.cor }} aria-hidden="true" />
                   {sd.title}
-                  <strong>{sd.count}</strong>
+                  <strong>{sd.count === null ? '—' : <NumeroAnimado valor={sd.count} />}</strong>
                 </button>
               ))}
               <span className="dash-saida dash-saida-fixa" title="Triagens abandonadas que o sistema apagou automaticamente (sem resposta).">
@@ -573,7 +574,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
             <small>Leads classificadas no período, da temperatura mais frequente para a menos frequente</small>
           </div>
           <div className="dash-total-pequeno">
-            <strong>{totalTemperaturas}</strong>
+            <strong><NumeroAnimado valor={totalTemperaturas} /></strong>
             <span>classificadas</span>
           </div>
         </div>
@@ -590,7 +591,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                   <span className="dash-passo">{t.posicao}º</span>
                   <span className="dash-quadrado" style={{ background: t.cor }} aria-hidden="true" />
                   <span style={{ flex: 1 }}>{t.nome}</span>
-                  <strong>{t.value}</strong>
+                  <strong><NumeroAnimado valor={t.value} /></strong>
                   <span className="dash-legenda-pct">{Math.round((t.value / totalTemperaturas) * 100)}%</span>
                 </li>
               ))}
@@ -633,7 +634,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                 onClick={() => abrirPopup(d.label, 'Atendimentos com este desfecho no período selecionado.', (lead) => lead.desfecho === d.value)}
               >
                 <small>{d.label}</small>
-                <strong>{d.count}</strong>
+                <strong><NumeroAnimado valor={d.count} /></strong>
               </button>
             ))}
           </div>

@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useSaidaDoPopup } from '../popupSaida';
 
 export type TomConfirmacao = 'neutro' | 'atencao' | 'perigo';
 export type IconeConfirmacao = 'sair' | 'lixeira' | 'chave' | 'pessoa' | 'aviso' | 'email';
@@ -107,6 +108,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
 
 function ConfirmDialog({ opcoes, onResponder }: { opcoes: OpcoesConfirmacao; onResponder: (ok: boolean) => void }) {
   const ref = useRef<HTMLDialogElement>(null);
+  useSaidaDoPopup(ref);
   const cancelarRef = useRef<HTMLButtonElement>(null);
   const confirmarRef = useRef<HTMLButtonElement>(null);
   const tom = opcoes.tom ?? 'neutro';

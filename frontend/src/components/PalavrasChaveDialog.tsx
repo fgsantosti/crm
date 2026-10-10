@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSaidaDoPopup } from '../popupSaida';
 
 /** "a, b ,, c" -> ['a', 'b', 'c'] (sem repetir, ignorando maiúsculas). */
 export function listaDePalavras(texto: string): string[] {
@@ -31,6 +32,7 @@ export function PalavrasChaveDialog({ area, valor, somenteLeitura, salvando, mul
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  useSaidaDoPopup(ref);
   const [palavras, setPalavras] = useState<string[]>(listaDePalavras(valor));
   const [rascunho, setRascunho] = useState('');
   const [erro, setErro] = useState('');

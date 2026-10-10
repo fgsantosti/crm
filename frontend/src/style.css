@@ -717,3 +717,31 @@ tr.linha-clicavel:hover { background: var(--accent-soft, rgba(0,0,0,.04)); }
 .dash-temps { grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); }
 .dash-temps li { gap: 8px; padding: 12px; min-width: 0; }
 .dash-temps li > span:nth-child(3) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Saída suave dos popups (popupSaida.tsx): ~170 ms de fade e descida; "reduzir movimento" fecha na hora (também no JS). */
+@keyframes popup-caixa-sai { to { opacity: 0; transform: translateY(10px) scale(.98); } }
+@keyframes popup-fundo-sai { to { opacity: 0; } }
+dialog[data-saindo] { animation: popup-caixa-sai .17s ease-in forwards !important; }
+dialog[data-saindo]::backdrop { animation: popup-fundo-sai .17s ease-in forwards !important; }
+[data-saindo] .popup-overlay, [data-saindo] .profile-overlay { animation: popup-fundo-sai .17s ease-in forwards !important; }
+[data-saindo] .popup-overlay > .panel, [data-saindo] .profile-overlay > .panel { animation: popup-caixa-sai .17s ease-in forwards !important; }
+@media (prefers-reduced-motion: reduce) {
+  dialog[data-saindo], dialog[data-saindo]::backdrop, [data-saindo] .popup-overlay, [data-saindo] .profile-overlay, [data-saindo] .popup-overlay > .panel, [data-saindo] .profile-overlay > .panel { animation: none !important; }
+}
+
+/* Dashboard: barras e gráficos crescem na entrada e acompanham mudanças de valor (reduzir movimento = sem animação). */
+@keyframes dash-revela { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes dash-cresce-x { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes dash-cresce-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+.dash-barra { animation: dash-revela .7s cubic-bezier(.2,.8,.2,1) both; }
+.dash-barra > span { transition: flex-grow .5s cubic-bezier(.2,.8,.2,1), background-color .3s; }
+.dash-trilho > span { transform-origin: left center; animation: dash-cresce-x .7s cubic-bezier(.2,.8,.2,1) both; transition: width .5s cubic-bezier(.2,.8,.2,1); }
+.dash-mes-barra { transform-origin: bottom center; animation: dash-cresce-y .7s cubic-bezier(.2,.8,.2,1) both; transition: height .5s cubic-bezier(.2,.8,.2,1); }
+.dash-mes:nth-child(2) .dash-mes-barra { animation-delay: .05s; } .dash-mes:nth-child(3) .dash-mes-barra { animation-delay: .1s; }
+.dash-mes:nth-child(4) .dash-mes-barra { animation-delay: .15s; } .dash-mes:nth-child(5) .dash-mes-barra { animation-delay: .2s; }
+.dash-mes:nth-child(6) .dash-mes-barra { animation-delay: .25s; }
+.dash-area:nth-child(2) .dash-trilho > span { animation-delay: .05s; } .dash-area:nth-child(3) .dash-trilho > span { animation-delay: .1s; } .dash-area:nth-child(4) .dash-trilho > span { animation-delay: .15s; }
+@media (prefers-reduced-motion: reduce) {
+  .dash-barra, .dash-trilho > span, .dash-mes-barra { animation: none; }
+  .dash-barra > span, .dash-trilho > span, .dash-mes-barra { transition: none; }
+}

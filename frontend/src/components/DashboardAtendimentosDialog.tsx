@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSaidaDoPopup } from '../popupSaida';
 import type { Api } from '../api';
 import { HistoricoConversaDialog } from './HistoricoConversaDialog';
 
@@ -40,6 +41,7 @@ export function DashboardAtendimentosDialog({ title, description, atendimentos, 
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  useSaidaDoPopup(ref);
   const [conversa, setConversa] = useState<AtendimentoResumo | null>(null);
 
   useEffect(() => {

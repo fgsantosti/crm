@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { SaidaAnimada } from '../popupSaida';
 import type { Api } from '../api';
 import type { Lead } from '../types';
 import { LeadNameField } from './LeadNameField';
@@ -10,6 +11,7 @@ import { IconeWhatsapp } from './Icones';
 
 export function Overlay({ onClose, children }: { onClose: () => void; children: ReactNode }) {
   return createPortal(
+    <SaidaAnimada>
     <div
       className="popup-overlay"
       onMouseDown={(e) => {
@@ -20,7 +22,8 @@ export function Overlay({ onClose, children }: { onClose: () => void; children: 
       <div className="panel" style={{ position: 'relative', width: 520, maxWidth: '100%', maxHeight: '100%', overflowY: 'auto', padding: 24, borderRadius: 16, boxShadow: '0 32px 70px rgba(0,0,0,0.4)' }}>
         {children}
       </div>
-    </div>,
+    </div>
+    </SaidaAnimada>,
     document.body,
   );
 }

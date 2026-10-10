@@ -4,6 +4,9 @@ import './style.css';
 import { App } from './App';
 import { ValidarAtendente } from './views/ValidarAtendente';
 import { ConfirmProvider } from './components/ConfirmDialog';
+import { instalarSaidaDosPopups } from './popupSaida';
+
+instalarSaidaDosPopups();
 
 // Sem router de verdade: só esta única rota pública precisa existir fora do
 // App autenticado, então basta checar o path na entrada.
