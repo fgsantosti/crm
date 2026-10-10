@@ -317,7 +317,7 @@ Use para conduzir o roteiro **na ordem configurada pela empresa** na tela
   "agente_conversacional": false,
   "mensagens_audio": false,                   // true: as respostas podem vir como action="AUDIO" (seção 5)
   "numero_agente": "+558694238125",          // mensagens vindas dele mesmo nunca abrem lead
-  "areas": ["Consumidor", "Previdenciário", "Trabalhista"],
+  "areas": ["Consumidor", "Fora de escopo", "Previdenciário", "Trabalhista"],  // "Fora de escopo" existe em toda empresa (fixa)
   "perguntas": [                              // só o fluxo, por ordem; sem textos vazios
     {"question_id": "nome", "ordem": 0, "texto": "Qual é o seu nome completo?", "obrigatoria": true,
      "variavel": {"nome": "Geral", "peso": 5}, "variavel_roteiro": "nome"}
@@ -452,7 +452,8 @@ O roteiro tem duas camadas:
   de o agente definir a área. `nome` e `situacao` são sempre fixas.
 - **SPIN por área** (`spin`): depois que o agente grava `especialidade` (uma
   das `areas`), ele segue a lista daquela área. `spin` tem **uma chave para
-  cada área cadastrada** (lista vazia se a área não tiver SPIN); cada item tem
+  cada área cadastrada, exceto "Fora de escopo"** (fixa em toda empresa, aparece em `areas`
+  mas nunca tem SPIN: classificar nela desqualifica o lead); lista vazia se a área não tiver SPIN; cada item tem
   o mesmo formato de `perguntas` mais `etapa_spin`
   (`"situacao" | "problema" | "implicacao" | "necessidade" | ""`), ordenado
   por `ordem`.
