@@ -1,5 +1,5 @@
 import { HistoricoConversaDialog } from '../components/HistoricoConversaDialog';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Company, Lead, LeadEvent, Me } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
@@ -7,6 +7,7 @@ import { AreaSelect } from '../components/AreaSelect';
 import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
 import { IconeWhatsapp } from '../components/Icones';
 import { CadastroAtendimentoDialog, Overlay, TriagemResumo } from '../components/CadastroAtendimento';
+import { useFlipKanban } from '../useFlipKanban';
 import { KanbanCardConteudo, KanbanColunaHead, TEMPERATURA_VISUAL } from '../components/KanbanVisual';
 import { LeadDetalheDialog } from '../components/LeadDetalheDialog';
 import { FiltroAreas, SEM_AREA } from '../components/FiltroAreas';
@@ -115,6 +116,8 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
   const [desqualificadosCount, setDesqualificadosCount] = useState(0);
   const [historicoAberto, setHistoricoAberto] = useState(false);
   const [detalhe, setDetalhe] = useState<Lead | null>(null);
+  const quadroRef = useRef<HTMLDivElement>(null);
+  useFlipKanban(quadroRef);
   const [nomesAreas, setNomesAreas] = useState<string[]>([]);
   const [areasFiltro, setAreasFiltro] = useState<string[]>([]);
 
@@ -393,7 +396,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
       {busy && !visible.length ? (
         <SkeletonCards count={visibleColumns.length} height={90} />
       ) : (
-        <div className="kb-board">
+        <div className="kb-board" ref={quadroRef}>
           {visibleColumns.map((col) => {
             const items = orderedItems(col.key);
             return (
@@ -419,6 +422,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
                     return (
                       <article
                         key={l.id}
+                        data-flip-id={l.id}
                         className={`kb-card${selected?.id === l.id ? ' selected' : ''}${bloqueado ? ' kb-card-bloqueado' : ''}${dragId === l.id ? ' kb-card-arrastando' : ''}`}
                         draggable={podeArrastar(l)}
                         onDragStart={(e) => {

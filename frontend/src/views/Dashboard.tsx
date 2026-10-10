@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Area, Company, Lead, Paginated } from '../types';
 import { SkeletonTiles } from '../components/Skeleton';
 import { COLUMNS, columnOf, leadsVisiveisNoKanban, ordenarColuna } from './Leads';
 import { KanbanCardConteudo, KanbanColunaHead, TEMPERATURA_VISUAL } from '../components/KanbanVisual';
+import { useFlipKanban } from '../useFlipKanban';
 import { NumeroAnimado } from '../components/NumeroAnimado';
 import { LeadDetalheDialog } from '../components/LeadDetalheDialog';
 import { DashboardAtendimentosDialog, type AtendimentoResumo } from '../components/DashboardAtendimentosDialog';
@@ -115,6 +116,8 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
   const [carregou, setCarregou] = useState(false);
   const [excluindoId, setExcluindoId] = useState<string | null>(null);
   const [detalhe, setDetalhe] = useState<Lead | null>(null);
+  const quadroRef = useRef<HTMLDivElement>(null);
+  useFlipKanban(quadroRef);
   const [error, setError] = useState('');
   const [recarregar, setRecarregar] = useState(0);
   // "Concluído com sucesso" = desfecho Encerrado (ver services.DESFECHO_SUCESSO).
@@ -487,7 +490,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
             <SkeletonTiles />
           ) : (
             <div className="kb-container-dash">
-            <div className="kb-board kb-board-compacto">
+            <div className="kb-board kb-board-compacto" ref={quadroRef}>
               {COLUMNS.map((col) => {
                 const items = ordenarColuna(col.key, kanbanLeads.filter((l) => columnOf(l) === col.key));
                 return (
@@ -495,7 +498,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                     <KanbanColunaHead coluna={col} total={items.length} />
                     <div className="kb-col-body">
                       {items.map((l) => (
-                        <article key={l.id} className="kb-card kb-card-estatico">
+                        <article key={l.id} data-flip-id={l.id} className="kb-card kb-card-estatico">
                           <button
                             type="button"
                             className="kb-fechar"
