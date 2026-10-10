@@ -46,6 +46,28 @@ from .services import (
 )
 from .serializers import DashboardPeriodSerializer
 
+class NotAgentAccount(permissions.BasePermission):
+    """Nega acesso a contas de serviço do agente de IA (membros do grupo "agente").
+
+    A conta de serviço do agente (ex.: username agente.<empresa>) só deve poder
+    chamar as actions `incoming`/`delivery` de CompanyViewSet. Qualquer outro
+    endpoint de escrita/leitura de dados do CRM (leads, roteiro, dados da
+    empresa) é reservado a usuários humanos (atendentes/empresa).
+    """
+    message = "Conta de serviço do agente não tem acesso a este recurso."
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and not user.groups.filter(name="agente").exists())
+
+class IsAgentAccount(permissions.BasePermission):
+    """Só a conta de serviço do agente (grupo "agente"). As rotas do agente (/incoming/, /delivery/, /agente/*)
+    mudam leads em nome do contato: atendente ou conta Empresa chamando-as forjava mensagens e apagava
+    triagens sem deixar rastro (HARDENING F1-05)."""
+    message = "Somente a conta de serviço do agente."
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and user.groups.filter(name="agente").exists())
+
 def _avatar_url(request, profile):
     return request.build_absolute_uri(profile.avatar.url) if profile.avatar else None
 
@@ -99,7 +121,7 @@ class RefreshView(APIView):
         return response
 
 @api_view(["GET", "PATCH"])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.IsAuthenticated, NotAgentAccount])
 def me(request):
     user = request.user
     profile, _ = Profile.objects.get_or_create(user=user)
@@ -120,7 +142,7 @@ def me(request):
     })
 
 @api_view(["POST", "DELETE"])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.IsAuthenticated, NotAgentAccount])
 @parser_classes([MultiPartParser])
 def avatar(request):
     profile, _ = Profile.objects.get_or_create(user=request.user)
@@ -147,7 +169,7 @@ def validar_convite(request, pk):
     return Response({"detail": result["detail"]}, status=200 if result["ok"] else 400)
 
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.IsAuthenticated, NotAgentAccount])
 def trocar_senha(request):
     current_password = str(request.data.get("current_password") or "")
     new_password = str(request.data.get("password") or "")
@@ -159,7 +181,7 @@ def trocar_senha(request):
     return Response({"detail": "Senha atualizada."})
 
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.IsAuthenticated, NotAgentAccount])
 def trocar_email_solicitar(request):
     new_email = str(request.data.get("email") or "").strip()
     if not new_email:
@@ -171,14 +193,14 @@ def trocar_email_solicitar(request):
     return Response({"detail": "Enviamos um código de confirmação para o novo e-mail."})
 
 @api_view(["POST"])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.IsAuthenticated, NotAgentAccount])
 def trocar_email_confirmar(request):
     code = str(request.data.get("code") or "").strip()
     result = confirmar_troca_email_service(request.user, code)
     return Response({"detail": result["detail"]}, status=200 if result["ok"] else 400)
 
 @api_view(["DELETE"])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.IsAuthenticated, NotAgentAccount])
 def excluir_conta(request):
     password = str(request.data.get("password") or "")
     if not request.user.check_password(password):
@@ -200,19 +222,6 @@ def logout_view(request):
     response = Response({"detail": "Sessão encerrada."})
     _clear_refresh_cookie(response)
     return response
-
-class NotAgentAccount(permissions.BasePermission):
-    """Nega acesso a contas de serviço do agente de IA (membros do grupo "agente").
-
-    A conta de serviço do agente (ex.: username agente.<empresa>) só deve poder
-    chamar as actions `incoming`/`delivery` de CompanyViewSet. Qualquer outro
-    endpoint de escrita/leitura de dados do CRM (leads, roteiro, dados da
-    empresa) é reservado a usuários humanos (atendentes/empresa).
-    """
-    message = "Conta de serviço do agente não tem acesso a este recurso."
-    def has_permission(self, request, view):
-        user = request.user
-        return bool(user and user.is_authenticated and not user.groups.filter(name="agente").exists())
 
 class IsSuperUser(permissions.BasePermission):
     """Restrito à equipe interna da Axioma (is_superuser=True).
@@ -239,11 +248,8 @@ class CompanyViewSet(viewsets.ModelViewSet):
         # abaixo) -- criar Company é exclusivo do Painel Admin (AdminCompanyViewSet).
         return Response({"detail": "Use o Painel Admin interno para cadastrar uma empresa."}, status=405)
     def get_permissions(self):
-        # Só o PATCH genérico (tela Roteiro, "Opções do Agente") é restrito à
-        # empresa/admin -- "incoming"/"delivery" são as rotas do próprio agente
-        # (POST) e continuam com a permissão padrão (IsAuthenticated), senão
-        # quebra a conta de serviço do agente. "equipe" já tem permission_classes
-        # próprio no @action.
+        # Só o PATCH genérico (tela Roteiro, "Opções do Agente") é restrito à empresa/admin; as rotas do
+        # agente (incoming/delivery/agente_*) são exclusivas da conta de serviço dele (IsAgentAccount).
         if self.action == "partial_update":
             return [permissions.IsAdminUser(), NotAgentAccount()]
         if self.action == "equipe":
@@ -252,6 +258,8 @@ class CompanyViewSet(viewsets.ModelViewSet):
         if self.action in ("identidade", "classificacao_impacto"):
             # Identidade visual: só a conta Empresa da própria empresa altera.
             return [permissions.IsAdminUser(), NotAgentAccount()]
+        if self.action in ("incoming", "delivery", "agente_contexto", "agente_contato", "agente_lembretes"):
+            return [permissions.IsAuthenticated(), IsAgentAccount()]
         return [permissions.IsAuthenticated()]
     @action(detail=True, methods=["post"], url_path="classificacao/impacto")
     def classificacao_impacto(self, request, pk=None):
@@ -303,18 +311,14 @@ class CompanyViewSet(viewsets.ModelViewSet):
         return Response(result)
     @action(detail=True, methods=["get"], url_path="agente/contexto")
     def agente_contexto(self, request, pk=None):
-        """Roteiro, áreas e faixas de urgência pro agente conduzir a triagem. Leitura
-        pura; liberado pra conta de serviço do agente e membros humanos da empresa
-        (get_object já restringe às empresas do usuário -> 404 nas demais)."""
+        """Roteiro, áreas e faixas de urgência pro agente conduzir a triagem. Leitura pura; só a conta de
+        serviço do agente (get_object restringe às empresas dela -> 404 nas demais)."""
         return Response(contexto_agente(self.get_object()))
     @action(detail=True, methods=["post"], url_path="agente/lembretes")
     def agente_lembretes(self, request, pk=None):
         """A ponte pergunta o que já pode ser lembrado (24h sem resposta do cliente) e recebe, por lead, as
         duas mensagens a enviar. Reserva o envio (idempotente: um lembrete por lead) e é só da conta do agente."""
-        company = self.get_object()
-        if not request.user.groups.filter(name="agente").exists():
-            return Response({"detail": "Somente a conta de serviço do agente."}, status=403)
-        return Response({"lembretes": reservar_lembretes(company)})
+        return Response({"lembretes": reservar_lembretes(self.get_object())})
     @action(detail=True, methods=["get"], url_path="agente/contato")
     def agente_contato(self, request, pk=None):
         """O agente pode atender este número agora? Mesma regra que /incoming/ usa pra
@@ -330,7 +334,7 @@ class CompanyViewSet(viewsets.ModelViewSet):
         company = self.get_object()
         data = IncomingSerializer(data=request.data)
         data.is_valid(raise_exception=True)
-        result = receive(company, data.validated_data)
+        result = receive(company, data.validated_data, autor=request.user)
         # Fora da transação do receive(): o TTS pode levar alguns segundos.
         return Response(aplicar_audio(company, result, request.build_absolute_uri))
     @action(detail=True, methods=["post"])

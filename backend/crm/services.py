@@ -540,7 +540,7 @@ def status_contato(company, contact):
     }
 
 @transaction.atomic
-def receive(company, data):
+def receive(company, data, autor=None):
     # Serialize per company: protege a criação do primeiro contato e mensagens concorrentes.
     company = Company.objects.select_for_update().get(pk=company.pk)
     lead, aceita, motivo = avaliar_contato(company, data["contact"])
@@ -573,7 +573,7 @@ def receive(company, data):
     lead.last_contact = timezone.now()
     lead.save()
     event = Event.objects.create(
-        lead=lead, message_id=data["message_id"], marker=data["marker"],
+        lead=lead, message_id=data["message_id"], marker=data["marker"], autor=autor,
         summary=f"Marcador recebido: {data['marker']}",
         mensagem_cliente=redigir_dados_sensiveis(data.get("mensagem"))[:4000] if company.coletar_historico_conversa else "",
     )

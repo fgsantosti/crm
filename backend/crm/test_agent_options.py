@@ -4,6 +4,7 @@ from rest_framework.test import APIClient
 
 from .models import Area, Company, Event, Lead, Question, Variavel, VariavelRoteiro
 from .services import contexto_agente, seed_roteiro_padrao
+from .apoio_testes import cliente_roteado
 
 
 class AgentOptionsTests(TestCase):
@@ -35,6 +36,7 @@ class AgentOptionsTests(TestCase):
         self.company.members.add(self.user)
         self.client = APIClient()
         self.client.force_authenticate(self.user)
+        self.client = cliente_roteado(self.client, self.company)
         self.counter = 0
         self.contact = "+5585999999999"
 
@@ -327,6 +329,7 @@ class VariasSpinsIniciaisTests(TestCase):
         self.user = get_user_model().objects.create_user(username="empresa-multi", is_staff=True)
         self.company.members.add(self.user)
         self.client = APIClient(); self.client.force_authenticate(self.user)
+        self.client = cliente_roteado(self.client, self.company)
         self.counter = 0
         self.contact = "+5585999990111"
 

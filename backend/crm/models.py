@@ -413,6 +413,8 @@ class Event(models.Model):
     # Texto (ou transcrição do áudio) que o cliente enviou nesta entrada; só preenchido com
     # Company.coletar_historico_conversa ligado, já sem dados sensíveis (services.redigir_dados_sensiveis).
     mensagem_cliente = models.TextField(blank=True, default="")
+    # Conta que chamou a API e gerou o evento (a conta de serviço do agente, no /incoming/). Rastreabilidade.
+    autor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     class Meta:
         constraints = [models.UniqueConstraint(fields=["lead", "message_id"], name="unique_lead_message")]
         ordering = ["created_at"]

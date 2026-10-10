@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from .models import Blacklist, Company, Question, Lead, Event, Area, AtendenteInvite, PasswordChangeRequired, AgentTokenExpiry, CompanyInfo, Variavel, VariavelRoteiro
 from .services import receive, status_contato, contexto_agente, seed_roteiro_padrao
+from .apoio_testes import cliente_roteado, conta_de_agente, token_de_agente
 
 class QualificationTests(TestCase):
     def setUp(self):
@@ -16,6 +17,7 @@ class QualificationTests(TestCase):
         self.company.members.add(self.user)
         self.client = APIClient()
         self.client.force_authenticate(self.user)
+        self.client = cliente_roteado(self.client, self.company)
         Question.objects.create(company=self.company, question_id="apresentacao", text="Olá! Como posso ajudar?")
         Question.objects.create(company=self.company, question_id="nome", text="Qual é o seu nome?")
         Question.objects.create(company=self.company, question_id="validar", text="Posso confirmar seus dados?")
@@ -202,8 +204,7 @@ class QualificationTests(TestCase):
         r = self.send("2", marker="CLASSIFICADO", fields={"encerramento_antecipado": True})
         self.assertTriagemReiniciada(r)
     def test_encerramento_antecipado_pela_api_aceita_sem_notas(self):
-        token_user = get_user_model().objects.create_user(username="agente-x")
-        self.company.members.add(token_user)
+        token_user = conta_de_agente(self.company, "agente-x")
         c = APIClient(); c.force_authenticate(token_user)
         base = f"/api/companies/{self.company.pk}/incoming/"
         payload = {"contact": "+5585911112222", "message_id": "m1", "marker": "Q", "question_id": "apresentacao"}
@@ -617,14 +618,14 @@ class QualificationTests(TestCase):
         self.assertNotEqual(primeiro_token, novo_token)
         agent_client = APIClient()
         agent_client.credentials(HTTP_AUTHORIZATION=f"Token {primeiro_token}")
-        self.assertEqual(agent_client.get("/api/me/").status_code, 401)
+        self.assertEqual(agent_client.get(f"/api/companies/{self.company.pk}/agente/contexto/").status_code, 401)
         agent_client.credentials(HTTP_AUTHORIZATION=f"Token {novo_token}")
-        self.assertEqual(agent_client.get("/api/me/").status_code, 200)
+        self.assertEqual(agent_client.get(f"/api/companies/{self.company.pk}/agente/contexto/").status_code, 200)
 
         revogado = c.delete(f"/api/admin-companies/{self.company.pk}/agente/")
         self.assertEqual(revogado.status_code, 200)
         agent_client.credentials(HTTP_AUTHORIZATION=f"Token {novo_token}")
-        self.assertEqual(agent_client.get("/api/me/").status_code, 401)
+        self.assertEqual(agent_client.get(f"/api/companies/{self.company.pk}/agente/contexto/").status_code, 401)
     def test_admin_companies_destroy_sem_confirmacao_nao_exclui(self):
         superuser = get_user_model().objects.create_user(username="super-teste-5", is_staff=True, is_superuser=True)
         c = APIClient()
@@ -1085,10 +1086,10 @@ class QualificationTests(TestCase):
         self.assertEqual(logout_resp.cookies["refresh_token"].value, "")
         blocked = anon_client.post("/api/login/refresh/")
         self.assertEqual(blocked.status_code, 401)
-    def test_agent_token_without_expiry_row_never_expires(self):
+    def test_agent_token_without_expiry_row_is_rejected(self):
+        # HARDENING F1-03: antes valia para sempre; agora token sem validade é tratado como expirado.
         from rest_framework.authtoken.models import Token
-        agent_user = get_user_model().objects.create_user(username="agente.sem-validade")
-        self.company.members.add(agent_user)
+        agent_user = conta_de_agente(self.company, "agente.sem-validade")
         token = Token.objects.create(user=agent_user)
         client = APIClient()
         client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
@@ -1097,11 +1098,10 @@ class QualificationTests(TestCase):
             {"contact": "+5585999110022", "message_id": "m1", "kind": "text", "marker": "Q", "question_id": "apresentacao", "fields": {}, "human_required": False, "reason": "pedido humano"},
             format="json",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 401)
     def test_agent_token_with_future_expiry_works(self):
         from rest_framework.authtoken.models import Token
-        agent_user = get_user_model().objects.create_user(username="agente.valido")
-        self.company.members.add(agent_user)
+        agent_user = conta_de_agente(self.company, "agente.valido")
         token = Token.objects.create(user=agent_user)
         AgentTokenExpiry.objects.create(token=token, expires_at=timezone.now() + timedelta(days=30))
         client = APIClient()
@@ -1114,8 +1114,7 @@ class QualificationTests(TestCase):
         self.assertEqual(response.status_code, 200)
     def test_agent_token_past_expiry_is_rejected(self):
         from rest_framework.authtoken.models import Token
-        agent_user = get_user_model().objects.create_user(username="agente.expirado")
-        self.company.members.add(agent_user)
+        agent_user = conta_de_agente(self.company, "agente.expirado")
         token = Token.objects.create(user=agent_user)
         AgentTokenExpiry.objects.create(token=token, expires_at=timezone.now() - timedelta(days=1))
         client = APIClient()
@@ -1639,7 +1638,7 @@ class AgenteContextoEUrgenciaTests(TestCase):
         agente.groups.add(Group.objects.get_or_create(name="agente")[0])
         self.company.members.add(agente)
         self.agent_client = APIClient()
-        self.agent_client.credentials(HTTP_AUTHORIZATION=f"Token {Token.objects.create(user=agente).key}")
+        self.agent_client.credentials(HTTP_AUTHORIZATION=f"Token {token_de_agente(agente)}")
 
     def send(self, mid, contact="+5585911113333", **kwargs):
         data = {"contact": contact, "message_id": mid, "kind": "text", "marker": "Q", "question_id": "apresentacao",
@@ -1686,12 +1685,13 @@ class AgenteContextoEUrgenciaTests(TestCase):
         self.assertEqual(self.agent_client.get(f"/api/companies/{self.other.pk}/agente/contexto/").status_code, 404)
         self.assertEqual(APIClient().get(f"/api/companies/{self.company.pk}/agente/contexto/").status_code, 401)
 
-    def test_contexto_liberado_para_membro_humano(self):
+    def test_contexto_e_exclusivo_da_conta_do_agente(self):
+        # HARDENING F1-05: antes membros humanos também liam; agora só a conta de serviço do agente.
         humano = get_user_model().objects.create_user(username="atendente-ctx")
         self.company.members.add(humano)
         c = APIClient()
         c.force_authenticate(humano)
-        self.assertEqual(c.get(f"/api/companies/{self.company.pk}/agente/contexto/").status_code, 200)
+        self.assertEqual(c.get(f"/api/companies/{self.company.pk}/agente/contexto/").status_code, 403)
 
     def test_classificado_por_notas_calcula_no_crm_e_prevalece_sobre_temperatura_do_agente(self):
         self.ate_validar()
@@ -1814,7 +1814,7 @@ class ContatoFecharDonoPendenciasTests(TestCase):
         agente.groups.add(Group.objects.get_or_create(name="agente")[0])
         self.company.members.add(agente)
         self.agent_client = APIClient()
-        self.agent_client.credentials(HTTP_AUTHORIZATION=f"Token {Token.objects.create(user=agente).key}")
+        self.agent_client.credentials(HTTP_AUTHORIZATION=f"Token {token_de_agente(agente)}")
         self.empresa = get_user_model().objects.create_user(username="empresa@contato.test", is_staff=True)
         self.ana = get_user_model().objects.create_user(username="ana@contato.test")
         self.bia = get_user_model().objects.create_user(username="bia@contato.test")
@@ -1871,7 +1871,7 @@ class ContatoFecharDonoPendenciasTests(TestCase):
     def test_contato_permissoes_e_validacao(self):
         self.assertEqual(self.contato("5585911114444").status_code, 400)
         self.assertEqual(self.contato("+5585911114444", company=self.other).status_code, 404)
-        self.assertEqual(self.contato("+5585911114444", client=self.cliente(self.ana)).status_code, 200)
+        self.assertEqual(self.contato("+5585911114444", client=self.cliente(self.ana)).status_code, 403)  # só o agente (F1-05)
         self.assertEqual(Lead.objects.count(), 0)
 
     def test_lead_novo_sempre_comeca_pela_apresentacao(self):
@@ -2164,8 +2164,7 @@ class MensagensAudioTests(TestCase):
         self.company = Company.objects.create(name="Empresa Áudio", allow_transcription=True, mensagens_audio=True)
         self.q = Question.objects.create(company=self.company, question_id="apresentacao", text="Olá, aqui é a {empresa}.<br>Vamos começar?")
         Question.objects.create(company=self.company, question_id="nome", text="Qual é o seu nome?")
-        self.agente = get_user_model().objects.create_user(username="agente-audio")
-        self.company.members.add(self.agente)
+        self.agente = conta_de_agente(self.company, "agente-audio")
         self.empresa = get_user_model().objects.create_user(username="empresa-audio", is_staff=True)
         self.company.members.add(self.empresa)
         self.atendente = get_user_model().objects.create_user(username="atendente-audio")
@@ -2374,7 +2373,7 @@ class SpinPorAreaTests(TestCase):
         agente.groups.add(Group.objects.get_or_create(name="agente")[0])
         self.company.members.add(agente)
         self.agent = APIClient()
-        self.agent.credentials(HTTP_AUTHORIZATION=f"Token {Token.objects.create(user=agente).key}")
+        self.agent.credentials(HTTP_AUTHORIZATION=f"Token {token_de_agente(agente)}")
 
     def criar(self, question_id, area=None, etapa="", ordem=0, **extra):
         return Question.objects.create(company=self.company, question_id=question_id, text=f"{question_id}?", variavel=self.v,
@@ -2493,6 +2492,7 @@ class BlacklistEFiltragemTests(TestCase):
         self.contact = "+5585999998888"
         self.client = APIClient()
         self.client.force_authenticate(self.ana)
+        self.client = cliente_roteado(self.client, self.company)
         for qid in ["apresentacao", "nome", "validar", "encerramento"]:
             Question.objects.create(company=self.company, question_id=qid, text=f"Pergunta {qid}")
 
@@ -2668,6 +2668,7 @@ class NecessidadeHumanaTests(TestCase):
         self.company.members.add(self.user)
         self.client = APIClient()
         self.client.force_authenticate(self.user)
+        self.client = cliente_roteado(self.client, self.company)
         self.url = f"/api/questions/{self.question.pk}/?company={self.company.pk}"
 
     def send(self, mid="humano-1", **kwargs):
@@ -4789,3 +4790,71 @@ class ComprovantePrivadoTests(TestCase):
         caminho2 = p2.comprovante_arquivo.path
         self.gestor.delete()  # cascata: cobrança -> pagamento
         self.assertFalse(os.path.exists(caminho2))
+
+
+class EscopoDaContaDoAgenteTests(TestCase):
+    """HARDENING F1-03, F1-05 e F3-12: só a conta de serviço do agente (grupo "agente", token com validade) fala com as rotas
+    do agente, e ela não alcança o resto da API."""
+    ROTAS_AGENTE = ("incoming", "delivery", "agente/contexto", "agente/contato", "agente/lembretes")
+
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        self.company = Company.objects.create(name="Escopo Ltda")
+        seed_roteiro_padrao(self.company)
+        Question.objects.filter(company=self.company, question_id="apresentacao").update(text="Olá!")
+        U = get_user_model()
+        self.agente = U.objects.create_user("agente.escopo", password="x")
+        self.agente.groups.add(Group.objects.get_or_create(name="agente")[0])
+        self.atendente = U.objects.create_user("atendente.escopo", password="x")
+        self.empresa = U.objects.create_user("empresa.escopo", password="x", is_staff=True)
+        for u in (self.agente, self.atendente, self.empresa):
+            self.company.members.add(u)
+
+    def chamar(self, client, rota):
+        base = f"/api/companies/{self.company.pk}/{rota}/"
+        if rota == "incoming":
+            return client.post(base, {"contact": "+5585900003333", "message_id": "m1", "kind": "text", "marker": "Q", "question_id": "apresentacao", "fields": {}}, format="json")
+        if rota == "delivery":
+            return client.post(base, {"event_id": 999999, "status": "FAILED"}, format="json")
+        if rota == "agente/contato":
+            return client.get(base + "?contact=%2B5585900003333")
+        if rota == "agente/lembretes":
+            return client.post(base, {}, format="json")
+        return client.get(base)
+
+    def test_atendente_e_conta_empresa_nao_chamam_rotas_do_agente(self):
+        for usuario in (self.atendente, self.empresa):
+            client = APIClient(); client.force_authenticate(usuario)
+            for rota in self.ROTAS_AGENTE:
+                self.assertEqual(self.chamar(client, rota).status_code, 403, (usuario.username, rota))
+
+    def test_agente_continua_chamando_as_rotas_e_fica_registrado_como_autor(self):
+        client = APIClient(); client.force_authenticate(self.agente)
+        r = self.chamar(client, "incoming")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(Event.objects.get(lead__company=self.company, message_id="m1").autor, self.agente)
+        for rota in ("agente/contexto", "agente/contato", "agente/lembretes"):
+            self.assertEqual(self.chamar(client, rota).status_code, 200, rota)
+
+    def test_token_de_usuario_fora_do_grupo_agente_nao_autentica(self):
+        from rest_framework.authtoken.models import Token
+        token = Token.objects.create(user=self.empresa)
+        client = APIClient(); client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        self.assertEqual(client.get(f"/api/leads/?company={self.company.pk}").status_code, 401)
+
+    def test_token_de_agente_sem_validade_nao_autentica_e_com_validade_sim(self):
+        from rest_framework.authtoken.models import Token
+        token = Token.objects.create(user=self.agente)
+        client = APIClient(); client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        url = f"/api/companies/{self.company.pk}/agente/contexto/"
+        self.assertEqual(client.get(url).status_code, 401)
+        AgentTokenExpiry.objects.create(token=token, expires_at=timezone.now() + timedelta(days=30))
+        self.assertEqual(client.get(url).status_code, 200)
+
+    def test_conta_do_agente_nao_alcanca_rotas_de_perfil(self):
+        client = APIClient(); client.force_authenticate(self.agente)
+        self.assertEqual(client.get("/api/me/").status_code, 403)
+        self.assertEqual(client.patch("/api/me/", {"display_name": "x"}, format="json").status_code, 403)
+        self.assertEqual(client.post("/api/me/email/", {"new_email": "x@x.example"}, format="json").status_code, 403)
+        self.assertEqual(client.post("/api/me/avatar/", {}, format="multipart").status_code, 403)
+        self.assertEqual(client.post("/api/trocar-senha/", {}, format="json").status_code, 403)
