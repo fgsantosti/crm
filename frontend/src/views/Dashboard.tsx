@@ -65,11 +65,19 @@ const STATUS_DONUT: { key: keyof Resumo['status']; label: string; color: string 
   { key: 'nao_prosseguiram', label: 'Não prosseguiram', color: '#D8CBBB' },
 ];
 
-// Gráficos de barra: do maior para o menor, da esquerda para a direita; a cor segue a posição (maior = laranja mais forte).
-const RAMPA = ['#A83E12', '#D9531A', '#E8793F', '#F0A06E', '#F4BE98', '#F6D6BE', '#E4D6C4'];
-function ranquear<T extends { value: number }>(itens: T[]): (T & { cor: string; posicao: number })[] {
-  return [...itens].sort((a, b) => b.value - a.value).map((it, i) => ({ ...it, posicao: i + 1, cor: RAMPA[Math.min(i, RAMPA.length - 1)] }));
+// Gráficos de barra: do maior para o menor, da esquerda para a direita; a cor é sempre a da própria categoria.
+function ranquear<T extends { value: number }>(itens: T[]): (T & { posicao: number })[] {
+  return [...itens].sort((a, b) => b.value - a.value).map((it, i) => ({ ...it, posicao: i + 1 }));
 }
+
+// Mesmas cores de classificação do Kanban (TEMPERATURA_VISUAL); as duas temperaturas de descarte em tons neutros.
+const COR_TEMPERATURA: Record<string, string> = {
+  Quente: TEMPERATURA_VISUAL.Quente.ponto,
+  Qualificado: TEMPERATURA_VISUAL.Qualificado.ponto,
+  Frio: TEMPERATURA_VISUAL.Frio.ponto,
+  Desconfiado: '#8C7B69',
+  Desqualificado: '#C9BBA9',
+};
 
 const ETAPA_VISUAL: Record<AtendimentoResumo['categoria_status'], { rotulo: string; fundo: string; cor: string }> = {
   automatico: { rotulo: 'Em triagem', fundo: '#E3ECFD', cor: '#1D4FBF' },
@@ -232,9 +240,9 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
     { title: 'Desqualificados', count: desqualificados, cor: '#8C7B69', description: 'Leads classificados como desqualificados ou desconfiados.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'desqualificado', desqualificacao: true },
     { title: 'Outras situações', count: resumo.status.especial, cor: '#7C3AED', description: 'Acompanhamentos em aberto: clientes que já têm processo e querem acompanhá-lo (não são leads novos). Depois de despachados, passam a contar em Despachos.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'especial', desqualificacao: false },
   ];
-  const ordenados = ranquear(STATUS_DONUT.map((st) => ({ ...st, value: resumo.status[st.key] })));
+  const ordenados = ranquear(STATUS_DONUT.map((st) => ({ ...st, cor: st.color, value: resumo.status[st.key] })));
   const segmentos = ordenados.filter((st) => st.value > 0);
-  const temperaturas = ranquear(TEMPERATURAS.map((t) => ({ nome: t, value: resumo.por_temperatura[t] ?? 0 })));
+  const temperaturas = ranquear(TEMPERATURAS.map((t) => ({ nome: t, cor: COR_TEMPERATURA[t], value: resumo.por_temperatura[t] ?? 0 })));
   const totalTemperaturas = temperaturas.reduce((t, x) => t + x.value, 0);
   const descricaoBarra = `Distribuição dos ${total} atendimentos: ${segmentos.map((st) => `${st.value} ${st.label.toLowerCase()}`).join(', ')}`;
   const pctNum = (n: number) => (total ? `${Math.round((n / total) * 100)}%` : '0%');
