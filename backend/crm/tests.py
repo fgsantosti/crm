@@ -4490,6 +4490,53 @@ class NotificacoesDoAdminTests(TestCase):
         self.assertEqual(self.api.post("/api/admin-notificacoes/enviar/", {"gestores": [self.g["id"]], "assunto": "", "mensagem": "x"}, format="json").status_code, 400)
         self.assertEqual(self.api.post("/api/admin-notificacoes/enviar/", {"gestores": [], "assunto": "a", "mensagem": "b"}, format="json").status_code, 400)
 
+    def test_envio_manual_resolve_variaveis_do_gestor_e_nunca_manda_chave_crua(self):
+        from django.core import mail
+        from django.utils import timezone
+        from datetime import timedelta
+        mail.outbox.clear()
+        self.company.refresh_from_db()
+        self.company.em_teste, self.company.teste_inicio, self.company.teste_dias = True, timezone.localdate(), 10
+        self.company.save()
+        fim = (self.company.teste_inicio + timedelta(days=10)).strftime("%d/%m/%Y")
+        r = self.api.post("/api/admin-notificacoes/enviar/", {"gestores": [self.g["id"]], "assunto": "Teste de {empresa}", "mensagem": "{gestor}, termina em {fim_do_teste}."}, format="json")
+        self.assertEqual(r.json()["enviados"], 1, r.json())
+        self.assertEqual((mail.outbox[0].subject, mail.outbox[0].body), ("Teste de Menezes A", f"Paulo, termina em {fim}."))
+        mail.outbox.clear()
+        r = self.api.post("/api/admin-notificacoes/enviar/", {"gestores": [self.g["id"]], "assunto": "x", "mensagem": "Vence em {vencimento}"}, format="json")
+        self.assertEqual((r.json()["enviados"], mail.outbox), (0, []))
+        self.assertIn("{vencimento}", r.json()["resultado"][0]["erro"])
+
+    def test_envio_manual_com_anexo_e_exigencia(self):
+        from django.core import mail
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        mail.outbox.clear()
+        base = {"gestores": str(self.g["id"]), "assunto": "Cobrança", "mensagem": "Segue.", "exige_anexo": "true"}
+        self.assertEqual(self.api.post("/api/admin-notificacoes/enviar/", base, format="multipart").status_code, 400)
+        ruim = SimpleUploadedFile("x.pdf", b"nao e pdf", content_type="application/pdf")
+        self.assertEqual(self.api.post("/api/admin-notificacoes/enviar/", {**base, "anexos": ruim}, format="multipart").status_code, 400)
+        ok = SimpleUploadedFile("cobranca.pdf", b"%PDF-1.4 teste", content_type="application/pdf")
+        r = self.api.post("/api/admin-notificacoes/enviar/", {**base, "anexos": ok}, format="multipart")
+        self.assertEqual((r.status_code, r.json()["enviados"], [a[0] for a in mail.outbox[0].attachments]), (201, 1, ["cobranca.pdf"]))
+
+    def test_comprovante_anexado_ao_pagamento(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from . import billing
+        from .models import Cobranca, Gestor
+        c = Cobranca.objects.create(gestor=Gestor.objects.get(pk=self.g["id"]), referencia="2026-10-01", vencimento="2026-10-15", valor="100.00")
+        ruim = SimpleUploadedFile("c.exe", b"MZ", content_type="application/octet-stream")
+        self.assertEqual(self.api.post(f"/api/admin-cobrancas/{c.pk}/pagamentos/", {"data": "2026-10-10", "arquivo": ruim}, format="multipart").status_code, 400)
+        png = SimpleUploadedFile("pix.png", b"\x89PNG\r\n\x1a\n" + b"0" * 20, content_type="image/png")
+        r = self.api.post(f"/api/admin-cobrancas/{c.pk}/pagamentos/", {"data": "2026-10-10", "valor": "100", "arquivo": png}, format="multipart")
+        self.assertEqual(r.status_code, 201)
+        p = c.pagamentos.get()
+        self.assertTrue(p.comprovante_arquivo)
+        resp = self.api.get(f"/api/admin-pagamentos/{p.pk}/comprovante/")
+        self.assertEqual((resp.status_code, resp["Content-Type"]), (200, "image/png"))
+        comum = APIClient(); comum.force_authenticate(get_user_model().objects.create_user("emp-comp", password="x", is_staff=True))
+        self.assertEqual(comum.get(f"/api/admin-pagamentos/{p.pk}/comprovante/").status_code, 403)
+        p.comprovante_arquivo.delete()
+
     def test_gestor_sem_email_registra_falha(self):
         from .models import Gestor
         sem = Gestor.objects.create(nome="Sem e-mail")

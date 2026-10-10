@@ -45,18 +45,21 @@ def contexto_do_gestor(gestor, **extra):
     return {"gestor": gestor.nome, **extra}
 
 
-def enviar(gestor, tipo, assunto, corpo, chave="", user=None, cc=False):
-    """Envia e registra um e-mail ao gestor. Com `chave`, não repete um aviso já enviado. Devolve a NotificacaoEnviada (ou None se já enviado)."""
+def enviar(gestor, tipo, assunto, corpo, chave="", user=None, cc=False, anexos=None):
+    """Envia e registra um e-mail ao gestor. Com `chave`, não repete um aviso já enviado. Devolve a NotificacaoEnviada (ou None se já enviado).
+    `anexos`: lista de (nome, bytes, tipo_mime)."""
     if chave and NotificacaoEnviada.objects.filter(chave=chave, estado="enviado").exists():
         return None
     cfg = config()
-    registro = NotificacaoEnviada(gestor=gestor, gestor_nome=gestor.nome, para=gestor.email, tipo=tipo, assunto=assunto[:250], corpo=corpo, chave=chave, criado_por=user)
+    registro = NotificacaoEnviada(gestor=gestor, gestor_nome=gestor.nome, para=gestor.email, tipo=tipo, assunto=assunto[:250], corpo=corpo, chave=chave, criado_por=user, anexos=[a[0] for a in anexos or []])
     if not gestor.email:
         registro.estado, registro.erro = "falhou", "Gestor sem e-mail cadastrado."
         registro.save()
         return registro
     try:
         mensagem = EmailMessage(assunto, corpo, from_email=cfg.remetente or settings.DEFAULT_FROM_EMAIL, to=[gestor.email], cc=[cfg.cc] if (cc and cfg.cc) else None)
+        for nome, conteudo, mime in anexos or []:
+            mensagem.attach(nome, conteudo, mime)
         mensagem.send(fail_silently=False)
     except Exception as exc:  # SMTP fora do ar, endereço recusado etc.: registra e segue
         registro.estado, registro.erro = "falhou", str(exc)[:300]
@@ -64,9 +67,53 @@ def enviar(gestor, tipo, assunto, corpo, chave="", user=None, cc=False):
     return registro
 
 
-def enviar_manual(gestor, assunto, corpo, user):
-    ctx = contexto_do_gestor(gestor)
-    return enviar(gestor, "manual", renderizar(assunto, ctx), renderizar(corpo, ctx), user=user)
+VARIAVEIS = ("gestor", "empresa", "valor", "vencimento", "fim_do_teste", "agente", "chave_expira_em", "dias_desligamento")
+
+
+def contexto_completo(gestor, hoje=None):
+    """Valores reais de cada variável para este gestor (envio manual). Sem dado correspondente, a variável não entra no contexto."""
+    hoje = hoje or timezone.localdate()
+    ctx = {"gestor": gestor.nome, "dias_desligamento": billing.regra().aviso_desligamento_dias}
+    empresas = list(gestor.empresas.order_by("id"))
+    if empresas:
+        ctx["empresa"] = empresas[0].name if len(empresas) == 1 else ", ".join(e.name for e in empresas)
+    fins = [(e.teste_inicio + timedelta(days=e.teste_dias), e) for e in empresas if e.em_teste and e.teste_inicio]
+    if fins:
+        fim, empresa = min(fins, key=lambda x: x[0])
+        ctx["fim_do_teste"] = _data(fim)
+        if len(empresas) > 1:
+            ctx["empresa"] = empresa.name
+    abertas = [c for c in gestor.cobrancas.prefetch_related("pagamentos") if billing.estado_da_cobranca(c, hoje)["status"] in ("a_receber", "em_atraso")]
+    if abertas:
+        c = min(abertas, key=lambda c: c.vencimento)
+        ctx.update(valor=_brl(billing.estado_da_cobranca(c, hoje)["saldo"]), vencimento=_data(c.vencimento))
+    validades = []
+    for empresa in empresas:
+        for usuario in empresa.members.filter(groups__name="agente"):
+            v = _status_conta_agente(usuario, True)["validade"]
+            if v and not v["expirado"]:
+                validades.append((v["expires_at"].date(), usuario.username, empresa.name))
+    if validades:
+        dia, agente, empresa = min(validades)
+        ctx.update(agente=agente, chave_expira_em=_data(dia))
+        if "empresa" not in ctx or len(empresas) > 1:
+            ctx["empresa"] = empresa
+    return ctx
+
+
+def variaveis_sem_valor(texto, ctx):
+    return sorted({m for m in re.findall(r"\{(\w+)\}", texto or "") if m not in ctx})
+
+
+def enviar_manual(gestor, assunto, corpo, user, anexos=None):
+    ctx = contexto_completo(gestor)
+    faltam = variaveis_sem_valor(assunto + " " + corpo, ctx)
+    if faltam:  # nunca manda "{variavel}" crua ao gestor: registra a falha e explica
+        registro = NotificacaoEnviada.objects.create(
+            gestor=gestor, gestor_nome=gestor.nome, para=gestor.email, tipo="manual", assunto=assunto[:250], corpo=corpo, criado_por=user,
+            estado="falhou", erro="Sem dado para " + ", ".join("{" + v + "}" for v in faltam) + " neste gestor.", anexos=[a[0] for a in anexos or []])
+        return registro
+    return enviar(gestor, "manual", renderizar(assunto, ctx), renderizar(corpo, ctx), user=user, anexos=anexos)
 
 
 def _ctx_cobranca(c):
@@ -139,6 +186,6 @@ def painel_de_chaves(hoje=None):
                 agentes.append({"agente": usuario.username, "empresa": empresa.name, "chave": estado["masked_key"], "expira_em": v["expires_at"].date() if v else None, "dias": dias, "situacao": situacao})
         saida.append({
             "gestor_id": g.pk, "gestor": g.nome, "email": g.email, "agentes": agentes,
-            "openai": {"projeto": g.openai_projeto, "chave_final": g.openai_chave_final, "limite_mensal": str(g.openai_limite_mensal) if g.openai_limite_mensal is not None else None},
+            "openai": {"modo": g.openai_modo, "projeto": g.openai_projeto, "chave_final": g.openai_chave_final, "limite_mensal": str(g.openai_limite_mensal) if g.openai_limite_mensal is not None else None},
         })
     return saida

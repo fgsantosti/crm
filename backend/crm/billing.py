@@ -163,8 +163,26 @@ def estado_da_cobranca(cobranca, hoje=None):
     return {"status": "a_receber", "pago": pago, "saldo": saldo, "dias_atraso": 0, "faixa": 0}
 
 
+EXTENSOES_ANEXO = {".pdf": b"%PDF", ".png": b"\x89PNG", ".jpg": b"\xff\xd8\xff", ".jpeg": b"\xff\xd8\xff", ".webp": b"RIFF"}
+TAMANHO_MAXIMO_ANEXO = 5 * 1024 * 1024
+
+
+def validar_anexo(arquivo):
+    """PDF ou imagem (PNG/JPEG/WEBP) de até 5 MB; confere também o início do arquivo, não só a extensão."""
+    nome = (getattr(arquivo, "name", "") or "").lower()
+    ext = nome[nome.rfind("."):] if "." in nome else ""
+    if ext not in EXTENSOES_ANEXO:
+        raise ValueError("Anexe um PDF ou uma imagem (PNG, JPG ou WEBP).")
+    if arquivo.size > TAMANHO_MAXIMO_ANEXO:
+        raise ValueError("O anexo passa de 5 MB.")
+    inicio = arquivo.read(12)
+    arquivo.seek(0)
+    if not inicio.startswith(EXTENSOES_ANEXO[ext]):
+        raise ValueError("O conteúdo do arquivo não corresponde ao tipo informado.")
+
+
 @transaction.atomic
-def registrar_pagamento(cobranca, data, valor, forma, comprovante, user):
+def registrar_pagamento(cobranca, data, valor, forma, comprovante, user, arquivo=None):
     """Registra um recebimento (valor em branco = o saldo). Aceita pagamento parcial, nunca acima do saldo."""
     saldo = cobranca.valor - pago_de(cobranca)
     if saldo <= 0:
@@ -187,7 +205,9 @@ def registrar_pagamento(cobranca, data, valor, forma, comprovante, user):
     data = data or timezone.localdate()
     if forma not in dict(Gestor.FORMAS):
         forma = cobranca.gestor.forma_pagamento
-    return Pagamento.objects.create(cobranca=cobranca, data=data, valor=valor, forma=forma, comprovante=(comprovante or "")[:300], registrado_por=user)
+    if arquivo:
+        validar_anexo(arquivo)
+    return Pagamento.objects.create(cobranca=cobranca, data=data, valor=valor, forma=forma, comprovante=(comprovante or "")[:300], comprovante_arquivo=arquivo or "", registrado_por=user)
 
 
 def _str(d):
@@ -259,7 +279,7 @@ def resumo_faturamento(ref, hoje=None):
     r = regra()
     pagamentos = [
         {"id": p.pk, "data": p.data, "gestor": p.cobranca.gestor.nome, "referencia": f"{dict(Cobranca.TIPOS)[p.cobranca.tipo]} · {p.cobranca.referencia:%m/%Y}", "valor": _str(p.valor),
-         "forma": p.forma, "comprovante": p.comprovante, "por": _nome_usuario(p.registrado_por), "criado_em": p.criado_em}
+         "forma": p.forma, "comprovante": p.comprovante, "comprovante_arquivo": p.comprovante_arquivo.name.rsplit("/", 1)[-1] if p.comprovante_arquivo else "", "por": _nome_usuario(p.registrado_por), "criado_em": p.criado_em}
         for p in Pagamento.objects.select_related("cobranca__gestor", "registrado_por")[:50]
     ]
     serie = []

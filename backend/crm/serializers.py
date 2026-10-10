@@ -434,7 +434,7 @@ class GestorSerializer(serializers.ModelSerializer):
     usuario_email = serializers.SerializerMethodField()
     class Meta:
         model = Gestor
-        fields = ["id", "nome", "email", "usuario", "usuario_email", "dia_vencimento", "forma_pagamento", "contrato_inicio", "indice_reajuste", "openai_projeto", "openai_chave_final", "openai_limite_mensal", "notas", "empresas", "criado_em"]
+        fields = ["id", "nome", "email", "usuario", "usuario_email", "dia_vencimento", "forma_pagamento", "contrato_inicio", "indice_reajuste", "openai_modo", "openai_projeto", "openai_chave_final", "openai_limite_mensal", "notas", "empresas", "criado_em"]
         read_only_fields = ["id", "empresas", "usuario_email", "criado_em"]
     def get_empresas(self, obj):
         return [{"id": c.pk, "name": c.name, "em_teste": c.em_teste} for c in obj.empresas.order_by("id")]

@@ -453,6 +453,8 @@ class Gestor(models.Model):
     forma_pagamento = models.CharField(max_length=10, choices=FORMAS, default="pix")
     contrato_inicio = models.DateField(null=True, blank=True, help_text="Início do contrato: base do pro-rata, do desconto por tempo e do reajuste anual.")
     indice_reajuste = models.CharField(max_length=20, default="IPCA")
+    MODOS_OPENAI = [("chave", "Chave de API do gestor"), ("plano", "Plano gerido pela Axioma")]
+    openai_modo = models.CharField(max_length=6, choices=MODOS_OPENAI, default="chave", help_text="chave = o gestor paga o consumo pela chave dele; plano = agentes no plano (ex.: ChatGPT Pro) gerido pela Axioma, com limite.")
     openai_projeto = models.CharField(max_length=120, blank=True, default="", help_text="Nome do projeto da OpenAI do gestor (a chave em si fica no gateway de cada agente).")
     openai_chave_final = models.CharField(max_length=8, blank=True, default="", help_text="Últimos caracteres da chave, só para conferência.")
     openai_limite_mensal = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Limite de consumo mensal combinado, em R$.")
@@ -494,7 +496,8 @@ class Pagamento(models.Model):
     data = models.DateField()
     valor = models.DecimalField(max_digits=10, decimal_places=2)
     forma = models.CharField(max_length=10, choices=Gestor.FORMAS, default="pix")
-    comprovante = models.CharField(max_length=300, blank=True, default="", help_text="Nome do arquivo ou link do comprovante.")
+    comprovante = models.CharField(max_length=300, blank=True, default="", help_text="Link ou referência do comprovante (quando não há arquivo).")
+    comprovante_arquivo = models.FileField(upload_to="comprovantes/", blank=True, help_text="Comprovante anexado (PDF ou imagem).")
     registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     criado_em = models.DateTimeField(auto_now_add=True)
     class Meta:
@@ -538,6 +541,7 @@ class NotificacaoEnviada(models.Model):
     chave = models.CharField(max_length=120, blank=True, default="", db_index=True)
     estado = models.CharField(max_length=10, default="enviado")
     erro = models.CharField(max_length=300, blank=True, default="")
+    anexos = models.JSONField(default=list, blank=True, help_text="Nomes dos arquivos enviados em anexo.")
     criado_em = models.DateTimeField(auto_now_add=True)
     criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     class Meta:

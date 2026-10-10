@@ -1,3 +1,4 @@
+import mimetypes
 import re
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -12,6 +13,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from . import billing, notifications
@@ -984,10 +986,11 @@ class AdminFaturamentoView(APIView):
 class AdminPagamentoView(APIView):
     """POST /api/admin-cobrancas/{id}/pagamentos/ registra um recebimento; DELETE /api/admin-pagamentos/{id}/ o desfaz."""
     permission_classes = [IsSuperUser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     def post(self, request, cobranca_id):
         cobranca = get_object_or_404(Cobranca, pk=cobranca_id)
         try:
-            billing.registrar_pagamento(cobranca, request.data.get("data"), request.data.get("valor"), request.data.get("forma") or "", request.data.get("comprovante") or "", request.user)
+            billing.registrar_pagamento(cobranca, request.data.get("data"), request.data.get("valor"), request.data.get("forma") or "", request.data.get("comprovante") or "", request.user, request.FILES.get("arquivo"))
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         return Response(billing._item_cobranca(cobranca, timezone.localdate()), status=201)
@@ -996,6 +999,17 @@ class AdminPagamentoView(APIView):
         cobranca = pagamento.cobranca
         pagamento.delete()
         return Response(billing._item_cobranca(cobranca, timezone.localdate()))
+
+class AdminComprovanteView(APIView):
+    """GET /api/admin-pagamentos/{id}/comprovante/: entrega o arquivo anexado (só superuser; não fica em /media/ público)."""
+    permission_classes = [IsSuperUser]
+    def get(self, request, pagamento_id):
+        pagamento = get_object_or_404(Pagamento, pk=pagamento_id)
+        if not pagamento.comprovante_arquivo:
+            return Response({"detail": "Este pagamento não tem arquivo."}, status=404)
+        nome = pagamento.comprovante_arquivo.name.rsplit("/", 1)[-1]
+        tipo = mimetypes.guess_type(nome)[0] or "application/octet-stream"
+        return FileResponse(pagamento.comprovante_arquivo.open("rb"), content_type=tipo, headers={"Content-Disposition": f'inline; filename="{nome}"', "X-Content-Type-Options": "nosniff"})
 
 class AdminRegrasCobrancaView(APIView):
     """Regras de cobrança da plataforma (pro-rata, desconto por tempo, abatimento do piloto, reajuste, faixas de atraso)."""
@@ -1023,18 +1037,32 @@ class AdminNotificacoesConfigView(APIView):
 class AdminNotificacoesEnviarView(APIView):
     """POST {"gestores": [ids] | "todos", "assunto", "mensagem"}: e-mail avulso (variáveis {gestor}). Devolve o resultado por gestor."""
     permission_classes = [IsSuperUser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     def post(self, request):
         assunto = str(request.data.get("assunto") or "").strip()
         mensagem = str(request.data.get("mensagem") or "").strip()
         if not assunto or not mensagem:
             return Response({"detail": "Informe o assunto e a mensagem."}, status=400)
         alvo = request.data.get("gestores")
+        if isinstance(alvo, str) and alvo != "todos":  # multipart: "1,2,3"
+            alvo = [int(x) for x in alvo.split(",") if x.strip().isdigit()]
         gestores = Gestor.objects.all() if alvo == "todos" else Gestor.objects.filter(pk__in=alvo if isinstance(alvo, list) else [])
         if not gestores:
             return Response({"detail": "Escolha ao menos um gestor."}, status=400)
+        anexos = request.FILES.getlist("anexos")
+        if len(anexos) > 5:
+            return Response({"detail": "No máximo 5 anexos."}, status=400)
+        try:
+            for a in anexos:
+                billing.validar_anexo(a)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        if str(request.data.get("exige_anexo") or "").lower() in ("1", "true") and not anexos:
+            return Response({"detail": "Este tipo de e-mail só é enviado com um anexo (a cobrança em PDF ou imagem)."}, status=400)
+        arquivos = [(a.name, a.read(), a.content_type or mimetypes.guess_type(a.name)[0] or "application/octet-stream") for a in anexos]
         resultado = []
         for g in gestores:
-            r = notifications.enviar_manual(g, assunto, mensagem, request.user)
+            r = notifications.enviar_manual(g, assunto, mensagem, request.user, arquivos)
             resultado.append({"gestor": g.nome, "estado": r.estado, "erro": r.erro})
         return Response({"resultado": resultado, "enviados": sum(1 for x in resultado if x["estado"] == "enviado")}, status=201)
 
