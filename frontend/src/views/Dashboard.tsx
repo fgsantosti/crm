@@ -480,49 +480,6 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
         </>
       )}
 
-      {role === 'empresa' && (
-        <section className="section" aria-labelledby="dash-kanban-t">
-          <div className="section-head">
-            <h2 id="dash-kanban-t">Kanban de atendimento</h2>
-            <span className="dash-nota">Somente visualização — a empresa não assume nem contata leads.</span>
-          </div>
-          {!carregou ? (
-            <SkeletonTiles />
-          ) : (
-            <div className="kb-container-dash">
-            <div className="kb-board kb-board-compacto" ref={quadroRef}>
-              {COLUMNS.map((col) => {
-                const items = ordenarColuna(col.key, kanbanLeads.filter((l) => columnOf(l) === col.key));
-                return (
-                  <section key={col.key} className="kb-col" aria-label={col.label}>
-                    <KanbanColunaHead coluna={col} total={items.length} />
-                    <div className="kb-col-body">
-                      {items.map((l) => (
-                        <article key={l.id} data-flip-id={l.id} className="kb-card kb-card-estatico">
-                          <button
-                            type="button"
-                            className="kb-fechar"
-                            aria-label={`Fechar lead ${l.name || l.contact} (apaga e reinicia a triagem)`}
-                            title="Fechar lead (apaga e reinicia a triagem)"
-                            onClick={() => removerLead(l)}
-                            disabled={excluindoId === l.id}
-                          >
-                            ×
-                          </button>
-                          <KanbanCardConteudo lead={l} coluna={col.key} compacto onDetalhar={setDetalhe} />
-                        </article>
-                      ))}
-                      {!items.length && <div className="kb-vazio">Nenhum lead aqui</div>}
-                    </div>
-                  </section>
-                );
-              })}
-            </div>
-            </div>
-          )}
-        </section>
-      )}
-
       <div className="dash-duas">
         <article className="dash-card" aria-labelledby="dash-area-t">
           <div>
@@ -750,6 +707,49 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
           </div>
         </section>
       )}
+      {role === 'empresa' && (
+        <section className="section" aria-labelledby="dash-kanban-t">
+          <div className="section-head">
+            <h2 id="dash-kanban-t">Kanban de atendimento</h2>
+            <span className="dash-nota">Somente visualização — a empresa não assume nem contata leads.</span>
+          </div>
+          {!carregou ? (
+            <SkeletonTiles />
+          ) : (
+            <div className="kb-container-dash">
+            <div className="kb-board kb-board-compacto" ref={quadroRef}>
+              {COLUMNS.map((col) => {
+                const items = ordenarColuna(col.key, kanbanLeads.filter((l) => columnOf(l) === col.key));
+                return (
+                  <section key={col.key} className="kb-col" aria-label={col.label}>
+                    <KanbanColunaHead coluna={col} total={items.length} />
+                    <div className="kb-col-body">
+                      {items.map((l) => (
+                        <article key={l.id} data-flip-id={l.id} className="kb-card kb-card-estatico">
+                          <button
+                            type="button"
+                            className="kb-fechar"
+                            aria-label={`Fechar lead ${l.name || l.contact} (apaga e reinicia a triagem)`}
+                            title="Fechar lead (apaga e reinicia a triagem)"
+                            onClick={() => removerLead(l)}
+                            disabled={excluindoId === l.id}
+                          >
+                            ×
+                          </button>
+                          <KanbanCardConteudo lead={l} coluna={col.key} compacto onDetalhar={setDetalhe} />
+                        </article>
+                      ))}
+                      {!items.length && <div className="kb-vazio">Nenhum lead aqui</div>}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+            </div>
+          )}
+        </section>
+      )}
+
         </>
       )}
       {popup && <DashboardAtendimentosDialog {...popup} historico={company.coletar_historico_conversa ? { api, companyId: company.id } : undefined} onClose={() => setPopup(null)} />}

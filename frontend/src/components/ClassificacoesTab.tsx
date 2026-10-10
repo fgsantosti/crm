@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Api } from '../api';
 import type { Company } from '../types';
 import { TEMPERATURA_VISUAL } from './KanbanVisual';
 import { Spinner } from './Skeleton';
+import { ICONE_ALERTA, ImpactoClassificacaoDialog, type LeadAfetada } from './ImpactoClassificacaoDialog';
+import { SaidaAnimada } from '../popupSaida';
 
 // Aba "Classificações" do Roteiro: onde terminam as faixas de nota (rigorosidade), legenda editável,
 // teste rápido e a regra em texto que o agente lê antes de dar as notas. O CRM continua calculando a temperatura.
@@ -45,10 +47,34 @@ export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api
   const [saving, setSaving] = useState(false);
   const [erro, setErro] = useState('');
   const [aviso, setAviso] = useState('');
+  const [afetadas, setAfetadas] = useState<LeadAfetada[]>([]);
+  const [impactoAberto, setImpactoAberto] = useState(false);
 
   const limites = useMemo(() => [0, ...cortes, 10], [cortes]);
   const presetAtual = PRESETS.find((p) => iguais(p.cortes, cortes))?.chave ?? 'personalizado';
   const alterado = !iguais(cortes, salvo.cortes) || regra.trim() !== salvo.regra.trim() || kanbanDe !== salvo.kanbanDe;
+
+  // Simulação: quais leads de Classificados sairiam do Kanban com as faixas em edição (não grava nada).
+  const mudouFaixas = !iguais(cortes, salvo.cortes) || kanbanDe !== salvo.kanbanDe;
+  useEffect(() => {
+    if (!canEdit || !mudouFaixas) {
+      setAfetadas([]);
+      return;
+    }
+    let ativo = true;
+    const timer = setTimeout(() => {
+      api(`/companies/${company.id}/classificacao/impacto/`, { method: 'POST', body: JSON.stringify({ classificacao_cortes: cortes, classificacao_kanban_a_partir_de: kanbanDe }) })
+        .then((d: { afetadas: LeadAfetada[] }) => ativo && setAfetadas(d.afetadas ?? []))
+        .catch(() => ativo && setAfetadas([]));
+    }, 350);
+    return () => {
+      ativo = false;
+      clearTimeout(timer);
+    };
+  }, [api, company.id, canEdit, mudouFaixas, cortes, kanbanDe]);
+  useEffect(() => {
+    if (!afetadas.length) setImpactoAberto(false);
+  }, [afetadas.length]);
 
   function mudar(i: number, bruto: string | number) {
     let v = typeof bruto === 'number' ? bruto : parseFloat(String(bruto).replace(',', '.'));
@@ -71,6 +97,8 @@ export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api
   const posTeste = Number.isNaN(media) ? null : Math.min(10, Math.max(0, media)) / 10;
 
   async function salvar() {
+    const concluidas = afetadas.length;
+    setImpactoAberto(false);
     setSaving(true);
     setErro('');
     setAviso('');
@@ -78,7 +106,8 @@ export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api
       const c: Company = await api(`/companies/${company.id}/`, { method: 'PATCH', body: JSON.stringify({ classificacao_cortes: cortes, classificacao_regra: regra.trim(), classificacao_kanban_a_partir_de: kanbanDe }) });
       onSalvo(c);
       setSalvo({ cortes: (c.classificacao_cortes ?? cortes).map(arredonda), regra: c.classificacao_regra ?? regra.trim(), kanbanDe: c.classificacao_kanban_a_partir_de ?? kanbanDe });
-      setAviso('Alterações salvas. O agente usa as novas faixas e a regra a partir da próxima conversa; leads já classificados não mudam.');
+      setAfetadas([]);
+      setAviso(`Alterações salvas. O agente usa as novas faixas e a regra a partir da próxima conversa; as leads de Classificados foram reavaliadas${concluidas ? ` e ${concluidas} concluíram como desqualificadas` : ''}.`);
     } catch (e) {
       setErro((e as Error).message);
     } finally {
@@ -243,7 +272,7 @@ export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api
       {erro && <p role="alert" className="error">{erro}</p>}
       {canEdit && (
         <div className="classif-acoes">
-          <button type="button" disabled={saving || !alterado} onClick={salvar}>
+          <button type="button" disabled={saving || !alterado} onClick={() => (afetadas.length ? setImpactoAberto(true) : salvar())}>
             {saving && <Spinner />}
             Salvar alterações
           </button>
@@ -252,6 +281,23 @@ export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api
           </button>
           {aviso && <span role="status" className="classif-aviso">{aviso}</span>}
         </div>
+      )}
+      {afetadas.length > 0 && (
+        <SaidaAnimada>
+          <button
+            type="button"
+            className="impacto-fab"
+            aria-haspopup="dialog"
+            aria-label={`${afetadas.length} lead${afetadas.length === 1 ? ' classificada sairia' : 's classificadas sairiam'} do Kanban. Ver lista.`}
+            title={`${afetadas.length} lead${afetadas.length === 1 ? ' afetada' : 's afetadas'}`}
+            onClick={() => setImpactoAberto(true)}
+          >
+            <svg width="26" height="26" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">{ICONE_ALERTA}</svg>
+          </button>
+        </SaidaAnimada>
+      )}
+      {impactoAberto && afetadas.length > 0 && (
+        <ImpactoClassificacaoDialog afetadas={afetadas} cores={Object.fromEntries(NOMES.map((n, i) => [n, CORES[i]]))} saving={saving} onVoltar={() => setImpactoAberto(false)} onSalvar={salvar} />
       )}
     </div>
   );
