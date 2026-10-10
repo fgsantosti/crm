@@ -20,6 +20,8 @@ type Resumo = {
   status: { despachado: number; automatico: number; aguardando: number; equipe: number; desqualificado: number; especial: number; nao_prosseguiram: number };
   desfechos: Record<'encerrado' | 'comprometido' | 'falha' | 'bloqueado', number>;
   por_area: [string, number][];
+  /** Leads classificadas por temperatura (Desqualificado ... Quente). */
+  por_temperatura: Record<string, number>;
   por_mes: [string, number][];
   por_owner: { owner_id: number; owner: string; atendimentos: number; concluidos: number; sucesso: number }[];
   sucesso: number;
@@ -45,7 +47,7 @@ const RESUMO_VAZIO: Resumo = {
   total: 0, novas_leads: 0, nao_prosseguiram: 0, novas_hoje: 0, triagem_concluida: 0, desqualificados: 0,
   status: { despachado: 0, automatico: 0, aguardando: 0, equipe: 0, desqualificado: 0, especial: 0, nao_prosseguiram: 0 },
   desfechos: { encerrado: 0, comprometido: 0, falha: 0, bloqueado: 0 },
-  por_area: [], por_mes: [], por_owner: [], sucesso: 0, concluidos: [], atendimentos: [],
+  por_area: [], por_temperatura: {}, por_mes: [], por_owner: [], sucesso: 0, concluidos: [], atendimentos: [],
 };
 
 function rotuloMes(chave: string) {
@@ -62,6 +64,23 @@ const STATUS_DONUT: { key: keyof Resumo['status']; label: string; color: string 
   { key: 'desqualificado', label: 'Desqualificados', color: '#8C7B69' },
   { key: 'nao_prosseguiram', label: 'Não prosseguiram', color: '#D8CBBB' },
 ];
+
+// Gráficos de barra: do maior para o menor, da esquerda para a direita; a cor segue a posição (maior = laranja mais forte).
+const RAMPA = ['#A83E12', '#D9531A', '#E8793F', '#F0A06E', '#F4BE98', '#F6D6BE', '#E4D6C4'];
+function ranquear<T extends { value: number }>(itens: T[]): (T & { cor: string; posicao: number })[] {
+  return [...itens].sort((a, b) => b.value - a.value).map((it, i) => ({ ...it, posicao: i + 1, cor: RAMPA[Math.min(i, RAMPA.length - 1)] }));
+}
+
+const ETAPA_VISUAL: Record<AtendimentoResumo['categoria_status'], { rotulo: string; fundo: string; cor: string }> = {
+  automatico: { rotulo: 'Em triagem', fundo: '#E3ECFD', cor: '#1D4FBF' },
+  aguardando: { rotulo: 'Triagem concluída', fundo: '#FBF0D8', cor: '#7A4F0E' },
+  equipe: { rotulo: 'Com a equipe', fundo: '#FBE3D0', cor: '#A83E12' },
+  despachado: { rotulo: 'Despachado', fundo: '#EEF7F1', cor: '#245F46' },
+  desqualificado: { rotulo: 'Desqualificado', fundo: '#EDE6DC', cor: '#4E4136' },
+  especial: { rotulo: 'Outras situações', fundo: '#EDE4FB', cor: '#5B21B6' },
+};
+
+const TEMPERATURAS = ['Quente', 'Qualificado', 'Frio', 'Desconfiado', 'Desqualificado'];
 
 const DESFECHO_LABELS: { value: LeadConcluido['desfecho']; label: string; color: string; fundo: string; borda: string }[] = [
   { value: 'encerrado', label: 'Encerrado', color: '#245F46', fundo: '#EEF7F1', borda: '#CFE5D8' },
@@ -123,7 +142,6 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
       params.set('data_fim', dataFim);
     }
     if (area) params.set('area', area);
-    if (search.trim()) params.set('q', search.trim());
     const timer = setTimeout(() => {
       api(`/leads/resumo/?${params.toString()}`)
         .then((d: Resumo) => {
@@ -138,12 +156,45 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
             setCarregou(true);
           }
         });
-    }, search ? 250 : 0);
+    }, 0);
     return () => {
       active = false;
       clearTimeout(timer);
     };
-  }, [company.id, area, periodo, dataInicio, dataFim, erroPeriodo, search, recarregar]);
+  }, [company.id, area, periodo, dataInicio, dataFim, erroPeriodo, recarregar]);
+
+  // Busca: lista os leads que combinam (nome, telefone ou responsável) em todo o histórico, sem filtrar o dashboard.
+  const termo = search.trim();
+  const buscaAtiva = termo.length >= 2;
+  const [resultados, setResultados] = useState<AtendimentoResumo[]>([]);
+  const [buscando, setBuscando] = useState(false);
+  useEffect(() => {
+    if (!buscaAtiva) {
+      setResultados([]);
+      setBuscando(false);
+      return;
+    }
+    let active = true;
+    setBuscando(true);
+    const timer = setTimeout(() => {
+      api(`/leads/resumo/?company=${company.id}&dias=all&q=${encodeURIComponent(termo)}`)
+        .then((d: Resumo) => active && setResultados(d.atendimentos ?? []))
+        .catch((e) => active && setError(e.message))
+        .finally(() => active && setBuscando(false));
+    }, 300);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [company.id, termo, buscaAtiva, recarregar]);
+
+  async function detalharResultado(r: AtendimentoResumo) {
+    try {
+      setDetalhe(await api(`/leads/${r.id}/?company=${company.id}`));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
 
   const total = resumo.total;
   const desqualificados = resumo.desqualificados;
@@ -181,7 +232,10 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
     { title: 'Desqualificados', count: desqualificados, cor: '#8C7B69', description: 'Leads classificados como desqualificados ou desconfiados.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'desqualificado', desqualificacao: true },
     { title: 'Outras situações', count: resumo.status.especial, cor: '#7C3AED', description: 'Acompanhamentos em aberto: clientes que já têm processo e querem acompanhá-lo (não são leads novos). Depois de despachados, passam a contar em Despachos.', matches: (lead: AtendimentoResumo) => lead.categoria_status === 'especial', desqualificacao: false },
   ];
-  const segmentos = STATUS_DONUT.map((st) => ({ ...st, value: resumo.status[st.key] })).filter((st) => st.value > 0);
+  const ordenados = ranquear(STATUS_DONUT.map((st) => ({ ...st, value: resumo.status[st.key] })));
+  const segmentos = ordenados.filter((st) => st.value > 0);
+  const temperaturas = ranquear(TEMPERATURAS.map((t) => ({ nome: t, value: resumo.por_temperatura[t] ?? 0 })));
+  const totalTemperaturas = temperaturas.reduce((t, x) => t + x.value, 0);
   const descricaoBarra = `Distribuição dos ${total} atendimentos: ${segmentos.map((st) => `${st.value} ${st.label.toLowerCase()}`).join(', ')}`;
   const pctNum = (n: number) => (total ? `${Math.round((n / total) * 100)}%` : '0%');
   const maxArea = Math.max(1, ...byArea.map(([, v]) => v));
@@ -286,6 +340,51 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
         </p>
       )}
 
+      {buscaAtiva ? (
+        <section className="dash-card dash-card-tabela" aria-labelledby="dash-busca-t">
+          <div className="dash-card-topo">
+            <div className="dash-card-cab">
+              <div>
+                <h2 id="dash-busca-t">
+                  {buscando ? 'Buscando…' : `${resultados.length} lead${resultados.length === 1 ? ' encontrado' : 's encontrados'} para “${termo}”`}
+                </h2>
+                <small>Nome, telefone ou responsável, em todo o histórico. Clique em Detalhar para abrir os dados do lead.</small>
+              </div>
+              <button type="button" className="dash-botao-claro" onClick={() => setSearch('')}>
+                Voltar ao dashboard
+              </button>
+            </div>
+          </div>
+          {!buscando && !resultados.length ? (
+            <div className="empty">Nenhum lead encontrado para esta busca.</div>
+          ) : (
+            <ul className="dash-resultados">
+              {resultados.map((r) => {
+                const tv = TEMPERATURA_VISUAL[r.temperature];
+                const etapa = ETAPA_VISUAL[r.categoria_status];
+                return (
+                  <li key={r.id}>
+                    <div className="dash-resultado-id">
+                      <span className="kb-dot" style={{ background: tv?.ponto ?? '#B9A893' }} aria-hidden="true" />
+                      <div>
+                        <strong>{r.name || 'Sem nome informado'}</strong>
+                        <small>{r.contact}</small>
+                      </div>
+                    </div>
+                    <span>{r.especialidade || '—'}</span>
+                    <span className="dash-selo" style={{ background: etapa.fundo, color: etapa.cor }}>{etapa.rotulo}</span>
+                    <span className="dash-resultado-resp">{r.owner || '—'}</span>
+                    <button type="button" className="kb-detalhar" aria-haspopup="dialog" aria-label={`Detalhar ${r.name || r.contact}`} onClick={() => detalharResultado(r)}>
+                      Detalhar
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      ) : (
+        <>
       {busy && !carregou ? (
         <SkeletonTiles />
       ) : (
@@ -307,16 +406,17 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
             {total > 0 && (
               <div className="dash-barra" role="img" aria-label={descricaoBarra}>
                 {segmentos.map((st) => (
-                  <span key={st.key} style={{ flexGrow: st.value, background: st.color }} title={`${st.label}: ${st.value} (${pctNum(st.value)})`} />
+                  <span key={st.key} style={{ flexGrow: st.value, background: st.cor }} title={`${st.label}: ${st.value} (${pctNum(st.value)})`} />
                 ))}
               </div>
             )}
             <ul className="dash-legenda">
-              {STATUS_DONUT.map((st) => (
+              {ordenados.map((st) => (
                 <li key={st.key}>
-                  <span className="dash-quadrado" style={{ background: st.color }} aria-hidden="true" />
+                  <span className="dash-quadrado" style={{ background: st.cor }} aria-hidden="true" />
                   {st.label}
-                  <strong>{resumo.status[st.key]}</strong>
+                  <strong>{st.value}</strong>
+                  <span className="dash-legenda-pct">{pctNum(st.value)}</span>
                 </li>
               ))}
             </ul>
@@ -457,6 +557,41 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
           )}
         </article>
       </div>
+
+      <section className="dash-card" aria-labelledby="dash-temp-t">
+        <div className="dash-card-cab">
+          <div>
+            <h2 id="dash-temp-t">Temperatura dos qualificados</h2>
+            <small>Leads classificadas no período, da temperatura mais frequente para a menos frequente</small>
+          </div>
+          <div className="dash-total-pequeno">
+            <strong>{totalTemperaturas}</strong>
+            <span>classificadas</span>
+          </div>
+        </div>
+        {totalTemperaturas > 0 ? (
+          <>
+            <div className="dash-barra" role="img" aria-label={`Temperatura das leads classificadas: ${temperaturas.map((t) => `${t.value} ${t.nome.toLowerCase()}`).join(', ')}`}>
+              {temperaturas.filter((t) => t.value > 0).map((t) => (
+                <span key={t.nome} style={{ flexGrow: t.value, background: t.cor }} title={`${t.nome}: ${t.value}`} />
+              ))}
+            </div>
+            <ul className="dash-temps">
+              {temperaturas.map((t) => (
+                <li key={t.nome}>
+                  <span className="dash-passo">{t.posicao}º</span>
+                  <span className="dash-quadrado" style={{ background: t.cor }} aria-hidden="true" />
+                  <span style={{ flex: 1 }}>{t.nome}</span>
+                  <strong>{t.value}</strong>
+                  <span className="dash-legenda-pct">{Math.round((t.value / totalTemperaturas) * 100)}%</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <p className="dash-nota">Nenhuma lead classificada no período selecionado.</p>
+        )}
+      </section>
 
       <section className="dash-card dash-card-tabela" aria-labelledby="dash-conc-t">
         <div className="dash-card-topo">
@@ -603,8 +738,10 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
           </div>
         </section>
       )}
+        </>
+      )}
       {popup && <DashboardAtendimentosDialog {...popup} historico={company.coletar_historico_conversa ? { api, companyId: company.id } : undefined} onClose={() => setPopup(null)} />}
-      {detalhe && <LeadDetalheDialog lead={detalhe} estagio={COLUMNS.find((c) => c.key === columnOf(detalhe))?.label ?? ''} historico={company.coletar_historico_conversa ? { api, companyId: company.id } : undefined} onClose={() => setDetalhe(null)} />}
+      {detalhe && <LeadDetalheDialog lead={detalhe} estagio={detalhe.desfecho ? 'Despachado' : (COLUMNS.find((c) => c.key === columnOf(detalhe))?.label ?? '')} historico={company.coletar_historico_conversa ? { api, companyId: company.id } : undefined} onClose={() => setDetalhe(null)} />}
     </>
   );
 }
