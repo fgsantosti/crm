@@ -16,6 +16,7 @@ class Company(models.Model):
     # Portão do Admin: com ele ligado, o CRM guarda as mensagens do cliente (e transcrições de áudio) de cada
     # lead, da primeira até a que o classificou, para a equipe consultar em "Histórico de conversa".
     classificacao_cortes = models.JSONField(default=default_cortes_classificacao, blank=True, help_text="4 notas (0-10, crescentes) onde terminam Desqualificado, Desconfiado, Frio e Qualificado; a partir da última é Quente. Padrão [3,5,7,9]; ver services.faixas_da_empresa.")
+    classificacao_kanban_a_partir_de = models.PositiveSmallIntegerField(default=2, help_text="Índice (0 Desqualificado ... 4 Quente) da primeira classificação que vai para o Kanban de classificados; as anteriores concluem sozinhas e ficam fora dele. Padrão 2 (Frio em diante).")
     classificacao_regra = models.TextField(blank=True, default="", max_length=1500, help_text="Critério em texto que o agente lê antes de dar as notas (tela Roteiro, aba Classificações). A temperatura final continua sendo calculada pelo CRM.")
     coletar_historico_conversa = models.BooleanField(default=False)
     # Identidade visual da empresa (barra lateral): vazio = padrão Conecta (logo e nome do produto).

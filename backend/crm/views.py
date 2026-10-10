@@ -38,7 +38,7 @@ from .services import (
     criar_lead_manual as criar_lead_manual_service,
     criar_situacao_especial_manual as criar_situacao_especial_manual_service,
     seed_roteiro_padrao,
-    resumo_dashboard, FORA_DO_KANBAN,
+    resumo_dashboard, fora_do_kanban,
 )
 from .serializers import DashboardPeriodSerializer
 
@@ -386,7 +386,7 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
             # regra de Leads.columnOf): triagem concluída (ou escalada pra humano), ainda não
             # em negociação nem despachada. Em espera vem antes de Classificado.
             qs = qs.filter(desfecho="", origem_manual=False, situacao_especial="", etapa_atendimento__in=["", "espera"]).exclude(
-                temperature__in=FORA_DO_KANBAN
+                temperature__in=fora_do_kanban(self.company())
             ).filter(Q(bot_closed=True) | Q(mode="HUMANO")).annotate(
                 estagio_rank=Case(When(etapa_atendimento="espera", then=Value(0)), default=Value(1), output_field=IntegerField()),
                 rank=Case(When(priority="Alta", then=Value(0)), When(priority="Média", then=Value(1)), default=Value(2), output_field=IntegerField()),
@@ -394,7 +394,7 @@ class LeadViewSet(TenantMixin, viewsets.ModelViewSet):
         if self.request.query_params.get("ativos") == "1":
             # Só o que o Kanban mostra (mesma regra de Leads.leadsVisiveisNoKanban) --
             # evita que leads despachados ocupem a página e empurrem ativos pra fora.
-            qs = qs.filter(desfecho="", origem_manual=False, situacao_especial="").exclude(temperature__in=FORA_DO_KANBAN)
+            qs = qs.filter(desfecho="", origem_manual=False, situacao_especial="").exclude(temperature__in=fora_do_kanban(self.company()))
         if self.request.query_params.get("especial") == "1":
             # "Outras situações": leads fora do fluxo de leads novos (ex.: acompanhamento de processo).
             qs = qs.exclude(situacao_especial="").filter(desfecho="").order_by("created_at")

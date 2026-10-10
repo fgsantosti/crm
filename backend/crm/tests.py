@@ -4141,3 +4141,59 @@ class DespachoEspecialPelaEmpresaTests(TestCase):
         self.assertNotEqual(donos["B"], "Despachado pela Empresa")
         # Não vira atendente no desempenho.
         self.assertTrue(all(o["owner_id"] != empresa.pk for o in r["por_owner"]))
+
+
+class KanbanAPartirDeTests(TestCase):
+    def setUp(self):
+        self.company = Company.objects.create(name="Kanban Ltda")
+        seed_roteiro_padrao(self.company)
+        self.staff = get_user_model().objects.create_user("emp-kb", password="x", is_staff=True)
+        self.company.members.add(self.staff)
+        self.api = APIClient(); self.api.force_authenticate(self.staff)
+
+    def test_padrao_mantem_desqualificado_e_desconfiado_fora(self):
+        from .services import fora_do_kanban
+        self.assertEqual(self.company.classificacao_kanban_a_partir_de, 2)
+        self.assertEqual(fora_do_kanban(self.company), {"Desqualificado", "Desconfiado"})
+        self.company.classificacao_kanban_a_partir_de = 0
+        self.assertEqual(fora_do_kanban(self.company), set())
+        self.company.classificacao_kanban_a_partir_de = 4
+        self.assertEqual(fora_do_kanban(self.company), {"Desqualificado", "Desconfiado", "Frio", "Qualificado"})
+
+    def test_patch_valida_o_indice(self):
+        url = f"/api/companies/{self.company.pk}/"
+        self.assertEqual(self.api.patch(url, {"classificacao_kanban_a_partir_de": 3}, format="json").status_code, 200)
+        for ruim in (5, -1, "x"):
+            self.assertEqual(self.api.patch(url, {"classificacao_kanban_a_partir_de": ruim}, format="json").status_code, 400, ruim)
+
+    def test_subir_o_limite_conclui_leads_abertos_sem_responsavel_e_poupa_os_assumidos(self):
+        atendente = get_user_model().objects.create_user("at-kb", password="x")
+        self.company.members.add(atendente)
+        solto = Lead.objects.create(company=self.company, contact="+5585900009301", name="Solto", temperature="Frio", bot_closed=True)
+        assumido = Lead.objects.create(company=self.company, contact="+5585900009302", name="Assumido", temperature="Frio", bot_closed=True, owner=atendente, mode="HUMANO", etapa_atendimento="negociacao")
+        quente = Lead.objects.create(company=self.company, contact="+5585900009303", name="Quente", temperature="Quente", bot_closed=True)
+        r = self.api.patch(f"/api/companies/{self.company.pk}/", {"classificacao_kanban_a_partir_de": 3}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        for l in (solto, assumido, quente):
+            l.refresh_from_db()
+        self.assertEqual(solto.desfecho, "desqualificado")
+        self.assertEqual(assumido.desfecho, "")
+        self.assertEqual(quente.desfecho, "")
+
+    def test_classificado_respeita_o_limite_da_empresa(self):
+        from .services import _aplicar_notas_urgencia, fora_do_kanban
+        # Qualificado (7-9) fora do Kanban quando o limite é Quente; Desconfiado dentro quando o limite é 0.
+        self.company.classificacao_kanban_a_partir_de = 4
+        self.assertIn("Qualificado", fora_do_kanban(self.company))
+        self.company.classificacao_kanban_a_partir_de = 0
+        self.assertNotIn("Desconfiado", fora_do_kanban(self.company))
+
+    def test_dashboard_categoriza_pelo_limite_da_empresa(self):
+        from .services import resumo_dashboard
+        Lead.objects.create(company=self.company, contact="+5585900009311", name="D", temperature="Desconfiado", bot_closed=True)
+        self.assertEqual(resumo_dashboard(self.company)["status"]["desqualificado"], 1)
+        self.assertEqual(resumo_dashboard(self.company)["status"]["aguardando"], 0)
+        Company.objects.filter(pk=self.company.pk).update(classificacao_kanban_a_partir_de=0)
+        self.company.refresh_from_db()
+        r = resumo_dashboard(self.company)
+        self.assertEqual((r["status"]["desqualificado"], r["status"]["aguardando"]), (0, 1))

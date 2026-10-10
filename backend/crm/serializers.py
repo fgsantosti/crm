@@ -22,7 +22,7 @@ class CompanySerializer(serializers.ModelSerializer):
         }
     class Meta:
         model = Company
-        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional", "mensagens_audio", "voz_tts", "etapa_inicial", "spin_inicial", "spins_iniciais", "coletar_historico_conversa", "classificacao_cortes", "classificacao_regra", "identidade_visual"]
+        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional", "mensagens_audio", "voz_tts", "etapa_inicial", "spin_inicial", "spins_iniciais", "coletar_historico_conversa", "classificacao_cortes", "classificacao_kanban_a_partir_de", "classificacao_regra", "identidade_visual"]
         # Só as opções do agente (tela Roteiro, aba "Opções do Agente") são editáveis
         # por aqui -- os demais campos de Company continuam no Painel Admin.
         read_only_fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "coletar_historico_conversa"]
@@ -32,6 +32,17 @@ class CompanySerializer(serializers.ModelSerializer):
             return validar_cortes(valor)
         except ValueError as exc:
             raise serializers.ValidationError(str(exc))
+    def validate_classificacao_kanban_a_partir_de(self, valor):
+        if not isinstance(valor, int) or valor < 0 or valor > 4:
+            raise serializers.ValidationError("Escolha de 0 a 4 (Quente sempre vai para o Kanban).")
+        return valor
+    def update(self, instance, validated_data):
+        from .services import aplicar_novo_limite_kanban
+        antes = instance.classificacao_kanban_a_partir_de
+        instance = super().update(instance, validated_data)
+        if instance.classificacao_kanban_a_partir_de != antes:
+            aplicar_novo_limite_kanban(instance)
+        return instance
     def validate_classificacao_regra(self, valor):
         from .services import MAX_REGRA_CLASSIFICACAO
         valor = (valor or "").strip()

@@ -760,7 +760,7 @@ def receive(company, data):
                     apagar_lead, motivo_apagar = True, field_error
                     question_id = None
                 else:
-                    if not lead.name.strip() and lead.temperature not in FORA_DO_KANBAN:
+                    if not lead.name.strip() and lead.temperature not in fora_do_kanban(company):
                         lead.name = lead.contact_name
                     lead.bot_closed = True
                     lead.state = "ENCERRADO_CLASSIFICADO"
@@ -768,7 +768,7 @@ def receive(company, data):
                     lead.next_action = "Revisar classificação e dar continuidade humana"
                     question_id = "encerramento" if texto_fora_habilitado(company, "encerramento") else None
                     event.summary = "Lead classificada: " + lead.temperature
-                    if lead.temperature in FORA_DO_KANBAN:
+                    if lead.temperature in fora_do_kanban(company):
                         # Nunca entra no Kanban humano, então nunca seria despachado: fecha
                         # aqui, senão o número ficaria preso como "lead ativo" pra sempre.
                         lead.desfecho = "desqualificado"
@@ -1194,8 +1194,8 @@ def _validar_lead_classificavel(lead):
     Desconfiado (esses nunca entram na fila de atendimento humano)."""
     if not lead.bot_closed and lead.mode != "HUMANO":
         return "Este lead ainda não concluiu a triagem."
-    if lead.temperature in FORA_DO_KANBAN:
-        return "Leads classificados como Desqualificado ou Desconfiado não entram na fila de atendimento humano."
+    if lead.temperature in fora_do_kanban(lead.company):
+        return "Leads com esta classificação não entram na fila de atendimento humano (configurado na aba Classificações do Roteiro)."
     if lead.desfecho:
         return "Este atendimento já foi concluído."
     return None
@@ -1229,7 +1229,7 @@ def acompanhar_lead(lead_id, user):
     lead = Lead.objects.select_for_update().filter(pk=lead_id).first()
     if not lead or not company.members.filter(pk=user.pk).exists():
         return "Lead não encontrado."
-    if lead.desfecho or lead.temperature in FORA_DO_KANBAN:
+    if lead.desfecho or lead.temperature in fora_do_kanban(company):
         return "Este lead não está disponível para atendimento."
     if lead.owner_id:
         return "Este atendimento já foi assumido por um atendente."
@@ -1418,7 +1418,17 @@ PRIORIDADE_POR_TEMPERATURA = {"Quente": "Alta", "Qualificado": "Média"}
 # O agente manda TODOS os leads pro CRM, até os desqualificados/desconfiados
 # -- mas esses dois nunca entram no fluxo operacional do Kanban nem podem ser
 # assumidos por atendente, só contam nas estatísticas do dashboard.
-FORA_DO_KANBAN = {"Desqualificado", "Desconfiado"}
+FORA_DO_KANBAN = {"Desqualificado", "Desconfiado"}  # padrão (Frio em diante vai ao Kanban); por empresa: fora_do_kanban(company)
+
+def fora_do_kanban(company=None):
+    """Classificações que NÃO vão para o Kanban na empresa: as que ficam antes de `classificacao_kanban_a_partir_de`
+    (Aba Classificações do Roteiro). Sem empresa ou valor inválido, vale o padrão."""
+    try:
+        corte = int(getattr(company, "classificacao_kanban_a_partir_de", 2))
+    except (TypeError, ValueError):
+        return FORA_DO_KANBAN
+    corte = min(4, max(0, corte))
+    return set(NOMES_CLASSIFICACAO[:corte])
 PODE_ASSUMIR_A_PARTIR_DE = "Frio"
 # "Concluído com sucesso" = desfecho Encerrado (o cliente conseguiu o que queria);
 # Comprometido e Falha também são conclusões, mas não de sucesso.
@@ -1896,7 +1906,7 @@ def _responsavel_exibido(r, nomes):
     """Nome do responsável; sem responsável e despachado pela conta Empresa, o rótulo dessa origem."""
     return nomes.get(r["owner"], "") or (ROTULO_DESPACHO_EMPRESA if r.get("despachado_pela_empresa") else "")
 
-def _categoria_status(lead):
+def _categoria_status(lead, fora=None):
     """Categoria exclusiva (cada lead cai em exatamente uma) usada no donut/tiles do Dashboard:
     especial (Outras situações), desqualificado, despachado, automatico (em triagem), aguardando
     (Qualificados + Atendimentos em espera = a fila de Pendências, "Triagem concluída") e equipe
@@ -1909,7 +1919,7 @@ def _categoria_status(lead):
         return "despachado"
     if not lead["bot_closed"] and lead["mode"] != "HUMANO":
         return "automatico"
-    if lead["bot_closed"] and lead["mode"] != "HUMANO" and lead["temperature"] in FORA_DO_KANBAN:
+    if lead["bot_closed"] and lead["mode"] != "HUMANO" and lead["temperature"] in (FORA_DO_KANBAN if fora is None else fora):
         return "desqualificado"
     if not lead["origem_manual"] and lead["etapa_atendimento"] in ("", "espera"):
         return "aguardando"
@@ -1920,21 +1930,21 @@ MOTIVOS_DESQUALIFICACAO = {
     "sem_resposta": "Sem resposta após 3 repetições da mesma pergunta",
 }
 
-def motivo_da_desqualificacao(lead):
+def motivo_da_desqualificacao(lead, fora=None):
     """Texto do motivo de um lead desqualificado (vazio para os demais), para o popup do Dashboard."""
-    if _categoria_status(lead) != "desqualificado":
+    if _categoria_status(lead, fora) != "desqualificado":
         return ""
     detalhe = lead.get("urgencia_detalhe") or {}
     if detalhe.get("motivo") in MOTIVOS_DESQUALIFICACAO:
         return MOTIVOS_DESQUALIFICACAO[detalhe["motivo"]]
-    if lead.get("temperature") in FORA_DO_KANBAN:
+    if lead.get("temperature") in (FORA_DO_KANBAN if fora is None else fora):
         media = f" (média {detalhe['score']})" if detalhe.get("score") is not None else ""
         return f"Classificado como {lead['temperature']}{media}"
     return "Desqualificado pelo agente"
 
-def _triagem_concluida_dashboard(lead):
+def _triagem_concluida_dashboard(lead, fora=None):
     """Triagem concluída = leads que aguardam a equipe (colunas Qualificados e Em espera)."""
-    return _categoria_status(lead) == "aguardando"
+    return _categoria_status(lead, fora) == "aguardando"
 
 def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, data_fim=None):
     """Agregados do Dashboard calculados no servidor sobre TODOS os leads da
@@ -1978,11 +1988,12 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
 
     status = {"despachado": 0, "automatico": 0, "aguardando": 0, "equipe": 0, "desqualificado": 0, "especial": 0, "nao_prosseguiram": 0}
     desfechos = {"encerrado": 0, "comprometido": 0, "falha": 0, "bloqueado": 0}
+    fora = fora_do_kanban(company)
     por_area, por_mes, por_owner = {}, {}, {}
     por_temperatura = {t: 0 for t in URGENCIA_RANK}
     tz = timezone.get_current_timezone()
     for r in rows:
-        status[_categoria_status(r)] += 1
+        status[_categoria_status(r, fora)] += 1
         if r["desfecho"] in desfechos:
             desfechos[r["desfecho"]] += 1
         chave_area = r["especialidade"] or "Sem especialidade"
@@ -2022,7 +2033,7 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
         "nao_prosseguiram": None if sem_contagem else (totais["nao"] or 0),
         "novas_hoje": novas_hoje,
         # Cadastro manual nunca passou por triagem (bot_closed=True só pra silenciar o agente).
-        "triagem_concluida": sum(1 for r in rows if _triagem_concluida_dashboard(r)),
+        "triagem_concluida": sum(1 for r in rows if _triagem_concluida_dashboard(r, fora)),
         # Mesmo critério da fatia "desqualificado" do status -- o tile e o donut sempre batem.
         "desqualificados": status["desqualificado"],
         "status": status,
@@ -2035,9 +2046,9 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
                 "temperature": r["temperature"], "priority": r["priority"],
                 "owner": _responsavel_exibido(r, nomes), "created_at": r["created_at"],
                 "desfecho": r["desfecho"], "origem_manual": r["origem_manual"],
-                "categoria_status": _categoria_status(r),
-                "triagem_concluida": _triagem_concluida_dashboard(r),
-                "motivo_desqualificacao": motivo_da_desqualificacao(r),
+                "categoria_status": _categoria_status(r, fora),
+                "triagem_concluida": _triagem_concluida_dashboard(r, fora),
+                "motivo_desqualificacao": motivo_da_desqualificacao(r, fora),
             }
             for r in sorted(rows, key=lambda r: (r["created_at"], str(r["id"])), reverse=True)
         ],
@@ -2118,3 +2129,16 @@ def atualizar_identidade_visual(company, dados, logo=None):
     company.marca_nome, company.marca_cor_principal, company.marca_cor_contraste = nome, principal, contraste
     company.save(update_fields=["marca_nome", "marca_logo", "marca_cor_principal", "marca_cor_contraste"])
     return None
+
+
+def aplicar_novo_limite_kanban(company):
+    """A empresa mudou quais classificações vão ao Kanban: leads abertos, sem responsável, que passaram a ficar
+    de fora concluem sozinhos como desqualificados (senão prenderiam o número sem ninguém poder atendê-los).
+    Leads já assumidos por um atendente ou já concluídos não mudam. Devolve quantos foram concluídos."""
+    fora = fora_do_kanban(company)
+    if not fora:
+        return 0
+    return Lead.objects.filter(
+        company=company, desfecho="", bot_closed=True, mode="AUTOMÁTICO", owner__isnull=True, origem_manual=False,
+        situacao_especial="", etapa_atendimento="", temperature__in=fora,
+    ).update(desfecho="desqualificado", concluido_em=timezone.now(), next_action="")
