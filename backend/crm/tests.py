@@ -4164,7 +4164,7 @@ class KanbanAPartirDeTests(TestCase):
     def test_patch_valida_o_indice(self):
         url = f"/api/companies/{self.company.pk}/"
         self.assertEqual(self.api.patch(url, {"classificacao_kanban_a_partir_de": 3}, format="json").status_code, 200)
-        for ruim in (5, -1, "x"):
+        for ruim in (5, 0, -1, "x"):
             self.assertEqual(self.api.patch(url, {"classificacao_kanban_a_partir_de": ruim}, format="json").status_code, 400, ruim)
 
     def test_subir_o_limite_conclui_leads_abertos_sem_responsavel_e_poupa_os_assumidos(self):

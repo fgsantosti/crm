@@ -33,8 +33,8 @@ class CompanySerializer(serializers.ModelSerializer):
         except ValueError as exc:
             raise serializers.ValidationError(str(exc))
     def validate_classificacao_kanban_a_partir_de(self, valor):
-        if not isinstance(valor, int) or valor < 0 or valor > 4:
-            raise serializers.ValidationError("Escolha de 0 a 4 (Quente sempre vai para o Kanban).")
+        if not isinstance(valor, int) or valor < 1 or valor > 4:
+            raise serializers.ValidationError("Escolha de 1 a 4 (Desqualificado nunca vai para o Kanban e Quente sempre vai).")
         return valor
     def update(self, instance, validated_data):
         from .services import aplicar_classificacao_aos_leads
