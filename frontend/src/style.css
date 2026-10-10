@@ -745,3 +745,46 @@ dialog[data-saindo]::backdrop { animation: popup-fundo-sai .17s ease-in forwards
   .dash-barra, .dash-trilho > span, .dash-mes-barra { animation: none; }
   .dash-barra > span, .dash-trilho > span, .dash-mes-barra { transition: none; }
 }
+
+/* Aba Classificações (Roteiro) */
+.classif { display: flex; flex-direction: column; gap: 20px; }
+.classif-card { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 28px; display: flex; flex-direction: column; gap: 22px; }
+.classif-card h2 { font-size: 24px; }
+.classif-card p { margin: 6px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--muted); max-width: 760px; }
+.classif-topo { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.classif-rotulo { display: block; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.classif-legenda { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 10px; }
+.classif-legenda li { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; background: var(--surface); }
+.classif-nome { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+.classif-cor { width: 12px; height: 12px; border-radius: 4px; flex: none; display: inline-block; }
+.classif-faixa { display: flex; align-items: center; gap: 8px; font-family: 'DM Mono', monospace; font-size: 13px; color: #4E4136; }
+.classif-faixa label, .classif-teste label { display: flex; align-items: center; gap: 6px; margin: 0; }
+.classif-faixa input { width: 76px; height: 34px; border: 1px solid #D8CBBB; border-radius: 8px; padding: 0 8px; font-family: 'DM Mono', monospace; font-size: 13px; background: var(--paper); }
+.classif-linha { position: relative; height: 104px; margin: 0 6px; }
+.classif-balao { position: absolute; top: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; color: var(--ink); }
+.classif-balao > span { font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 500; background: var(--ink); color: #fff; border-radius: 8px; padding: 3px 8px; }
+.classif-trilho { position: absolute; left: 0; right: 0; top: 46px; height: 28px; }
+.classif-trechos { position: absolute; left: 14px; right: 14px; top: 7px; height: 14px; border-radius: 999px; overflow: hidden; display: flex; gap: 2px; background: #fff; }
+.classif-trechos > span { min-width: 0; }
+.classif-alca { position: absolute; left: 0; top: 0; width: 100%; height: 28px; margin: 0; padding: 0; background: transparent; pointer-events: none; -webkit-appearance: none; appearance: none; outline: none; }
+.classif-alca::-webkit-slider-runnable-track { background: transparent; height: 28px; border: 0; }
+.classif-alca::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; pointer-events: auto; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 3px solid var(--ink); cursor: grab; box-shadow: 0 2px 6px rgba(36,26,18,.3); }
+.classif-alca::-moz-range-track { background: transparent; height: 28px; border: 0; }
+.classif-alca::-moz-range-thumb { pointer-events: auto; width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 3px solid var(--ink); cursor: grab; box-shadow: 0 2px 6px rgba(36,26,18,.3); }
+.classif-alca:focus-visible::-webkit-slider-thumb { outline: 3px solid var(--accent); outline-offset: 2px; }
+.classif-alca:disabled::-webkit-slider-thumb { cursor: not-allowed; opacity: .6; }
+.classif-escala { position: absolute; left: 14px; right: 14px; top: 78px; display: flex; justify-content: space-between; font-family: 'DM Mono', monospace; font-size: 11.5px; color: var(--muted); }
+.classif-marcador { position: absolute; top: 74px; transform: translateX(-50%); }
+.classif-teste { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 16px 18px; border: 1px dashed #D8CBBB; border-radius: 16px; background: #F7F1E8; font-size: 14px; }
+.classif-teste label { font-size: 13.5px; font-weight: 600; gap: 10px; }
+.classif-teste input { width: 84px; height: 40px; border: 1px solid #D8CBBB; border-radius: 9px; padding: 0 10px; font-family: 'DM Mono', monospace; font-size: 14px; background: #fff; }
+.classif-teste strong { display: inline-flex; align-items: center; gap: 8px; }
+.classif-teste small { margin-left: auto; color: var(--muted); }
+.classif-regra { display: flex; flex-direction: column; gap: 8px; margin: 0; font-size: 13px; font-weight: 600; }
+.classif-regra textarea { width: 100%; border: 1px solid #D8CBBB; border-radius: 12px; padding: 14px 16px; font-size: 14.5px; line-height: 1.55; background: var(--paper); resize: vertical; font-weight: 400; }
+.classif-rodape-regra { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
+.classif-rodape-regra small { color: var(--muted); }
+.classif-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.classif-acoes button { min-height: 46px; padding: 0 22px; border-radius: 11px; }
+.classif-aviso { font-size: 13.5px; font-weight: 600; color: #245F46; }
+@media (max-width: 600px) { .classif-card { padding: 20px; } .classif-teste small { margin-left: 0; } }

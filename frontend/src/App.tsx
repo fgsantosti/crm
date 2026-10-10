@@ -244,7 +244,7 @@ export function App() {
           {view === 'pendencias' && <Pendencias api={api} company={company} />}
           {view === 'humano' && <AtendimentoHumano api={api} company={company} me={me} />}
           {view === 'blacklist' && <BlackList api={api} company={company} />}
-          {view === 'roteiro' && <Roteiro api={api} company={company} canEdit={role !== 'atendente'} />}
+          {view === 'roteiro' && <Roteiro api={api} company={company} canEdit={role !== 'atendente'} onCompanyChange={(atualizada) => setCompanies((v) => v.map((c) => (c.id === atualizada.id ? { ...c, ...atualizada } : c)))} />}
           {view === 'dados-empresa' && <DadosEmpresa api={api} company={company} />}
           {view === 'equipe' && <Equipe api={api} company={company} />}
         </div>

@@ -22,6 +22,10 @@ export type Company = {
   mensagens_audio: boolean;
   /** Voz do TTS automático (Edge, pt-BR). */
   voz_tts: string;
+  /** Notas (0-10, crescentes) onde terminam Desqualificado, Desconfiado, Frio e Qualificado; a partir da última é Quente. */
+  classificacao_cortes?: number[];
+  /** Critério em texto que o agente lê antes de dar as notas. */
+  classificacao_regra?: string;
 };
 
 export type Lead = {

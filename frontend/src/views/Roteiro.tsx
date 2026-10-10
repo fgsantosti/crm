@@ -4,6 +4,7 @@ import type { Area, Company, Question, Paginated, Variavel, VariavelRoteiro } fr
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 import { AudioDaPergunta } from '../components/AudioDaPergunta';
 import { useConfirmar } from '../components/ConfirmDialog';
+import { ClassificacoesTab } from '../components/ClassificacoesTab';
 import { PalavrasChaveDialog, listaDePalavras } from '../components/PalavrasChaveDialog';
 
 const PLACEHOLDER_LABELS: Record<string, string> = {
@@ -183,9 +184,9 @@ const VOZES_TTS = [
   { id: 'pt-BR-ThalitaMultilingualNeural', label: 'Thalita (feminina, multilíngue)' },
 ];
 
-export function Roteiro({ api, company, canEdit }: { api: Api; company: Company; canEdit: boolean }) {
+export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; company: Company; canEdit: boolean; onCompanyChange?: (c: Company) => void }) {
   const confirmar = useConfirmar();
-  const [tab, setTab] = useState<'perguntas' | 'fora-do-fluxo' | 'variaveis' | 'opcoes-agente'>('perguntas');
+  const [tab, setTab] = useState<'perguntas' | 'fora-do-fluxo' | 'variaveis' | 'opcoes-agente' | 'classificacoes'>('perguntas');
   const [conversacional, setConversacional] = useState(company.agente_conversacional);
   const [etapaInicial, setEtapaInicial] = useState(company.etapa_inicial);
   const [spinsIniciais, setSpinsIniciais] = useState<number[]>(company.spins_iniciais ?? (company.spin_inicial ? [company.spin_inicial] : []));
@@ -545,6 +546,9 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
         </button>
         <button type="button" className={tab === 'opcoes-agente' ? '' : 'secondary'} onClick={() => setTab('opcoes-agente')}>
           Opções do Agente
+        </button>
+        <button type="button" className={tab === 'classificacoes' ? '' : 'secondary'} onClick={() => setTab('classificacoes')}>
+          Classificações
         </button>
       </div>
 
@@ -988,6 +992,8 @@ export function Roteiro({ api, company, canEdit }: { api: Api; company: Company;
           </section>
         </div>
       )}
+
+      {tab === 'classificacoes' && <ClassificacoesTab api={api} company={company} canEdit={canEdit} onSalvo={(c) => onCompanyChange?.(c)} />}
 
       {tab === 'opcoes-agente' && (
         <section className="section">
