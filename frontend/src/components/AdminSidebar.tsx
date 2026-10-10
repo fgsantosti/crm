@@ -1,4 +1,6 @@
 import { Logo } from './Logo';
+import { IconeMenu } from './IconesMenu';
+import { BotaoFixarPainel, useSidebarFixa } from './PainelLateral';
 import { ProfileMenu } from './ProfileMenu';
 import type { Api } from '../api';
 import type { Me } from '../types';
@@ -40,10 +42,13 @@ export function AdminSidebar({
   onOpenTrocarSenha: () => void;
 }) {
   const confirmar = useConfirmar();
+  const [fixa, alternarFixa] = useSidebarFixa();
   return (
+    <div className={`sidebar-slot${fixa ? ' fixa' : ''}`}>
     <aside className="sidebar">
       <div className="sidebar-glow" />
       <div className="sidebar-dots" />
+      <BotaoFixarPainel fixa={fixa} onAlternar={alternarFixa} />
       <div className="brand">
         <Logo />
         <span>Conecta</span>
@@ -55,7 +60,10 @@ export function AdminSidebar({
       <nav>
         {ITEMS.map((it) => (
           <button key={it.key} type="button" className={view === it.key ? 'nav-active' : ''} onClick={() => onNavigate(it.key)}>
-            <span>{it.label}</span>
+            <span className="nav-label">
+              <IconeMenu nome={it.key} />
+              <span className="nav-texto">{it.label}</span>
+            </span>
           </button>
         ))}
       </nav>
@@ -82,5 +90,6 @@ export function AdminSidebar({
         </button>
       </div>
     </aside>
+    </div>
   );
 }

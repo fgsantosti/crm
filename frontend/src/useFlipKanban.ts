@@ -33,7 +33,11 @@ export function useFlipKanban(ref: RefObject<HTMLElement | null>) {
     };
     window.addEventListener('scroll', refazer, true);
     window.addEventListener('resize', refazer);
+    // O painel lateral recolhe/expande e muda a largura do quadro sem resize de janela.
+    const observador = typeof ResizeObserver !== 'undefined' && ref.current ? new ResizeObserver(refazer) : null;
+    if (observador && ref.current) observador.observe(ref.current);
     return () => {
+      observador?.disconnect();
       cancelAnimationFrame(quadro);
       window.removeEventListener('scroll', refazer, true);
       window.removeEventListener('resize', refazer);
