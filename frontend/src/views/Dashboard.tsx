@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchTodasAsPaginas, type Api } from '../api';
 import type { Area, Company, Lead, Paginated } from '../types';
 import { SkeletonTiles } from '../components/Skeleton';
-import { COLUMNS, columnOf, leadsVisiveisNoKanban, ordenarColuna } from './Leads';
+import { COLUMNS, columnOf, foraDoKanban, leadsVisiveisNoKanban, ordenarColuna } from './Leads';
 import { KanbanCardConteudo, KanbanColunaHead, TEMPERATURA_VISUAL } from '../components/KanbanVisual';
 import { useFlipKanban } from '../useFlipKanban';
 import { NumeroAnimado } from '../components/NumeroAnimado';
@@ -226,7 +226,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
 
   const kanbanLeads = useMemo(() => {
     const ids = new Set(resumo.atendimentos.map((lead) => lead.id));
-    return leadsVisiveisNoKanban(leads).filter((lead) => ids.has(lead.id));
+    return leadsVisiveisNoKanban(leads, foraDoKanban(company)).filter((lead) => ids.has(lead.id));
   }, [leads, resumo.atendimentos]);
 
   function abrirPopup(title: string, description: string, matches: (lead: AtendimentoResumo) => boolean, desqualificacao = false) {

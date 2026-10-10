@@ -24,6 +24,8 @@ export type Company = {
   voz_tts: string;
   /** Notas (0-10, crescentes) onde terminam Desqualificado, Desconfiado, Frio e Qualificado; a partir da última é Quente. */
   classificacao_cortes?: number[];
+  /** Índice (0 Desqualificado ... 4 Quente) da primeira classificação que vai ao Kanban; as anteriores concluem sozinhas. Padrão 2. */
+  classificacao_kanban_a_partir_de?: number;
   /** Critério em texto que o agente lê antes de dar as notas. */
   classificacao_regra?: string;
 };

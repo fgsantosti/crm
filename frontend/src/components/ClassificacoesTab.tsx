@@ -36,9 +36,11 @@ const iguais = (a: number[], b: number[]) => a.length === b.length && a.every((v
 
 export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api; company: Company; canEdit: boolean; onSalvo: (c: Company) => void }) {
   const inicial = (company.classificacao_cortes?.length === 4 ? company.classificacao_cortes : PADRAO).map(arredonda);
+  const kanbanInicial = Math.min(4, Math.max(0, company.classificacao_kanban_a_partir_de ?? 2));
   const [cortes, setCortes] = useState<number[]>(inicial);
   const [regra, setRegra] = useState(company.classificacao_regra ?? '');
-  const [salvo, setSalvo] = useState({ cortes: inicial, regra: company.classificacao_regra ?? '' });
+  const [salvo, setSalvo] = useState({ cortes: inicial, regra: company.classificacao_regra ?? '', kanbanDe: kanbanInicial });
+  const [kanbanDe, setKanbanDe] = useState(kanbanInicial);
   const [teste, setTeste] = useState('7.4');
   const [saving, setSaving] = useState(false);
   const [erro, setErro] = useState('');
@@ -46,7 +48,7 @@ export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api
 
   const limites = useMemo(() => [0, ...cortes, 10], [cortes]);
   const presetAtual = PRESETS.find((p) => iguais(p.cortes, cortes))?.chave ?? 'personalizado';
-  const alterado = !iguais(cortes, salvo.cortes) || regra.trim() !== salvo.regra.trim();
+  const alterado = !iguais(cortes, salvo.cortes) || regra.trim() !== salvo.regra.trim() || kanbanDe !== salvo.kanbanDe;
 
   function mudar(i: number, bruto: string | number) {
     let v = typeof bruto === 'number' ? bruto : parseFloat(String(bruto).replace(',', '.'));
@@ -55,6 +57,12 @@ export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api
     const max = i === 3 ? 9.9 : cortes[i + 1] - 0.1;
     v = Math.min(max, Math.max(min, arredonda(v)));
     setCortes((c) => c.map((x, j) => (j === i ? arredonda(v) : x)));
+    setAviso('');
+  }
+
+  // Marcar uma classificação marca também todas acima dela; desmarcar desmarca também todas abaixo (a fila é contínua).
+  function alternarKanban(i: number) {
+    setKanbanDe(i >= kanbanDe ? Math.min(4, i + 1) : i);
     setAviso('');
   }
 
@@ -67,9 +75,9 @@ export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api
     setErro('');
     setAviso('');
     try {
-      const c: Company = await api(`/companies/${company.id}/`, { method: 'PATCH', body: JSON.stringify({ classificacao_cortes: cortes, classificacao_regra: regra.trim() }) });
+      const c: Company = await api(`/companies/${company.id}/`, { method: 'PATCH', body: JSON.stringify({ classificacao_cortes: cortes, classificacao_regra: regra.trim(), classificacao_kanban_a_partir_de: kanbanDe }) });
       onSalvo(c);
-      setSalvo({ cortes: (c.classificacao_cortes ?? cortes).map(arredonda), regra: c.classificacao_regra ?? regra.trim() });
+      setSalvo({ cortes: (c.classificacao_cortes ?? cortes).map(arredonda), regra: c.classificacao_regra ?? regra.trim(), kanbanDe: c.classificacao_kanban_a_partir_de ?? kanbanDe });
       setAviso('Alterações salvas. O agente usa as novas faixas e a regra a partir da próxima conversa; leads já classificados não mudam.');
     } catch (e) {
       setErro((e as Error).message);
@@ -111,6 +119,10 @@ export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api
                 <span className="classif-cor" style={{ background: CORES[i] }} aria-hidden="true" />
                 {nome}
               </span>
+              <label className="classif-kanban">
+                <input type="checkbox" checked={i >= kanbanDe} disabled={!canEdit || i === 4} onChange={() => alternarKanban(i)} />
+                Vai para o Kanban
+              </label>
               <span className="classif-faixa">
                 <span>de {fmt(limites[i])}</span>
                 {i < 4 ? (
@@ -190,6 +202,16 @@ export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api
             </span>
           )}
           <small>Só simula; não altera nenhum lead.</small>
+          <div className="classif-kanban-lista">
+            <span>Vão para o Kanban:</span>
+            {NOMES.map((nome, i) => i >= kanbanDe && (
+              <span key={nome} className="classif-kanban-chip">
+                <span className="classif-cor" style={{ background: CORES[i] }} aria-hidden="true" />
+                {nome}
+              </span>
+            ))}
+            {kanbanDe > 0 && <small>{NOMES.slice(0, kanbanDe).join(' e ')} concluem sozinhos, fora do Kanban.</small>}
+          </div>
         </div>
       </section>
 
@@ -225,7 +247,7 @@ export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api
             {saving && <Spinner />}
             Salvar alterações
           </button>
-          <button type="button" className="secondary" disabled={saving} onClick={() => { setCortes(PADRAO); setRegra(''); setAviso(''); }}>
+          <button type="button" className="secondary" disabled={saving} onClick={() => { setCortes(PADRAO); setRegra(''); setKanbanDe(2); setAviso(''); }}>
             Restaurar padrão
           </button>
           {aviso && <span role="status" className="classif-aviso">{aviso}</span>}

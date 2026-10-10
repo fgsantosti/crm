@@ -788,3 +788,8 @@ dialog[data-saindo]::backdrop { animation: popup-fundo-sai .17s ease-in forwards
 .classif-acoes button { min-height: 46px; padding: 0 22px; border-radius: 11px; }
 .classif-aviso { font-size: 13.5px; font-weight: 600; color: #245F46; }
 @media (max-width: 600px) { .classif-card { padding: 20px; } .classif-teste small { margin-left: 0; } }
+.classif-kanban { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12.5px; font-weight: 500; color: #4E4136; cursor: pointer; }
+.classif-kanban input { width: 17px; height: 17px; margin: 0; accent-color: var(--accent); }
+.classif-kanban-lista { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding-top: 12px; border-top: 1px solid #E7DECF; font-size: 13px; }
+.classif-kanban-lista > small { margin-left: 0 !important; flex-basis: 100%; }
+.classif-kanban-chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px; background: #fff; border: 1px solid #E7DECF; font-weight: 600; }

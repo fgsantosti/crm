@@ -17,6 +17,13 @@ export const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Descon
 export const URGENCIA_COR: Record<string, string> = { Frio: '#2563EB', Qualificado: '#D4A72C', Quente: '#E2574C' };
 export const FORA_DO_KANBAN = new Set(['Desqualificado', 'Desconfiado']);
 
+/** Classificações que não vão ao Kanban nesta empresa (aba Classificações do Roteiro; padrão: Desqualificado e Desconfiado). */
+export function foraDoKanban(company: { classificacao_kanban_a_partir_de?: number }): Set<string> {
+  const ordem = ['Desqualificado', 'Desconfiado', 'Frio', 'Qualificado', 'Quente'];
+  const corte = Math.min(4, Math.max(0, company.classificacao_kanban_a_partir_de ?? 2));
+  return new Set(ordem.slice(0, corte));
+}
+
 const DESFECHO_OPTIONS: { value: 'encerrado' | 'comprometido' | 'falha'; label: string; color: string; help: string }[] = [
   { value: 'encerrado', label: 'Encerrado', color: 'var(--success)', help: 'Sucesso de comunicação — o cliente conseguiu realizar o que desejava.' },
   { value: 'comprometido', label: 'Comprometido', color: 'var(--warn)', help: 'Algo não saiu conforme o planejado; o cliente pode voltar ou não dar continuidade.' },
@@ -44,8 +51,8 @@ export function columnOf(l: Lead): ColumnKey {
 }
 
 /** Leads visíveis no Kanban: desfecho já definitivo, cadastro manual e Desqualificado/Desconfiado nunca aparecem aqui. */
-export function leadsVisiveisNoKanban(leads: Lead[]): Lead[] {
-  return leads.filter((l) => !l.desfecho && !l.origem_manual && !FORA_DO_KANBAN.has(l.temperature));
+export function leadsVisiveisNoKanban(leads: Lead[], fora: Set<string> = FORA_DO_KANBAN): Lead[] {
+  return leads.filter((l) => !l.desfecho && !l.origem_manual && !fora.has(l.temperature));
 }
 
 export function ordenarColuna(key: ColumnKey, items: Lead[]): Lead[] {
@@ -257,7 +264,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
     };
   }, [company.id]);
 
-  const visible = leadsVisiveisNoKanban(leads)
+  const visible = leadsVisiveisNoKanban(leads, foraDoKanban(company))
     .filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()))
     .filter((l) => !areasFiltro.length || areasFiltro.includes(l.especialidade || SEM_AREA));
   const visibleColumns = COLUMNS.filter((col) => mostrarNovasLeads || col.key !== 'novos');
