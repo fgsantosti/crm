@@ -2084,6 +2084,33 @@ MARCA_LOGO_MAX_BYTES = 2 * 1024 * 1024
 MARCA_LOGO_LADO = 256
 _COR_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 
+AVATAR_MAX_BYTES = 2 * 1024 * 1024
+AVATAR_LADO = 512
+
+def normalizar_avatar(arquivo):
+    """Foto de perfil: só PNG/JPEG/WEBP de verdade (aberto pelo Pillow, não pelo Content-Type enviado), regravada
+    como PNG de no máximo 512 px com nome gerado no servidor. Ela é servida em /media/ na mesma origem do CRM:
+    aceitar o arquivo como veio permitia subir HTML/SVG com script (HARDENING F1-01). Devolve (ContentFile, erro)."""
+    import uuid
+    from io import BytesIO
+    from django.core.files.base import ContentFile
+    from PIL import Image, UnidentifiedImageError
+    if arquivo.size > AVATAR_MAX_BYTES:
+        return None, "Imagem muito grande (máximo 2MB)."
+    try:
+        imagem = Image.open(arquivo)
+        formato = imagem.format
+        imagem.load()
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+        return None, "Imagem inválida. Use PNG, JPEG ou WEBP."
+    if formato not in {"PNG", "JPEG", "WEBP"}:
+        return None, "Formato não suportado. Use PNG, JPEG ou WEBP."
+    imagem = imagem.convert("RGBA")
+    imagem.thumbnail((AVATAR_LADO, AVATAR_LADO))
+    saida = BytesIO()
+    imagem.save(saida, "PNG")
+    return ContentFile(saida.getvalue(), name=f"{uuid.uuid4().hex}.png"), None
+
 def _logo_da_marca(arquivo):
     """Valida e normaliza o logo (PNG/JPEG/WEBP até 2 MB, no máximo 256 px). Devolve (ContentFile, erro)."""
     from io import BytesIO

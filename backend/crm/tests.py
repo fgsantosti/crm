@@ -4526,6 +4526,7 @@ class NotificacoesDoAdminTests(TestCase):
         r = self.api.post("/api/admin-notificacoes/enviar/", {**base, "anexos": ok}, format="multipart")
         self.assertEqual((r.status_code, r.json()["enviados"], [a[0] for a in mail.outbox[0].attachments]), (201, 1, ["cobranca.pdf"]))
 
+    @override_settings(PRIVATE_MEDIA_ROOT=__import__('tempfile').mkdtemp())
     def test_comprovante_anexado_ao_pagamento(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
         from . import billing
@@ -4687,3 +4688,104 @@ class ForaDeEscopoFixaTests(TestCase):
         ctx = contexto_agente(self.company)
         self.assertIn("Fora de escopo", ctx["areas"])
         self.assertNotIn("Fora de escopo", ctx["spin"])
+
+
+def _imagem_bytes(formato="PNG", tamanho=(40, 30)):
+    from io import BytesIO
+    from PIL import Image
+    saida = BytesIO()
+    Image.new("RGB", tamanho, (217, 83, 26)).save(saida, formato)
+    return saida.getvalue()
+
+
+class AvatarSegurancaTests(TestCase):
+    """HARDENING F1-01: o avatar é servido em /media/ na mesma origem do CRM; só pode ser imagem de verdade, regravada pelo servidor."""
+    def setUp(self):
+        import tempfile
+        self.media = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media)
+        self.override.enable()
+        self.user = get_user_model().objects.create_user("avatar-user", password="x")
+        self.api = APIClient(); self.api.force_authenticate(self.user)
+
+    def tearDown(self):
+        import shutil
+        self.override.disable()
+        shutil.rmtree(self.media, ignore_errors=True)
+
+    def enviar(self, nome, conteudo, tipo):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        return self.api.post("/api/me/avatar/", {"avatar": SimpleUploadedFile(nome, conteudo, content_type=tipo)}, format="multipart")
+
+    def test_html_ou_svg_declarado_como_imagem_e_recusado(self):
+        for nome, conteudo in (("x.html", b"<script>alert(1)</script>"), ("x.svg", b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>")):
+            r = self.enviar(nome, conteudo, "image/png")
+            self.assertEqual(r.status_code, 400, nome)
+        import os
+        self.assertFalse(os.path.isdir(os.path.join(self.media, "avatars")) and os.listdir(os.path.join(self.media, "avatars")))
+
+    def test_imagem_valida_e_regravada_como_png_com_nome_do_servidor(self):
+        import os, re
+        r = self.enviar("minha foto.webp", _imagem_bytes("WEBP"), "image/webp")
+        self.assertEqual(r.status_code, 200, r.content)
+        from .models import Profile
+        nome = Profile.objects.get(user=self.user).avatar.name
+        self.assertRegex(nome, r"^avatars/[0-9a-f]{32}\.png$")
+        with open(os.path.join(self.media, nome), "rb") as f:
+            self.assertEqual(f.read(4), b"\x89PNG")
+
+    def test_trocar_avatar_apaga_o_arquivo_anterior(self):
+        import os
+        from .models import Profile
+        self.enviar("a.png", _imagem_bytes(), "image/png")
+        antigo = Profile.objects.get(user=self.user).avatar.path
+        self.enviar("b.jpg", _imagem_bytes("JPEG"), "image/jpeg")
+        self.assertFalse(os.path.exists(antigo))
+
+
+class ComprovantePrivadoTests(TestCase):
+    """HARDENING F1-02: comprovante de pagamento nunca fica sob MEDIA_ROOT (servido publicamente pelo Caddy)."""
+    def setUp(self):
+        import tempfile
+        from .models import Cobranca, Gestor
+        self.media, self.privado = tempfile.mkdtemp(), tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media, PRIVATE_MEDIA_ROOT=self.privado)
+        self.override.enable()
+        self.admin = get_user_model().objects.create_superuser("adm-comp", password="x")
+        self.api = APIClient(); self.api.force_authenticate(self.admin)
+        self.gestor = Gestor.objects.create(nome="Paulo", email="p@x.example")
+        self.cobranca = Cobranca.objects.create(gestor=self.gestor, referencia="2026-10-01", vencimento="2026-10-15", valor="100.00")
+
+    def tearDown(self):
+        import shutil
+        self.override.disable()
+        shutil.rmtree(self.media, ignore_errors=True)
+        shutil.rmtree(self.privado, ignore_errors=True)
+
+    def registrar(self, nome="comprovante.png"):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        arquivo = SimpleUploadedFile(nome, _imagem_bytes(), content_type="image/png")
+        r = self.api.post(f"/api/admin-cobrancas/{self.cobranca.pk}/pagamentos/", {"data": "2026-10-10", "valor": "50", "arquivo": arquivo}, format="multipart")
+        self.assertEqual(r.status_code, 201, r.content)
+        return self.cobranca.pagamentos.order_by("-id").first()
+
+    def test_arquivo_fica_fora_do_media_root_com_nome_aleatorio(self):
+        import os
+        p = self.registrar()
+        caminho = os.path.realpath(p.comprovante_arquivo.path)
+        self.assertTrue(caminho.startswith(os.path.realpath(self.privado)), caminho)
+        self.assertFalse(caminho.startswith(os.path.realpath(self.media)))
+        self.assertRegex(os.path.basename(caminho), r"^[0-9a-f]{32}\.png$")
+        resp = self.api.get(f"/api/admin-pagamentos/{p.pk}/comprovante/")
+        self.assertEqual((resp.status_code, resp["Content-Type"]), (200, "image/png"))
+
+    def test_apagar_pagamento_ou_gestor_apaga_o_arquivo(self):
+        import os
+        p = self.registrar()
+        caminho = p.comprovante_arquivo.path
+        self.assertEqual(self.api.delete(f"/api/admin-pagamentos/{p.pk}/").status_code, 200)
+        self.assertFalse(os.path.exists(caminho))
+        p2 = self.registrar("outro.png")
+        caminho2 = p2.comprovante_arquivo.path
+        self.gestor.delete()  # cascata: cobrança -> pagamento
+        self.assertFalse(os.path.exists(caminho2))

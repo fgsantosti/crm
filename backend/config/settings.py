@@ -53,6 +53,9 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # do mesmo volume (ver compose.prod.yaml e deploy/Caddyfile.prod).
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+# Arquivos que NUNCA podem ser públicos (comprovantes de pagamento): fora do MEDIA_ROOT, num volume que o
+# Caddy não monta; só saem pela API autenticada (ver crm.models.armazenamento_privado).
+PRIVATE_MEDIA_ROOT = Path(os.getenv("PRIVATE_MEDIA_ROOT", BASE_DIR / "privado"))
 CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "http://localhost:8080").split(",")
 
 # E-mail (convite de atendente e credenciais provisórias). Backend padrão é o

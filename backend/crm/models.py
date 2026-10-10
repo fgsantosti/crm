@@ -502,13 +502,41 @@ class Cobranca(models.Model):
         ordering = ["-referencia", "-id"]
         constraints = [models.UniqueConstraint(fields=["gestor", "tipo", "referencia"], name="unique_cobranca_gestor_tipo_mes")]
 
+def armazenamento_privado():
+    """Storage dos arquivos que não podem ser públicos: fora do MEDIA_ROOT (que o Caddy serve em /media/).
+    Lê PRIVATE_MEDIA_ROOT a cada uso (não na carga do modelo), como o FileSystemStorage faz com o MEDIA_ROOT."""
+    import os
+    from django.core.files.storage import FileSystemStorage
+
+    class ArmazenamentoPrivado(FileSystemStorage):
+        @property
+        def base_location(self):
+            return settings.PRIVATE_MEDIA_ROOT
+
+        @property
+        def location(self):
+            return os.path.abspath(self.base_location)
+
+        def url(self, name):
+            raise ValueError("Arquivo privado: sirva pela API autenticada, nunca por URL pública.")
+
+    return ArmazenamentoPrivado()
+
+
+def caminho_comprovante(_instancia, nome):
+    """Nome gerado no servidor (nunca o nome enviado, que é adivinhável): comprovantes/<uuid>.<ext>."""
+    import uuid
+    ext = nome.rsplit(".", 1)[-1].lower() if "." in nome else "bin"
+    return f"comprovantes/{uuid.uuid4().hex}.{ext}"
+
+
 class Pagamento(models.Model):
     cobranca = models.ForeignKey(Cobranca, on_delete=models.CASCADE, related_name="pagamentos")
     data = models.DateField()
     valor = models.DecimalField(max_digits=10, decimal_places=2)
     forma = models.CharField(max_length=10, choices=Gestor.FORMAS, default="pix")
     comprovante = models.CharField(max_length=300, blank=True, default="", help_text="Link ou referência do comprovante (quando não há arquivo).")
-    comprovante_arquivo = models.FileField(upload_to="comprovantes/", blank=True, help_text="Comprovante anexado (PDF ou imagem).")
+    comprovante_arquivo = models.FileField(upload_to=caminho_comprovante, storage=armazenamento_privado, blank=True, help_text="Comprovante anexado (PDF ou imagem), fora do /media/ público.")
     registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     criado_em = models.DateTimeField(auto_now_add=True)
     class Meta:
@@ -557,3 +585,14 @@ class NotificacaoEnviada(models.Model):
     criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     class Meta:
         ordering = ["-criado_em", "-id"]
+
+
+from django.db.models.signals import post_delete  # noqa: E402
+from django.dispatch import receiver  # noqa: E402
+
+
+@receiver(post_delete, sender=Pagamento)
+def _apagar_arquivo_do_comprovante(sender, instance, **kwargs):
+    """Apagar o pagamento (direto ou em cascata, ao apagar cobrança/gestor) apaga também o arquivo do comprovante."""
+    if instance.comprovante_arquivo:
+        instance.comprovante_arquivo.delete(save=False)

@@ -130,12 +130,13 @@ def avatar(request):
     file = request.FILES.get("avatar")
     if not file:
         return Response({"detail": "Envie um arquivo em 'avatar'."}, status=400)
-    if file.content_type not in ("image/png", "image/jpeg", "image/webp"):
-        return Response({"detail": "Formato não suportado. Use PNG, JPEG ou WEBP."}, status=400)
-    if file.size > 2 * 1024 * 1024:
-        return Response({"detail": "Imagem muito grande (máximo 2MB)."}, status=400)
-    profile.avatar = file
-    profile.save()
+    from .services import normalizar_avatar
+    imagem, erro = normalizar_avatar(file)
+    if erro:
+        return Response({"detail": erro}, status=400)
+    if profile.avatar:
+        profile.avatar.delete(save=False)
+    profile.avatar.save(imagem.name, imagem, save=True)
     return Response({"avatar_url": _avatar_url(request, profile)})
 
 @api_view(["POST"])
@@ -1007,7 +1008,8 @@ class AdminPagamentoView(APIView):
         return Response(billing._item_cobranca(cobranca, timezone.localdate()))
 
 class AdminComprovanteView(APIView):
-    """GET /api/admin-pagamentos/{id}/comprovante/: entrega o arquivo anexado (só superuser; não fica em /media/ público)."""
+    """GET /api/admin-pagamentos/{id}/comprovante/: entrega o arquivo anexado (só superuser). O arquivo fica em
+    PRIVATE_MEDIA_ROOT (crm.models.armazenamento_privado), fora do /media/ que o Caddy serve."""
     permission_classes = [IsSuperUser]
     def get(self, request, pagamento_id):
         pagamento = get_object_or_404(Pagamento, pk=pagamento_id)
