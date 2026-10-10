@@ -206,7 +206,26 @@ export type AdminCompany = {
   numero_agente: string;
   member_count: number;
   tem_agente_ativo: boolean;
+  /** Situação do teste (piloto) da empresa. */
+  teste?: TesteSituacao;
 };
+
+export type TesteSituacao = { em_teste: boolean; inicio: string | null; dias: number; fim: string | null; restam: number | null; situacao: string; convertido_em: string | null };
+
+export type PrecoItem = {
+  item: 'implantacao' | 'base' | 'empresa_adicional' | 'agente_adicional' | 'piloto';
+  nome: string;
+  nota: string;
+  tipo: string;
+  valor: string | null;
+  vigente_desde: string | null;
+  proximo: { valor: string; vigente_desde: string } | null;
+  em_uso: number | null;
+};
+
+export type PrecoHistorico = { id: number; item: string; nome: string; valor: string; vigente_desde: string; escopo: string; escopo_rotulo: string; nota: string; criado_em: string; por: string };
+
+export type TabelaPrecos = { itens: PrecoItem[]; recorrente_atual: string; historico: PrecoHistorico[] };
 
 export type AgentStatus = {
   existe: boolean;

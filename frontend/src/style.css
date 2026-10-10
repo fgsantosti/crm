@@ -861,3 +861,32 @@ dialog[data-saindo]::backdrop { animation: popup-fundo-sai .17s ease-in forwards
 .impacto-dialog .confirm-faixa { flex: none; height: 72px; }
 .impacto-dialog .confirm-corpo { max-height: none; overflow: hidden; min-height: 0; padding-top: 42px; }
 .impacto-grupo .impacto-lista { max-height: 150px; }
+
+/* Painel Admin → Cobranças */
+.cob-valor { text-align: right; font-family: 'Neuton', serif; font-size: 22px; font-weight: 800; }
+.cob-linha-ativa { background: #FFF9F2; }
+.cob-agendado { display: block; margin-top: 4px; color: var(--accent-deep); font-weight: 600; }
+.cob-edicao { border-top: 1px solid #F0C9AE; background: #FFF9F2; padding: 22px 26px; display: flex; flex-direction: column; gap: 16px; }
+.cob-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 14px; }
+.cob-campos label { margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; }
+.cob-campos input { height: 44px; border-radius: 10px; background: #fff; }
+.cob-escopos { display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; }
+.cob-escopos label { margin: 0; display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.cob-escopos input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); }
+.cob-escopos small { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
+.cob-previa { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; padding: 14px 16px; border-radius: 12px; background: #fff; border: 1px solid var(--line-soft); }
+.cob-previa small { display: block; font-size: 11.5px; color: var(--muted); }
+.cob-previa strong { font-family: 'DM Mono', monospace; font-weight: 500; font-size: 16px; }
+.cob-previa .cob-previa-texto { flex: 1; min-width: 200px; font-size: 12.5px; color: #4E4136; }
+.cob-acoes { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.cob-historico { list-style: none; margin: 8px 0 0; padding: 0; }
+.cob-historico li { display: grid; grid-template-columns: 96px minmax(0, 1.3fr) minmax(0, 1.4fr) minmax(0, 1.6fr) auto; gap: 14px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line-soft); font-size: 13.5px; }
+.cob-quando { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); }
+.cob-de-para { font-family: 'DM Mono', monospace; }
+.cob-acoes-linha { display: inline-flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.cob-acoes-linha button { padding: 7px 12px; font-size: 12px; }
+.chave-switch { width: 48px; height: 28px; padding: 3px; border-radius: 999px; background: #CDBBA6; display: flex; align-items: center; justify-content: flex-start; transition: background .2s ease; }
+.chave-switch.ligada { background: var(--success); justify-content: flex-end; }
+.chave-switch > span { width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(36,26,18,.3); }
+@media (max-width: 800px) { .cob-historico li { grid-template-columns: 1fr; gap: 4px; } }
+@media (prefers-reduced-motion: reduce) { .chave-switch { transition: none; } }

@@ -17,6 +17,7 @@ import { Equipe } from './views/Equipe';
 import { Admin } from './views/Admin';
 import { AdminDashboard } from './views/AdminDashboard';
 import { AdminEquipe } from './views/AdminEquipe';
+import { AdminCobrancas } from './views/AdminCobrancas';
 import { TrocarSenhaObrigatoria } from './views/TrocarSenhaObrigatoria';
 import { TrocarEmailPagina } from './views/TrocarEmailPagina';
 import { TrocarSenhaPagina } from './views/TrocarSenhaPagina';
@@ -176,6 +177,7 @@ export function App() {
             {adminView === 'dashboard' && <AdminDashboard api={api} />}
             {adminView === 'equipe' && <AdminEquipe api={api} />}
             {adminView === 'painel' && <Admin api={api} />}
+            {adminView === 'cobrancas' && <AdminCobrancas api={api} />}
           </div>
         </main>
       </div>
