@@ -39,6 +39,7 @@ from .services import (
     criar_situacao_especial_manual as criar_situacao_especial_manual_service,
     seed_roteiro_padrao,
     resumo_dashboard, fora_do_kanban, calcular_impacto_classificacao,
+    tabela_de_precos, alterar_preco, situacao_teste, iniciar_teste, encerrar_teste, prorrogar_teste, converter_teste,
 )
 from .serializers import DashboardPeriodSerializer
 
@@ -723,6 +724,40 @@ class AdminCompanyViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Confirme digitando o nome exato da empresa."}, status=400)
         return Response(excluir_empresa(company))
 
+    @action(detail=True, methods=["get", "post"], url_path="teste")
+    def teste(self, request, pk=None):
+        """Empresa em fase de teste (piloto): GET devolve a situação; POST {"em_teste": true, "inicio": "AAAA-MM-DD", "dias": 30}
+        liga o teste e {"em_teste": false} o desliga (sem converter em contrato)."""
+        company = self.get_object()
+        if request.method == "POST":
+            try:
+                if request.data.get("em_teste", True) in (False, "false", "0", 0):
+                    encerrar_teste(company)
+                else:
+                    iniciar_teste(company, request.data.get("inicio"), 30 if request.data.get("dias") in (None, "") else request.data.get("dias"))
+            except (ValueError, TypeError) as exc:
+                return Response({"detail": str(exc) or "Dados do teste inválidos."}, status=400)
+            company.refresh_from_db()
+        return Response(situacao_teste(company))
+    @action(detail=True, methods=["post"], url_path="teste/prorrogar")
+    def teste_prorrogar(self, request, pk=None):
+        company = self.get_object()
+        try:
+            prorrogar_teste(company, 15 if request.data.get("dias") in (None, "") else request.data.get("dias"))
+        except (ValueError, TypeError) as exc:
+            return Response({"detail": str(exc) or "Dados inválidos."}, status=400)
+        company.refresh_from_db()
+        return Response(situacao_teste(company))
+    @action(detail=True, methods=["post"], url_path="teste/converter")
+    def teste_converter(self, request, pk=None):
+        company = self.get_object()
+        try:
+            converter_teste(company)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        company.refresh_from_db()
+        return Response(situacao_teste(company))
+
     @action(detail=True, methods=["get", "post", "delete"])
     def agente(self, request, pk=None):
         company = self.get_object()
@@ -889,3 +924,17 @@ class AtendenteInviteViewSet(TenantMixin, viewsets.ModelViewSet):
             from rest_framework import serializers as drf_serializers
             raise drf_serializers.ValidationError({"email": str(exc)})
         serializer.instance = invite
+
+
+class AdminPrecosView(APIView):
+    """Painel Admin, Cobranças: tabela de valores com vigência. GET lista os valores de hoje, o que está em uso e o histórico;
+    POST {"item", "valor", "vigente_desde", "escopo", "nota"} cria uma nova linha de preço (não edita a anterior)."""
+    permission_classes = [IsSuperUser]
+    def get(self, request):
+        return Response(tabela_de_precos())
+    def post(self, request):
+        try:
+            alterar_preco(request.data.get("item"), request.data.get("valor"), request.data.get("vigente_desde"), request.data.get("escopo") or "novos", request.user, request.data.get("nota") or "")
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(tabela_de_precos(), status=201)

@@ -4261,3 +4261,72 @@ class ImpactoDaClassificacaoTests(TestCase):
         self.assertEqual((self.quente.temperature, self.quente.priority), ("Quente", "Alta"))
         self.assertEqual((self.espera.temperature, self.espera.desfecho), ("Frio", ""))  # em espera: intacta
         self.assertEqual((self.negociando.temperature, self.negociando.desfecho), ("Frio", ""))
+
+
+class CobrancasPrecosETesteTests(TestCase):
+    def setUp(self):
+        self.admin = get_user_model().objects.create_superuser("adm-cob", password="x")
+        self.api = APIClient(); self.api.force_authenticate(self.admin)
+        self.empresa = get_user_model().objects.create_user("emp-cob", password="x", is_staff=True)
+        self.company = Company.objects.create(name="Cobrança Ltda")
+        self.company.members.add(self.empresa)
+
+    def test_valores_iniciais_e_so_superusuario(self):
+        r = self.api.get("/api/admin-precos/")
+        self.assertEqual(r.status_code, 200, r.content)
+        itens = {i["item"]: i for i in r.json()["itens"]}
+        self.assertEqual({k: v["valor"] for k, v in itens.items()}, {"implantacao": "5900.00", "base": "890.00", "empresa_adicional": "890.00", "agente_adicional": "400.00", "piloto": "2900.00"})
+        comum = APIClient(); comum.force_authenticate(self.empresa)
+        self.assertEqual(comum.get("/api/admin-precos/").status_code, 403)
+        self.assertEqual(comum.post("/api/admin-precos/", {}, format="json").status_code, 403)
+
+    def test_alterar_valor_cria_linha_com_vigencia_sem_apagar_a_anterior(self):
+        from datetime import date, timedelta
+        futura = (date.today() + timedelta(days=30)).isoformat()
+        r = self.api.post("/api/admin-precos/", {"item": "base", "valor": "990", "vigente_desde": futura, "escopo": "reajuste"}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        base = {i["item"]: i for i in r.json()["itens"]}["base"]
+        self.assertEqual(base["valor"], "890.00")  # ainda não vigente: o de hoje continua valendo
+        self.assertEqual(base["proximo"]["valor"], "990.00")
+        self.assertEqual(r.json()["historico"][0]["por"], self.admin.username)
+        hoje = date.today().isoformat()
+        r = self.api.post("/api/admin-precos/", {"item": "agente_adicional", "valor": "450,50", "vigente_desde": hoje, "escopo": "novos"}, format="json")
+        self.assertEqual({i["item"]: i for i in r.json()["itens"]}["agente_adicional"]["valor"], "450.50")
+        from .models import PrecoCobranca
+        self.assertEqual(PrecoCobranca.objects.filter(item="agente_adicional").count(), 2)  # a antiga continua no histórico
+
+    def test_validacoes_do_preco(self):
+        corpo = {"item": "base", "valor": "100", "vigente_desde": "2026-12-01", "escopo": "novos"}
+        for troca in ({"item": "xyz"}, {"valor": "abc"}, {"valor": "-5"}, {"vigente_desde": "amanhã"}, {"escopo": "outro"}, {"vigente_desde": "2026-01-01"}):
+            self.assertEqual(self.api.post("/api/admin-precos/", {**corpo, **troca}, format="json").status_code, 400, troca)
+
+    def test_teste_ligar_prorrogar_converter(self):
+        url = f"/api/admin-companies/{self.company.pk}/teste/"
+        r = self.api.post(url, {"em_teste": True, "inicio": "2026-10-12", "dias": 30}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        dados = r.json()
+        self.assertEqual((dados["em_teste"], dados["dias"], dados["fim"]), (True, 30, "2026-11-11"))
+        r = self.api.post(url + "prorrogar/", {"dias": 15}, format="json")
+        self.assertEqual((r.json()["dias"], r.json()["fim"]), (45, "2026-11-26"))
+        r = self.api.post(url + "converter/", format="json")
+        self.assertEqual((r.json()["em_teste"], r.json()["situacao"]), (False, "Contrato ativo"))
+        self.assertEqual(self.api.post(url + "converter/", format="json").status_code, 400)  # já não está em teste
+        self.assertEqual(self.api.post(url + "prorrogar/", {"dias": 15}, format="json").status_code, 400)
+
+    def test_teste_desligar_validar_e_lista_traz_a_situacao(self):
+        url = f"/api/admin-companies/{self.company.pk}/teste/"
+        self.assertEqual(self.api.post(url, {"em_teste": True, "dias": 0}, format="json").status_code, 400)
+        self.api.post(url, {"em_teste": True, "dias": 10}, format="json")
+        lista = self.api.get("/api/admin-companies/").json()["results"]
+        self.assertTrue(next(c for c in lista if c["id"] == self.company.pk)["teste"]["em_teste"])
+        self.api.post(url, {"em_teste": False}, format="json")
+        self.company.refresh_from_db()
+        self.assertFalse(self.company.em_teste)
+        comum = APIClient(); comum.force_authenticate(self.empresa)
+        self.assertEqual(comum.post(url, {"em_teste": True}, format="json").status_code, 403)
+
+    def test_tabela_conta_empresas_em_teste_fora_da_base(self):
+        from .services import tabela_de_precos
+        Company.objects.create(name="Piloto Ltda", em_teste=True)
+        itens = {i["item"]: i for i in tabela_de_precos()["itens"]}
+        self.assertEqual((itens["piloto"]["em_uso"], itens["base"]["em_uso"]), (1, 1))

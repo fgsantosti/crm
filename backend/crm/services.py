@@ -13,7 +13,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.authtoken.models import Token
 from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
-from .models import Profile, Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, VARIAVEL_DETALHAMENTO, PESO_PADRAO_DETALHAMENTO, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, TEXTO_PADRAO_LEMBRETE, DEFAULT_HUMAN_MESSAGE, SITUACOES_ESPECIAIS, ESPECIAL_QUESTION_IDS, ContagemDiaria
+from .models import Profile, Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, VARIAVEL_DETALHAMENTO, PESO_PADRAO_DETALHAMENTO, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, TEXTO_PADRAO_LEMBRETE, DEFAULT_HUMAN_MESSAGE, SITUACOES_ESPECIAIS, ESPECIAL_QUESTION_IDS, ContagemDiaria, PrecoCobranca
 
 logger = logging.getLogger(__name__)
 
@@ -2220,3 +2220,139 @@ def aplicar_classificacao_aos_leads(company):
 def aplicar_novo_limite_kanban(company):
     """Compatibilidade: reaplica a classificação aos leads de Classificados (ver aplicar_classificacao_aos_leads)."""
     return aplicar_classificacao_aos_leads(company)["concluidas"]
+
+
+# --- Painel Admin: cobranças (valores com vigência) e empresas em teste ---
+from decimal import Decimal, InvalidOperation
+
+ITENS_COBRANCA = {
+    "implantacao": {"nome": "Implantação inicial", "nota": "Consultoria, roteiro, agente personalizado e treinamento", "tipo": "Única, por cliente"},
+    "base": {"nome": "Conta de empresa (plano base)", "nota": "Inclui o 1º agente e contas de atendente ilimitadas", "tipo": "Mensal, por empresa"},
+    "empresa_adicional": {"nome": "Empresa adicional", "nota": "Segunda empresa ou mais do mesmo gestor", "tipo": "Mensal, por empresa"},
+    "agente_adicional": {"nome": "Agente adicional", "nota": "Outro número de WhatsApp com o mesmo roteiro", "tipo": "Mensal, por agente"},
+    "piloto": {"nome": "Piloto (empresa em teste)", "nota": "Abatido da implantação se o cliente fechar", "tipo": "Única, por teste"},
+}
+
+def preco_vigente(item, hoje=None):
+    """Linha de preço em vigor hoje para o item (a mais recente cuja vigência já começou), ou None."""
+    hoje = hoje or timezone.localdate()
+    return PrecoCobranca.objects.filter(item=item, vigente_desde__lte=hoje).first()
+
+def agentes_adicionais_da_plataforma():
+    """Contas de agente além da primeira de cada empresa (base do "agente adicional" cobrado)."""
+    total = 0
+    for company in Company.objects.all():
+        n = company.members.filter(groups__name="agente").count()
+        total += max(0, n - 1)
+    return total
+
+def tabela_de_precos(hoje=None):
+    """Itens com o valor vigente, a próxima mudança agendada, quanto está em uso hoje e o histórico completo."""
+    hoje = hoje or timezone.localdate()
+    empresas = Company.objects.all()
+    em_teste = empresas.filter(em_teste=True).count()
+    uso = {"base": empresas.filter(em_teste=False).count(), "agente_adicional": agentes_adicionais_da_plataforma(), "piloto": em_teste,
+           "empresa_adicional": None, "implantacao": None}  # empresa adicional/implantação dependem do cadastro de gestores (fase seguinte)
+    itens = []
+    for chave, meta in ITENS_COBRANCA.items():
+        atual = preco_vigente(chave, hoje)
+        futuro = PrecoCobranca.objects.filter(item=chave, vigente_desde__gt=hoje).order_by("vigente_desde").first()
+        itens.append({
+            "item": chave, **meta, "valor": str(atual.valor) if atual else None, "vigente_desde": atual.vigente_desde if atual else None,
+            "proximo": {"valor": str(futuro.valor), "vigente_desde": futuro.vigente_desde} if futuro else None, "em_uso": uso[chave],
+        })
+    v = lambda k: (preco_vigente(k, hoje).valor if preco_vigente(k, hoje) else Decimal("0"))
+    recorrente = v("base") * uso["base"] + v("agente_adicional") * uso["agente_adicional"]
+    historico = [
+        {"id": p.pk, "item": p.item, "nome": ITENS_COBRANCA.get(p.item, {}).get("nome", p.item), "valor": str(p.valor), "vigente_desde": p.vigente_desde,
+         "escopo": p.escopo, "escopo_rotulo": dict(PrecoCobranca.ESCOPO_CHOICES).get(p.escopo, p.escopo), "nota": p.nota, "criado_em": p.criado_em,
+         "por": _nome_usuario(p.criado_por)}
+        for p in PrecoCobranca.objects.select_related("criado_por").order_by("-criado_em", "-id")[:100]
+    ]
+    return {"itens": itens, "recorrente_atual": str(recorrente), "historico": historico}
+
+@transaction.atomic
+def alterar_preco(item, valor, vigente_desde, escopo, user, nota=""):
+    """Nova linha de preço (nunca edita nem apaga a anterior). Levanta ValueError com a mensagem para a tela."""
+    if item not in ITENS_COBRANCA:
+        raise ValueError("Item de cobrança desconhecido.")
+    try:
+        valor = Decimal(str(valor).replace(",", ".")).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
+        raise ValueError("Informe um valor numérico.")
+    if valor < 0 or valor > Decimal("1000000"):
+        raise ValueError("O valor precisa ficar entre 0 e 1.000.000.")
+    if isinstance(vigente_desde, str):
+        try:
+            vigente_desde = datetime.strptime(vigente_desde[:10], "%Y-%m-%d").date()
+        except ValueError:
+            raise ValueError("Informe a data de vigência (AAAA-MM-DD).")
+    if not vigente_desde:
+        raise ValueError("Informe a data de vigência.")
+    if escopo not in dict(PrecoCobranca.ESCOPO_CHOICES):
+        raise ValueError("Escolha a quem o novo valor se aplica.")
+    atual = preco_vigente(item, vigente_desde)
+    if atual and atual.vigente_desde == vigente_desde:
+        raise ValueError("Já existe um valor com esta data de vigência para o item: escolha outra data.")
+    return PrecoCobranca.objects.create(item=item, valor=valor, vigente_desde=vigente_desde, escopo=escopo, nota=(nota or "")[:200], criado_por=user)
+
+def situacao_teste(company, hoje=None):
+    """Estado do teste da empresa: {em_teste, inicio, dias, fim, restam, situacao}."""
+    hoje = hoje or timezone.localdate()
+    if not company.em_teste or not company.teste_inicio:
+        return {"em_teste": bool(company.em_teste), "inicio": company.teste_inicio, "dias": company.teste_dias, "fim": None, "restam": None,
+                "situacao": "Contrato ativo" if company.teste_convertido_em else "Sem teste", "convertido_em": company.teste_convertido_em}
+    fim = company.teste_inicio + timedelta(days=company.teste_dias)
+    restam = (fim - hoje).days
+    situacao = f"Faltam {restam} dias" if restam > 0 else "Termina hoje" if restam == 0 else f"Teste vencido há {-restam} dias"
+    return {"em_teste": True, "inicio": company.teste_inicio, "dias": company.teste_dias, "fim": fim, "restam": restam, "situacao": situacao, "convertido_em": None}
+
+def _data(valor, padrao=None):
+    if not valor:
+        return padrao
+    if isinstance(valor, str):
+        try:
+            return datetime.strptime(valor[:10], "%Y-%m-%d").date()
+        except ValueError:
+            raise ValueError("Data inválida (AAAA-MM-DD).")
+    return valor
+
+@transaction.atomic
+def iniciar_teste(company, inicio=None, dias=30):
+    dias = int(dias)
+    if dias < 1 or dias > 365:
+        raise ValueError("A duração do teste fica entre 1 e 365 dias.")
+    company.em_teste = True
+    company.teste_inicio = _data(inicio, timezone.localdate())
+    company.teste_dias = dias
+    company.teste_convertido_em = None
+    company.save(update_fields=["em_teste", "teste_inicio", "teste_dias", "teste_convertido_em"])
+    return company
+
+@transaction.atomic
+def encerrar_teste(company):
+    """Tira a empresa de teste sem converter em contrato (marcação desfeita)."""
+    company.em_teste = False
+    company.save(update_fields=["em_teste"])
+    return company
+
+@transaction.atomic
+def prorrogar_teste(company, dias=15):
+    dias = int(dias)
+    if not company.em_teste:
+        raise ValueError("Esta empresa não está em teste.")
+    if dias < 1 or dias > 120:
+        raise ValueError("A prorrogação fica entre 1 e 120 dias.")
+    company.teste_dias += dias
+    company.save(update_fields=["teste_dias"])
+    return company
+
+@transaction.atomic
+def converter_teste(company):
+    """O teste virou contrato: sai de teste e guarda o dia da conversão (o piloto é abatido da implantação na cobrança)."""
+    if not company.em_teste:
+        raise ValueError("Esta empresa não está em teste.")
+    company.em_teste = False
+    company.teste_convertido_em = timezone.localdate()
+    company.save(update_fields=["em_teste", "teste_convertido_em"])
+    return company

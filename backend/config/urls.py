@@ -14,6 +14,7 @@ def servir_media(request, path):
     return serve(request, path, document_root=settings.MEDIA_ROOT)
 from rest_framework.routers import DefaultRouter
 from crm.views import (
+    AdminPrecosView,
     CompanyViewSet, LeadViewSet, QuestionViewSet, CompanyInfoViewSet, AreaViewSet, AtendenteInviteViewSet, BlacklistViewSet, AdminCompanyViewSet, VariavelViewSet, VariavelRoteiroViewSet,
     me, avatar, validar_convite, trocar_senha, trocar_email_solicitar, trocar_email_confirmar, excluir_conta,
     redefinir_senha_atendente_view, desligar_atendente,
@@ -48,6 +49,7 @@ urlpatterns = [
     path("api/convites/<uuid:pk>/validar/", validar_convite),
     path("api/companies/<int:company_id>/equipe/<int:user_id>/redefinir-senha/", redefinir_senha_atendente_view),
     path("api/companies/<int:company_id>/equipe/<int:user_id>/", desligar_atendente),
+    path("api/admin-precos/", AdminPrecosView.as_view()),
     path("api/", include(router.urls)),
 ]
 # Áudios do roteiro/TTS também servidos pelo Django: o agente os baixa pela rede interna

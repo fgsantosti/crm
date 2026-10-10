@@ -15,6 +15,10 @@ class Company(models.Model):
     allow_transcription = models.BooleanField(default=False)
     # Portão do Admin: com ele ligado, o CRM guarda as mensagens do cliente (e transcrições de áudio) de cada
     # lead, da primeira até a que o classificou, para a equipe consultar em "Histórico de conversa".
+    em_teste = models.BooleanField(default=False, help_text="Empresa em fase de teste (piloto): cobra o valor do piloto em vez da mensalidade (Painel Admin, Cobranças).")
+    teste_inicio = models.DateField(null=True, blank=True)
+    teste_dias = models.PositiveSmallIntegerField(default=30, help_text="Duração do teste em dias (cresce com as prorrogações).")
+    teste_convertido_em = models.DateField(null=True, blank=True, help_text="Dia em que o teste virou contrato.")
     classificacao_cortes = models.JSONField(default=default_cortes_classificacao, blank=True, help_text="4 notas (0-10, crescentes) onde terminam Desqualificado, Desconfiado, Frio e Qualificado; a partir da última é Quente. Padrão [3,5,7,9]; ver services.faixas_da_empresa.")
     classificacao_kanban_a_partir_de = models.PositiveSmallIntegerField(default=2, help_text="Índice (0 Desqualificado ... 4 Quente) da primeira classificação que vai para o Kanban de classificados; as anteriores concluem sozinhas e ficam fora dele. Padrão 2 (Frio em diante).")
     classificacao_regra = models.TextField(blank=True, default="", max_length=1500, help_text="Critério em texto que o agente lê antes de dar as notas (tela Roteiro, aba Classificações). A temperatura final continua sendo calculada pelo CRM.")
@@ -414,3 +418,24 @@ class AgentTokenExpiry(models.Model):
     """
     token = models.OneToOneField("authtoken.Token", on_delete=models.CASCADE, related_name="expiry")
     expires_at = models.DateTimeField(default=default_token_expiry)
+
+
+class PrecoCobranca(models.Model):
+    """Valor de um item de cobrança da Axioma (Painel Admin, Cobranças). Os valores mudam com o tempo: cada alteração é uma
+    linha nova com data de vigência, e o valor de hoje é a linha mais recente cuja vigência já começou. Nada é apagado:
+    o histórico mostra de quanto para quanto, quando e por quem."""
+    ITEM_CHOICES = [
+        ("implantacao", "Implantação inicial"), ("base", "Conta de empresa (plano base)"), ("empresa_adicional", "Empresa adicional"),
+        ("agente_adicional", "Agente adicional"), ("piloto", "Piloto (empresa em teste)"),
+    ]
+    ESCOPO_CHOICES = [("novos", "Novos contratos"), ("reajuste", "No próximo reajuste de cada contrato"), ("todos", "Todos os contratos a partir da vigência"), ("escolher", "Gestores escolhidos")]
+    item = models.CharField(max_length=30, choices=ITEM_CHOICES)
+    valor = models.DecimalField(max_digits=10, decimal_places=2)
+    vigente_desde = models.DateField()
+    escopo = models.CharField(max_length=12, choices=ESCOPO_CHOICES, default="novos")
+    nota = models.CharField(max_length=200, blank=True, default="")
+    criado_em = models.DateTimeField(auto_now_add=True)
+    criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    class Meta:
+        ordering = ["-vigente_desde", "-id"]
+        indexes = [models.Index(fields=["item", "-vigente_desde"])]

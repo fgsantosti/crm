@@ -80,12 +80,13 @@ class AdminCompanySerializer(serializers.ModelSerializer):
     """Só para a tela interna da Axioma (IsSuperUser) -- cross-tenant de propósito."""
     member_count = serializers.SerializerMethodField()
     tem_agente_ativo = serializers.SerializerMethodField()
+    teste = serializers.SerializerMethodField()
     # Entrada livre (com espaços/traços); validate_numero_agente normaliza para E.164 (<= 16).
     numero_agente = serializers.CharField(max_length=40, allow_blank=True, required=False)
     class Meta:
         model = Company
-        fields = ["id", "name", "initial_state", "allow_transcription", "coletar_historico_conversa", "numero_agente", "member_count", "tem_agente_ativo"]
-        read_only_fields = ["id", "member_count", "tem_agente_ativo"]
+        fields = ["id", "name", "initial_state", "allow_transcription", "coletar_historico_conversa", "numero_agente", "member_count", "tem_agente_ativo", "teste"]
+        read_only_fields = ["id", "member_count", "tem_agente_ativo", "teste"]
     def validate_numero_agente(self, value):
         # Aceita como a pessoa digita ("+55 (86) 9423-8125", "5586...") e grava em E.164.
         bruto = (value or "").strip()
@@ -94,6 +95,9 @@ class AdminCompanySerializer(serializers.ModelSerializer):
         if bruto and not re.match(r"^\+[1-9]\d{7,14}$", value):
             raise serializers.ValidationError("Use o formato internacional, ex.: +5586999999999.")
         return value
+    def get_teste(self, obj):
+        from .services import situacao_teste
+        return situacao_teste(obj)
     def get_member_count(self, obj):
         # Só atendentes/empresa ATIVOS -- uma conta desativada (ex.: via Django
         # Admin, fora do fluxo normal de "Desligar atendente") não deve inflar
