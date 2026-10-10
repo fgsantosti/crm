@@ -81,12 +81,14 @@ class AdminCompanySerializer(serializers.ModelSerializer):
     member_count = serializers.SerializerMethodField()
     tem_agente_ativo = serializers.SerializerMethodField()
     teste = serializers.SerializerMethodField()
+    gestor_id = serializers.IntegerField(read_only=True)
+    gestor_nome = serializers.CharField(source="gestor.nome", read_only=True, default="")
     # Entrada livre (com espaços/traços); validate_numero_agente normaliza para E.164 (<= 16).
     numero_agente = serializers.CharField(max_length=40, allow_blank=True, required=False)
     class Meta:
         model = Company
-        fields = ["id", "name", "initial_state", "allow_transcription", "coletar_historico_conversa", "numero_agente", "member_count", "tem_agente_ativo", "teste"]
-        read_only_fields = ["id", "member_count", "tem_agente_ativo", "teste"]
+        fields = ["id", "name", "initial_state", "allow_transcription", "coletar_historico_conversa", "numero_agente", "member_count", "tem_agente_ativo", "teste", "gestor_id", "gestor_nome"]
+        read_only_fields = ["id", "member_count", "tem_agente_ativo", "teste", "gestor_id", "gestor_nome"]
     def validate_numero_agente(self, value):
         # Aceita como a pessoa digita ("+55 (86) 9423-8125", "5586...") e grava em E.164.
         bruto = (value or "").strip()
@@ -432,14 +434,26 @@ class GestorSerializer(serializers.ModelSerializer):
     """Painel Admin: cliente que paga. As empresas vinculam-se por actions (vincular/desvincular), não por este campo."""
     empresas = serializers.SerializerMethodField()
     usuario_email = serializers.SerializerMethodField()
+    usuario_info = serializers.SerializerMethodField()
+    resumo_comercial = serializers.SerializerMethodField()
     class Meta:
         model = Gestor
-        fields = ["id", "nome", "email", "usuario", "usuario_email", "dia_vencimento", "forma_pagamento", "contrato_inicio", "indice_reajuste", "openai_modo", "openai_projeto", "openai_chave_final", "openai_limite_mensal", "notas", "empresas", "criado_em"]
-        read_only_fields = ["id", "empresas", "usuario_email", "criado_em"]
+        fields = ["id", "nome", "email", "usuario", "usuario_email", "dia_vencimento", "forma_pagamento", "contrato_inicio", "indice_reajuste", "openai_modo", "openai_projeto", "openai_chave_final", "openai_limite_mensal", "notas", "empresas", "usuario_info", "resumo_comercial", "criado_em"]
+        read_only_fields = ["id", "empresas", "usuario_email", "usuario_info", "resumo_comercial", "criado_em"]
     def get_empresas(self, obj):
         return [{"id": c.pk, "name": c.name, "em_teste": c.em_teste} for c in obj.empresas.order_by("id")]
     def get_usuario_email(self, obj):
         return (obj.usuario.email or obj.usuario.username) if obj.usuario else ""
+    def get_usuario_info(self, obj):
+        u = obj.usuario
+        if not u:
+            return None
+        return {"username": u.username, "email": u.email, "ativo": u.is_active, "criado_em": u.date_joined, "ultimo_acesso": u.last_login}
+    def get_resumo_comercial(self, obj):
+        from . import billing
+        from django.utils import timezone
+        linhas = billing.montar_linhas_mensalidade(obj, billing.mes_de(timezone.localdate()))
+        return {"linhas": [{"descricao": l["descricao"], "valor": str(l["valor"])} for l in linhas], "total": str(billing._total(linhas))}
     def validate_nome(self, valor):
         valor = (valor or "").strip()
         if not valor:

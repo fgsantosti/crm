@@ -4597,3 +4597,44 @@ class NotificacoesDoAdminTests(TestCase):
         self.api.patch("/api/admin-notificacoes/config/", {"lembrete_cobranca_ativo": False}, format="json")
         self.api.get("/api/admin-faturamento/?mes=2026-10")
         self.assertEqual(processar_automaticas(date(2026, 10, 10))["cobranca"], 0)
+
+
+class PainelAdminVisaoELeadsTests(TestCase):
+    def setUp(self):
+        from .models import ContagemDiaria, Gestor
+        self.admin = get_user_model().objects.create_superuser("adm-pv", password="x")
+        self.api = APIClient(); self.api.force_authenticate(self.admin)
+        self.g1 = Gestor.objects.create(nome="Paulo", email="p@x.example")
+        self.g2 = Gestor.objects.create(nome="Camila", email="c@x.example")
+        self.a = Company.objects.create(name="Empresa A", gestor=self.g1)
+        self.b = Company.objects.create(name="Empresa B", gestor=self.g2)
+        Lead.objects.create(company=self.a, contact="+5585900000001", name="Q", temperature="Quente", bot_closed=True, mode="HUMANO")
+        Lead.objects.create(company=self.a, contact="+5585900000002", name="F", temperature="Frio", bot_closed=True)
+        Lead.objects.create(company=self.b, contact="+5585900000003", name="T")
+        ContagemDiaria.objects.create(company=self.a, data=timezone.localdate(), novas=3, nao_prosseguiram=2)
+
+    def test_so_superusuario(self):
+        comum = APIClient(); comum.force_authenticate(get_user_model().objects.create_user("emp-pv", password="x", is_staff=True))
+        for url in ("/api/admin-leads/", "/api/admin-visao-geral/"):
+            self.assertEqual(comum.get(url).status_code, 403, url)
+
+    def test_leads_agregados_por_empresa_e_gestor(self):
+        d = self.api.get("/api/admin-leads/?periodo=30").json()
+        self.assertEqual(d["resumo"]["atendimentos"], 5)  # 3 leads + 2 que não prosseguiram
+        self.assertEqual(d["resumo"]["quentes"], 1)
+        a = next(e for e in d["empresas"] if e["empresa"] == "Empresa A")
+        self.assertEqual((a["total"], a["nao_prosseguiram"], a["temperaturas"]["Quente"]), (4, 2, 1))
+        self.assertEqual(sum(t["valor"] for t in d["tipos"]), 5)
+        self.assertEqual(d["mensal"][-1]["valor"], 5)
+        so_g2 = self.api.get(f"/api/admin-leads/?gestor={self.g2.pk}&periodo=all").json()
+        self.assertEqual([e["empresa"] for e in so_g2["empresas"]], ["Empresa B"])
+        self.assertEqual(self.api.get("/api/admin-leads/?periodo=7").status_code, 400)
+
+    def test_visao_geral_traz_kpis_alertas_e_volume(self):
+        d = self.api.get("/api/admin-visao-geral/").json()
+        self.assertEqual((d["kpis"]["gestores"], d["kpis"]["empresas"], d["kpis"]["leads_30_dias"]), (2, 2, 5))
+        self.assertEqual(d["volume"][0]["empresa"], "Empresa A")
+        self.assertTrue(any(f["gestor"] == "Paulo" for f in d["faturamento"]))
+        Company.objects.create(name="Sem gestor")
+        d = self.api.get("/api/admin-visao-geral/").json()
+        self.assertTrue(any(a["titulo"] == "Empresa sem gestor" for a in d["alertas"]))

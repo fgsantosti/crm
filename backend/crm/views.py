@@ -16,7 +16,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from . import billing, notifications
+from . import admin_panel, billing, notifications
 from .models import ConfigNotificacao, NotificacaoEnviada, Cobranca, Gestor, Pagamento, Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, VariavelRoteiro, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
 from .serializers import ConfigNotificacaoSerializer, GestorSerializer, RegraCobrancaSerializer, BlacklistSerializer, CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer, VariavelRoteiroSerializer
 from .services import (
@@ -1010,6 +1010,22 @@ class AdminComprovanteView(APIView):
         nome = pagamento.comprovante_arquivo.name.rsplit("/", 1)[-1]
         tipo = mimetypes.guess_type(nome)[0] or "application/octet-stream"
         return FileResponse(pagamento.comprovante_arquivo.open("rb"), content_type=tipo, headers={"Content-Disposition": f'inline; filename="{nome}"', "X-Content-Type-Options": "nosniff"})
+
+class AdminVisaoGeralView(APIView):
+    """GET /api/admin-visao-geral/: indicadores, alertas, volume e faturamento por gestor (só superuser)."""
+    permission_classes = [IsSuperUser]
+    def get(self, request):
+        return Response(admin_panel.visao_geral())
+
+class AdminLeadsView(APIView):
+    """GET /api/admin-leads/?periodo=30|90|all&gestor=<id>: leads de todas as empresas, só agregados."""
+    permission_classes = [IsSuperUser]
+    def get(self, request):
+        periodo = request.query_params.get("periodo", "30")
+        if periodo not in admin_panel.PERIODOS:
+            return Response({"detail": "periodo precisa ser 30, 90 ou all."}, status=400)
+        gestor = request.query_params.get("gestor", "")
+        return Response(admin_panel.leads_do_admin(periodo, int(gestor) if gestor.isdigit() else None))
 
 class AdminRegrasCobrancaView(APIView):
     """Regras de cobrança da plataforma (pro-rata, desconto por tempo, abatimento do piloto, reajuste, faixas de atraso)."""
