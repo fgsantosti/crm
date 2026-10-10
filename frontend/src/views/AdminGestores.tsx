@@ -5,8 +5,7 @@ import { Spinner } from '../components/Skeleton';
 import { useConfirmar } from '../components/ConfirmDialog';
 
 // Painel Admin → Gestores: o cliente que paga e as empresas dele (base do faturamento).
-const FORMAS = [['pix', 'PIX'], ['boleto', 'Boleto'], ['cartao', 'Cartão'], ['outro', 'Outro']] as const;
-const VAZIO = { nome: '', email: '', dia_vencimento: 10, forma_pagamento: 'pix', contrato_inicio: '', indice_reajuste: 'IPCA', openai_projeto: '', openai_chave_final: '', openai_limite_mensal: '', notas: '' };
+const VAZIO = { nome: '', email: '', dia_vencimento: 10, contrato_inicio: '', indice_reajuste: 'IPCA', openai_modo: 'chave', openai_projeto: '', openai_chave_final: '', openai_limite_mensal: '', notas: '' };
 const dataBr = (iso: string | null | undefined) => (iso ? iso.slice(0, 10).split('-').reverse().join('/') : '—');
 
 export function AdminGestores({ api }: { api: Api }) {
@@ -134,16 +133,6 @@ export function AdminGestores({ api }: { api: Api }) {
               <input type="number" min={1} max={28} value={form.dados.dia_vencimento} onChange={(e) => campo('dia_vencimento', Number(e.target.value))} />
             </label>
             <label>
-              Forma de pagamento
-              <select value={form.dados.forma_pagamento} onChange={(e) => campo('forma_pagamento', e.target.value)}>
-                {FORMAS.map(([v, r]) => (
-                  <option key={v} value={v}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
               Início do contrato
               <input type="date" value={form.dados.contrato_inicio ?? ''} onChange={(e) => campo('contrato_inicio', e.target.value)} />
             </label>
@@ -157,21 +146,45 @@ export function AdminGestores({ api }: { api: Api }) {
             </label>
           </div>
           <fieldset className="gestor-openai">
-            <legend>Chave da OpenAI do gestor</legend>
-            <p className="dash-nota">O gestor paga o modelo. Guardamos só a referência; a chave em si fica no gateway de cada agente.</p>
+            <legend>Uso da OpenAI</legend>
+            <div className="gestor-modos" role="radiogroup" aria-label="Como os agentes usam a OpenAI">
+              <button type="button" role="radio" aria-checked={form.dados.openai_modo === 'chave'} className={form.dados.openai_modo === 'chave' ? 'ativo' : ''} onClick={() => campo('openai_modo', 'chave')}>
+                <strong>Chave de API do gestor</strong>
+                <small>O gestor paga o consumo. Guardamos só a referência.</small>
+              </button>
+              <button type="button" role="radio" aria-checked={form.dados.openai_modo === 'plano'} className={form.dados.openai_modo === 'plano' ? 'ativo' : ''} onClick={() => campo('openai_modo', 'plano')}>
+                <strong>Plano gerido pela Axioma</strong>
+                <small>Agentes no plano (ex.: ChatGPT Pro), com limite de uso.</small>
+              </button>
+            </div>
             <div className="cob-campos">
-              <label>
-                Projeto na OpenAI
-                <input value={form.dados.openai_projeto} onChange={(e) => campo('openai_projeto', e.target.value)} />
-              </label>
-              <label>
-                Final da chave
-                <input value={form.dados.openai_chave_final} maxLength={8} placeholder="ex.: 7f3a" onChange={(e) => campo('openai_chave_final', e.target.value)} />
-              </label>
-              <label>
-                Limite mensal combinado (R$)
-                <input type="number" min={0} step={10} value={form.dados.openai_limite_mensal} onChange={(e) => campo('openai_limite_mensal', e.target.value)} />
-              </label>
+              {form.dados.openai_modo === 'plano' ? (
+                <>
+                  <label>
+                    Plano / conta
+                    <input value={form.dados.openai_projeto} placeholder="ex.: ChatGPT Pro da Axioma" onChange={(e) => campo('openai_projeto', e.target.value)} />
+                  </label>
+                  <label>
+                    Limite de uso mensal (R$)
+                    <input type="number" min={0} step={10} value={form.dados.openai_limite_mensal} onChange={(e) => campo('openai_limite_mensal', e.target.value)} />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label>
+                    Projeto na OpenAI
+                    <input value={form.dados.openai_projeto} onChange={(e) => campo('openai_projeto', e.target.value)} />
+                  </label>
+                  <label>
+                    Final da chave
+                    <input value={form.dados.openai_chave_final} maxLength={8} placeholder="ex.: 7f3a" onChange={(e) => campo('openai_chave_final', e.target.value)} />
+                  </label>
+                  <label>
+                    Limite mensal combinado (R$)
+                    <input type="number" min={0} step={10} value={form.dados.openai_limite_mensal} onChange={(e) => campo('openai_limite_mensal', e.target.value)} />
+                  </label>
+                </>
+              )}
             </div>
           </fieldset>
           <label>
@@ -197,11 +210,11 @@ export function AdminGestores({ api }: { api: Api }) {
               <div>
                 <h2>{g.nome}</h2>
                 <small>
-                  {g.email || 'sem e-mail'} · vence todo dia {g.dia_vencimento} · {FORMAS.find(([v]) => v === g.forma_pagamento)?.[1]} · contrato desde {dataBr(g.contrato_inicio)} ({g.indice_reajuste})
+                  {g.email || 'sem e-mail'} · vence todo dia {g.dia_vencimento} · contrato desde {dataBr(g.contrato_inicio)} ({g.indice_reajuste})
                 </small>
               </div>
               <div className="cob-acoes-linha">
-                <button type="button" className="secondary" onClick={() => setForm({ id: g.id, dados: { nome: g.nome, email: g.email, dia_vencimento: g.dia_vencimento, forma_pagamento: g.forma_pagamento, contrato_inicio: g.contrato_inicio ?? '', indice_reajuste: g.indice_reajuste, openai_projeto: g.openai_projeto, openai_chave_final: g.openai_chave_final, openai_limite_mensal: g.openai_limite_mensal ?? '', notas: g.notas } })}>
+                <button type="button" className="secondary" onClick={() => setForm({ id: g.id, dados: { nome: g.nome, email: g.email, dia_vencimento: g.dia_vencimento, contrato_inicio: g.contrato_inicio ?? '', indice_reajuste: g.indice_reajuste, openai_modo: g.openai_modo ?? 'chave', openai_projeto: g.openai_projeto, openai_chave_final: g.openai_chave_final, openai_limite_mensal: g.openai_limite_mensal ?? '', notas: g.notas } })}>
                   Editar
                 </button>
                 <button type="button" className="secondary" onClick={() => implantacao(g)}>

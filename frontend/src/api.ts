@@ -81,6 +81,8 @@ export function apiFactory(onSessionExpired: () => void): Api {
       throw new Error(data.detail || `Não foi possível concluir a operação (${response.status}).`);
     }
     if (response.status === 204) return null;
+    const tipo = response.headers.get('Content-Type') || '';
+    if (tipo.startsWith('application/pdf') || tipo.startsWith('image/')) return response.blob(); // comprovantes e anexos
     return response.json().catch(() => null);
   };
 }

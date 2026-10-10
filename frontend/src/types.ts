@@ -282,6 +282,7 @@ export type Gestor = {
   usuario_email: string;
   dia_vencimento: number;
   forma_pagamento: 'pix' | 'boleto' | 'cartao' | 'outro';
+  openai_modo: 'chave' | 'plano';
   contrato_inicio: string | null;
   indice_reajuste: string;
   openai_projeto: string;
@@ -308,7 +309,7 @@ export type Faturamento = {
     atrasados: { cobranca_id: number; gestor: string; tipo_rotulo: string; saldo: string; vencimento: string; dias_atraso: number; faixa: number }[];
     limites: { curta: number; media: number; aviso_desligamento_dias: number };
   };
-  pagamentos: { id: number; data: string; gestor: string; referencia: string; valor: string; forma: string; comprovante: string; por: string }[];
+  pagamentos: { id: number; data: string; gestor: string; referencia: string; valor: string; forma: string; comprovante: string; comprovante_arquivo: string; por: string }[];
   contratos: { gestor_id: number; gestor: string; contrato_inicio: string | null; indice: string; proximo_reajuste: string | null; dias_para_reajuste: number | null; alerta_reajuste: boolean; desconto_por_tempo_pct: number; implantacao: string; em_teste: boolean }[];
   recorrente: { mes: string; valor: string; projecao: boolean }[];
 };
@@ -323,7 +324,7 @@ export type NotificacaoItem = { id: number; quando: string; gestor: string; para
 export type ChavesGestor = {
   gestor_id: number; gestor: string; email: string;
   agentes: { agente: string; empresa: string; chave: string | null; expira_em: string | null; dias: number | null; situacao: 'valida' | 'expira' | 'expirada' | 'sem_chave' | 'sem_validade' }[];
-  openai: { projeto: string; chave_final: string; limite_mensal: string | null };
+  openai: { modo: 'chave' | 'plano'; projeto: string; chave_final: string; limite_mensal: string | null };
 };
 export type RegraCobranca = {
   prorata_ativo: boolean; descontos: [number, number][]; abater_piloto: boolean; abatimento_pct: number; indice_padrao: string;

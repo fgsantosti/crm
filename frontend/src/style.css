@@ -935,3 +935,11 @@ dialog[data-saindo]::backdrop { animation: popup-fundo-sai .17s ease-in forwards
 .cob-regra-linha input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
 .cob-desconto { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .cob-desconto button { padding: 2px 10px; font-size: 14px; line-height: 1.2; }
+.gestor-modos { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.gestor-modos button { text-align: left; background: var(--surface, #fff); color: inherit; border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 3px; box-shadow: none; transition: border-color .15s, background .15s; }
+.gestor-modos button small { color: var(--muted); font-size: 12.5px; font-weight: 400; }
+.gestor-modos button.ativo { border-color: var(--accent); background: var(--accent-soft, #FFF1E6); }
+.notif-anexos { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.notif-anexos ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.notif-anexos li { background: var(--line-soft); border-radius: 999px; padding: 4px 6px 4px 12px; display: flex; align-items: center; gap: 6px; }
+.notif-anexos li button { padding: 0 8px; font-size: 15px; line-height: 1.4; }

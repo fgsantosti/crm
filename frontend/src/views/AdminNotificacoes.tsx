@@ -13,11 +13,11 @@ const SITUACAO: Record<string, { rotulo: string; fundo: string; cor: string }> =
   sem_chave: { rotulo: 'Sem chave', fundo: '#F1E8DB', cor: '#4E4136' },
   sem_validade: { rotulo: 'Sem validade', fundo: '#EEF7F1', cor: '#245F46' },
 };
-const MODELOS: { chave: keyof ConfigNotificacao; nome: string; assunto: string }[] = [
-  { chave: 'texto_cobranca', nome: 'Lembrete de cobrança', assunto: 'Lembrete: mensalidade vence em {vencimento}' },
-  { chave: 'texto_atraso', nome: 'Cobrança em atraso', assunto: 'Mensalidade em atraso desde {vencimento}' },
+const MODELOS: { chave: keyof ConfigNotificacao; nome: string; assunto: string; exigeAnexo?: boolean }[] = [
+  { chave: 'texto_cobranca', nome: 'Lembrete de cobrança', assunto: 'Lembrete: mensalidade vence em {vencimento}', exigeAnexo: true },
+  { chave: 'texto_atraso', nome: 'Cobrança em atraso', assunto: 'Mensalidade em atraso desde {vencimento}', exigeAnexo: true },
   { chave: 'texto_teste', nome: 'Fim do teste', assunto: 'O teste de {empresa} termina em {fim_do_teste}' },
-  { chave: 'texto_chave', nome: 'Chave expirando', assunto: 'A chave de API do agente {agente} expira em {chave_expira_em}' },
+  { chave: 'texto_chave', nome: 'Chave expirando', assunto: 'A chave de API do agente {agente} expira em {chave_expira_em}', exigeAnexo: true },
 ];
 
 function Chave({ ligado, aoAlternar, nome }: { ligado: boolean; aoAlternar: () => void; nome: string }) {
@@ -43,6 +43,8 @@ export function AdminNotificacoes({ api }: { api: Api }) {
   const [mensagem, setMensagem] = useState('');
   const [diasTeste, setDiasTeste] = useState('');
   const [diasChave, setDiasChave] = useState('');
+  const [anexos, setAnexos] = useState<File[]>([]);
+  const [exigeAnexo, setExigeAnexo] = useState(false);
 
   const carregar = useCallback(() => {
     Promise.all([api('/admin-notificacoes/config/'), api('/admin-notificacoes/chaves/'), api('/admin-notificacoes/historico/'), fetchTodasAsPaginas<Gestor>(api, '/admin-gestores/')])
@@ -98,14 +100,19 @@ export function AdminNotificacoes({ api }: { api: Api }) {
     setError('');
     setAviso('');
     try {
-      const r: { enviados: number; resultado: { gestor: string; estado: string; erro: string }[] } = await api('/admin-notificacoes/enviar/', {
-        method: 'POST',
-        body: JSON.stringify({ gestores: dest === 'todos' ? 'todos' : [Number(dest)], assunto, mensagem }),
-      });
+      const corpo = new FormData();
+      corpo.append('gestores', dest === 'todos' ? 'todos' : dest);
+      corpo.append('assunto', assunto);
+      corpo.append('mensagem', mensagem);
+      if (exigeAnexo) corpo.append('exige_anexo', 'true');
+      anexos.forEach((a) => corpo.append('anexos', a));
+      const r: { enviados: number; resultado: { gestor: string; estado: string; erro: string }[] } = await api('/admin-notificacoes/enviar/', { method: 'POST', body: corpo });
       const falhas = r.resultado.filter((x) => x.estado !== 'enviado');
       setAviso(`${r.enviados} e-mail(s) enviado(s)${falhas.length ? `; ${falhas.length} falhou: ${falhas.map((f) => `${f.gestor} (${f.erro})`).join(', ')}` : ''}.`);
       setAssunto('');
       setMensagem('');
+      setAnexos([]);
+      setExigeAnexo(false);
       carregar();
     } catch (e) {
       setError((e as Error).message);
@@ -117,6 +124,7 @@ export function AdminNotificacoes({ api }: { api: Api }) {
     if (!cfg) return;
     setAssunto(m.assunto);
     setMensagem(String(cfg[m.chave]));
+    setExigeAnexo(!!m.exigeAnexo);
   }
 
   return (
@@ -159,7 +167,7 @@ export function AdminNotificacoes({ api }: { api: Api }) {
                 <th>Agente</th>
                 <th>Chave do CRM</th>
                 <th>Validade</th>
-                <th>Chave da OpenAI</th>
+                <th>OpenAI (chave ou plano)</th>
               </tr>
             </thead>
             <tbody>
@@ -183,9 +191,13 @@ export function AdminNotificacoes({ api }: { api: Api }) {
                     <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 13 }}>{a?.chave ?? '—'}</td>
                     <td>{a && <span className="dash-selo" style={{ background: SITUACAO[a.situacao].fundo, color: SITUACAO[a.situacao].cor }}>{SITUACAO[a.situacao].rotulo}{a.dias !== null && a.situacao !== 'expirada' ? ` · ${a.dias} dias (${dataBr(a.expira_em)})` : ''}</span>}</td>
                     <td>
-                      {g.openai.projeto || g.openai.chave_final ? (
+                      {g.openai.projeto || g.openai.chave_final || g.openai.modo === 'plano' ? (
                         <>
-                          <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 13 }}>{g.openai.chave_final ? `sk-••••${g.openai.chave_final}` : '—'}</span>
+                          {g.openai.modo === 'plano' ? (
+                            <strong style={{ display: 'block' }}>Plano gerido pela Axioma</strong>
+                          ) : (
+                            <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 13 }}>{g.openai.chave_final ? `sk-••••${g.openai.chave_final}` : '—'}</span>
+                          )}
                           <small style={{ display: 'block' }}>{g.openai.projeto}{g.openai.limite_mensal ? ` · limite R$ ${Number(g.openai.limite_mensal).toLocaleString('pt-BR')}` : ''}</small>
                         </>
                       ) : (
@@ -209,7 +221,7 @@ export function AdminNotificacoes({ api }: { api: Api }) {
         <section className="dash-card" aria-labelledby="not-env">
           <div>
             <h2 id="not-env">Enviar notificação</h2>
-            <small>E-mail avulso para um gestor ou para todos. Use {'{gestor}'} para o nome.</small>
+            <small>E-mail avulso para um gestor ou para todos. As variáveis ({'{gestor}'}, {'{empresa}'}, {'{valor}'}, {'{vencimento}'}, {'{fim_do_teste}'}, {'{agente}'}, {'{chave_expira_em}'}) são trocadas pelos dados reais de cada gestor; se faltar o dado, o e-mail não sai e o histórico explica.</small>
           </div>
           <label className="notif-campo">
             Destinatário
@@ -237,8 +249,24 @@ export function AdminNotificacoes({ api }: { api: Api }) {
             Mensagem
             <textarea rows={6} value={mensagem} onChange={(e) => setMensagem(e.target.value)} />
           </label>
+          <div className="notif-anexos">
+            <label className="notif-campo">
+              {exigeAnexo ? 'Anexo (obrigatório neste modelo: a cobrança em PDF ou imagem)' : 'Anexos (PDF ou imagem, até 5 MB cada)'}
+              <input type="file" multiple accept="application/pdf,image/png,image/jpeg,image/webp" onChange={(e) => { setAnexos((a) => [...a, ...Array.from(e.target.files ?? [])].slice(0, 5)); e.target.value = ''; }} />
+            </label>
+            {anexos.length > 0 && (
+              <ul>
+                {anexos.map((a, i) => (
+                  <li key={`${a.name}-${i}`}>
+                    {a.name}
+                    <button type="button" className="secondary" aria-label={`Remover ${a.name}`} onClick={() => setAnexos((x) => x.filter((_, j) => j !== i))}>×</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <div className="cob-acoes">
-            <button type="button" disabled={enviando || !assunto.trim() || !mensagem.trim()} onClick={enviar}>
+            <button type="button" disabled={enviando || !assunto.trim() || !mensagem.trim() || (exigeAnexo && !anexos.length)} onClick={enviar}>
               {enviando && <Spinner />}
               Enviar e-mail
             </button>

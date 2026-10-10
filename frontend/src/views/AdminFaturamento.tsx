@@ -31,7 +31,8 @@ export function AdminFaturamento({ api }: { api: Api }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [pagando, setPagando] = useState<CobrancaItem | null>(null);
-  const [pg, setPg] = useState({ data: hojeIso(), valor: '', forma: 'pix', comprovante: '' });
+  const [pg, setPg] = useState({ data: hojeIso(), valor: '', forma: 'pix' });
+  const [arquivo, setArquivo] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
 
   const carregar = useCallback(() => {
@@ -46,14 +47,28 @@ export function AdminFaturamento({ api }: { api: Api }) {
 
   function abrirPagamento(c: CobrancaItem) {
     setPagando(c);
-    setPg({ data: hojeIso(), valor: c.saldo, forma: c.forma, comprovante: '' });
+    setPg({ data: hojeIso(), valor: c.saldo, forma: c.forma });
+    setArquivo(null);
+  }
+  async function verComprovante(id: number) {
+    try {
+      const blob: Blob = await api(`/admin-pagamentos/${id}/comprovante/`);
+      window.open(URL.createObjectURL(blob), '_blank', 'noopener');
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }
   async function registrar() {
     if (!pagando) return;
     setSaving(true);
     setError('');
     try {
-      await api(`/admin-cobrancas/${pagando.id}/pagamentos/`, { method: 'POST', body: JSON.stringify(pg) });
+      const corpo = new FormData();
+      corpo.append('data', pg.data);
+      corpo.append('valor', pg.valor);
+      corpo.append('forma', pg.forma);
+      if (arquivo) corpo.append('arquivo', arquivo);
+      await api(`/admin-cobrancas/${pagando.id}/pagamentos/`, { method: 'POST', body: corpo });
       setPagando(null);
       carregar();
     } catch (e) {
@@ -230,8 +245,8 @@ export function AdminFaturamento({ api }: { api: Api }) {
                 </select>
               </label>
               <label>
-                Comprovante (arquivo ou link)
-                <input value={pg.comprovante} placeholder="ex.: pix-1010.pdf" onChange={(e) => setPg({ ...pg, comprovante: e.target.value })} />
+                Comprovante (PDF ou imagem, até 5 MB)
+                <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" onChange={(e) => setArquivo(e.target.files?.[0] ?? null)} />
               </label>
             </div>
             <div className="cob-acoes">
@@ -346,7 +361,17 @@ export function AdminFaturamento({ api }: { api: Api }) {
                   <td>{p.referencia}</td>
                   <td className="dash-num">{brl(p.valor)}</td>
                   <td>{FORMAS[p.forma] ?? p.forma}</td>
-                  <td>{p.comprovante ? (/^https?:\/\//.test(p.comprovante) ? <a href={p.comprovante} target="_blank" rel="noreferrer">Ver comprovante</a> : p.comprovante) : <span className="dash-nota">sem comprovante</span>}</td>
+                  <td>
+                    {p.comprovante_arquivo ? (
+                      <button type="button" className="secondary" onClick={() => verComprovante(p.id)}>
+                        Ver comprovante
+                      </button>
+                    ) : p.comprovante ? (
+                      /^https?:\/\//.test(p.comprovante) ? <a href={p.comprovante} target="_blank" rel="noreferrer">Ver comprovante</a> : p.comprovante
+                    ) : (
+                      <span className="dash-nota">sem comprovante</span>
+                    )}
+                  </td>
                   <td>{p.por || '—'}</td>
                   <td style={{ textAlign: 'right' }}>
                     <button type="button" className="secondary" onClick={() => desfazer(p.id, p.gestor)}>
