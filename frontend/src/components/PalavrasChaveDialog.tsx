@@ -88,7 +88,7 @@ export function PalavrasChaveDialog({ area, valor, somenteLeitura, salvando, mul
       <div className="panel-toolbar">
         <div>
           <h2 id="palavras-titulo">Palavras Chave da Spin</h2>
-          <small>{area}-SPIN</small>
+          <small>{area}</small>
         </div>
         <button type="button" className="secondary" onClick={() => ref.current?.close()} aria-label="Fechar">
           Fechar

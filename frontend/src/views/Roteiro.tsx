@@ -200,6 +200,8 @@ function Chevron({ aberto }: { aberto: boolean }) {
   );
 }
 
+const COR_VAR = ['#D9531A', '#C88A1E', '#2F7D5C', '#2563EB', '#7C3AED', '#E2574C', '#8C7B69', '#0F8B8D'];
+
 const VOZES_TTS = [
   { id: 'pt-BR-FranciscaNeural', label: 'Francisca (feminina)' },
   { id: 'pt-BR-AntonioNeural', label: 'Antonio (masculina)' },
@@ -231,22 +233,30 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
   const [newVR, setNewVR] = useState('');
   const [dragId, setDragId] = useState<number | null>(null);
   const [vrCheckboxOverride, setVrCheckboxOverride] = useState<Record<number, boolean>>({});
-  // Lista de perguntas exibida: 'fixas' ou o id de uma Área (lista "{Área}-SPIN").
-  const [lista, setLista] = useState<'fixas' | number>('fixas');
+  // Lista de perguntas exibida: 'fixas' ou o id de uma Área (lista da Área).
+  const [lista, setLista] = useState<'fixas' | 'fora' | number>('fixas');
   // Cartões em acordeão: um aberto por vez, o resto fica numa linha só (texto resumido + etiquetas).
   const [abertaQ, setAbertaQ] = useState<number | null>(null);
   const [abertaF, setAbertaF] = useState<string | null>(null);
   const [novaAberta, setNovaAberta] = useState(false);
+  const [novaVarAberta, setNovaVarAberta] = useState(false);
+  const [copiado, setCopiado] = useState('');
 
   const isOffflow = (q: Question) => (OFFFLOW_IDS as readonly string[]).includes(q.question_id);
   // Ordena por `ordem` (não pela posição no array): o reorder só atualiza o campo, então sem isso
   // a nova ordem era salva no backend mas a tela continuava igual até recarregar.
-  const areaDaLista = lista === 'fixas' ? null : lista;
+  // "Fora de escopo" está sempre presente, no fim dos chips: se a empresa já tem uma Área com esse nome, é ela; senão é um chip virtual.
+  const ehForaDeEscopo = (a: Area) => a.name.trim().toLowerCase() === 'fora de escopo';
+  const areaFora = areas.find(ehForaDeEscopo) ?? null;
+  const areasDoFluxo = areas.filter((a) => !ehForaDeEscopo(a));
+  const listaFora = lista === 'fora' || (areaFora !== null && lista === areaFora.id);
+  const areaDaLista = lista === 'fixas' ? null : lista === 'fora' ? -1 : lista;
   const areaSelecionada = areas.find((a) => a.id === areaDaLista);
   const flowQuestions = questions
     .filter((q) => !isOffflow(q) && (q.area ?? null) === areaDaLista)
     .sort((a, b) => a.ordem - b.ordem || a.id - b.id);
   const offflowQuestions = questions.filter(isOffflow);
+  const pesoTotal = variaveis.reduce((t, v) => t + v.peso, 0) || 1;
 
   function load() {
     setBusy(true);
@@ -423,7 +433,7 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
     }
   }
 
-  // Move a pergunta para outra lista (fixas ou {Área}-SPIN), entrando no fim dela.
+  // Move a pergunta para outra lista (fixas ou a Área), entrando no fim dela.
   async function moverParaLista(q: Question, destino: string) {
     const area = destino === 'fixas' ? null : Number(destino);
     const naLista = questions.filter((x) => !isOffflow(x) && (x.area ?? null) === area && x.id !== q.id);
@@ -585,24 +595,45 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
 
       {busy && !questions.length && !variaveis.length && <SkeletonCards count={4} height={92} />}
 
+      <div key={tab} className="rot-aba">
+
       {tab === 'perguntas' && (
-        <section className="section rot-grade">
+        <section className={`section rot-grade${listaFora ? ' sem-chat' : ''}`}>
           <div className="rot-lista">
           <div className="spin-seletor" role="tablist" aria-label="Lista de perguntas">
             <button type="button" role="tab" aria-selected={lista === 'fixas'} className={lista === 'fixas' ? '' : 'secondary'} onClick={() => setLista('fixas')}>
               Perguntas fixas <span className="rot-contagem">{questions.filter((q) => !isOffflow(q) && (q.area ?? null) === null).length}</span>
             </button>
-            {areas.map((a) => (
+            {areasDoFluxo.map((a) => (
               <button type="button" role="tab" key={a.id} aria-selected={lista === a.id} className={lista === a.id ? '' : 'secondary'} onClick={() => setLista(a.id)}>
-                {a.name}-SPIN <span className="rot-contagem">{questions.filter((q) => !isOffflow(q) && q.area === a.id).length}</span>
+                {a.name} <span className="rot-contagem">{questions.filter((q) => !isOffflow(q) && q.area === a.id).length}</span>
               </button>
             ))}
+            <button type="button" role="tab" aria-selected={listaFora} className={`rot-chip-fora${listaFora ? '' : ' secondary'}`} onClick={() => setLista(areaFora ? areaFora.id : 'fora')}>
+              Fora de escopo
+            </button>
           </div>
           <p style={{ fontSize: 13, color: 'var(--muted)', margin: '6px 0 10px' }}>
-            {areaSelecionada
+            {listaFora
+              ? 'Cliente cujo assunto não é atendido pelo escritório.'
+              : areaSelecionada
               ? `Perguntas feitas depois que o agente classifica a área como ${areaSelecionada.name}. Para guardar a demanda desta área, marque "Armazenar resposta" e use "Demanda" na pergunta de Problema.`
               : 'Perguntas feitas antes de o agente definir a área.'}
           </p>
+          {listaFora ? (
+            <article className="step-card rot-fora">
+              <h3>Sempre presente, sem perguntas</h3>
+              <p>
+                Quando o assunto do cliente não corresponde a nenhuma das áreas, o agente não faz perguntas: o lead é concluído como <strong>Desqualificado</strong>{' '}
+                (aparece só nas estatísticas) e o número fica livre para uma nova conversa. Por isso não há roteiro para editar aqui.
+              </p>
+              <ul>
+                <li>Com <strong>Etapa Inicial</strong> e várias áreas, o agente usa as palavras-chave de cada área para reconhecer o assunto; sem correspondência, vale fora de escopo.</li>
+                <li>O 4º pedido de repetição seguido na mesma pergunta também desqualifica (sem resposta).</li>
+              </ul>
+            </article>
+          ) : (
+            <>
           {canEdit && flowQuestions.length > 1 && (
             <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 4 }}>Arraste os cartões pelo ⠿ para reordenar o fluxo.</p>
           )}
@@ -708,14 +739,14 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
                       </select>
                     </label>
                   )}
-                  {!SEMPRE_FIXAS.includes(q.question_id) && areas.length > 0 && (
+                  {!SEMPRE_FIXAS.includes(q.question_id) && areasDoFluxo.length > 0 && (
                     <label style={{ margin: 0 }}>
                       Lista
                       <select value={q.area === null || q.area === undefined ? 'fixas' : String(q.area)} onChange={(e) => moverParaLista(q, e.target.value)} disabled={savingQ === q.id}>
                         <option value="fixas">Perguntas fixas</option>
-                        {areas.map((a) => (
+                        {areasDoFluxo.map((a) => (
                           <option key={a.id} value={a.id}>
-                            {a.name}-SPIN
+                            {a.name}
                           </option>
                         ))}
                       </select>
@@ -790,16 +821,16 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
             </article>
           ))}
           </div>
-          {!busy && !flowQuestions.length && <div className="empty">{areaSelecionada ? `Nenhuma pergunta na lista ${areaSelecionada.name}-SPIN ainda.` : 'Nenhuma pergunta cadastrada para esta empresa ainda.'}</div>}
+          {!busy && !flowQuestions.length && <div className="empty">{areaSelecionada ? `Nenhuma pergunta na lista ${areaSelecionada.name} ainda.` : 'Nenhuma pergunta cadastrada para esta empresa ainda.'}</div>}
 
           {canEdit && !novaAberta && (
             <button type="button" className="rot-adicionar" onClick={() => setNovaAberta(true)}>
-              + Nova pergunta {areaSelecionada ? `em ${areaSelecionada.name}-SPIN` : 'fixa'}
+              + Nova pergunta {areaSelecionada ? `em ${areaSelecionada.name}` : 'fixa'}
             </button>
           )}
           {canEdit && novaAberta && (
             <form onSubmit={createQuestion} className="step-card rot-nova" style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
-              <strong style={{ fontSize: 14 }}>Nova pergunta {areaSelecionada ? `em ${areaSelecionada.name}-SPIN` : 'fixa'}</strong>
+              <strong style={{ fontSize: 14 }}>Nova pergunta {areaSelecionada ? `em ${areaSelecionada.name}` : 'fixa'}</strong>
               <small style={{ color: 'var(--muted)' }}>
                 Perguntas além das 3 obrigatórias (nome, situação, demanda) entram no campo de observação do lead.
               </small>
@@ -842,12 +873,15 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
               </div>
             </form>
           )}
+            </>
+          )}
           </div>
 
+          {!listaFora && (
           <aside className="rot-chat" aria-label="Pré-visualização da conversa">
             <div className="rot-chat-topo">
               <strong>Como o contato vê</strong>
-              <small>{areaSelecionada ? `${areaSelecionada.name}-SPIN` : 'Perguntas fixas'} · dados de exemplo</small>
+              <small>{areaSelecionada ? areaSelecionada.name : 'Perguntas fixas'} · dados de exemplo</small>
             </div>
             <div className="rot-chat-corpo">
               {flowQuestions.map((q, i) => (
@@ -868,6 +902,7 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
             </div>
             <small className="rot-chat-nota">Clique em uma mensagem para editar a pergunta. {company.mensagens_audio && company.allow_transcription ? 'Com áudio ligado, o contato recebe estas mensagens em voz.' : ''}</small>
           </aside>
+          )}
         </section>
       )}
 
@@ -973,77 +1008,94 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
       )}
 
       {tab === 'variaveis' && (
-        <div className="roteiro-variable-grid">
+        <div className="roteiro-variable-grid var-grade">
           <section className="section">
-            <h3 style={{ marginTop: 0 }}>Variáveis do agente</h3>
-            <p style={{ marginBottom: 16, fontSize: 13.5 }}>
-              Cada pergunta do roteiro fica atrelada a uma destas, com peso de 1 a 10. O CRM calcula a média ponderada
-              das notas do agente e define a urgência do lead a partir dela. <strong>Detalhamento</strong> é uma variável
-              obrigatória do sistema: o CRM mede o quanto o cliente contou (demanda, observações, impacto e dados extras) e só o
-              peso dela pode ser alterado.
-            </p>
-            {variaveis.map((v) => (
-              <article key={v.id} className="step-card roteiro-variable-row" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                {v.builtin ? (
-                  <>
-                    <strong style={{ flex: 1 }}>
-                      {v.name} <span className="chip chip-neutral" style={{ marginLeft: 6 }}>obrigatória</span>
-                    </strong>
-                    {canEdit ? (
-                      <select defaultValue={v.peso} onChange={(e) => saveVariavel(v, { peso: Number(e.target.value) })} disabled={savingV === v.id} style={{ width: 140 }} aria-label={`Peso de ${v.name}`}>
-                        {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                          <option key={n} value={n}>
-                            Peso {n}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span>peso {v.peso}</span>
-                    )}
-                  </>
-                ) : canEdit ? (
-                  <>
-                    <input
-                      defaultValue={v.name}
-                      style={{ flex: 1 }}
-                      onBlur={(e) => {
-                        if (e.target.value.trim() && e.target.value !== v.name) saveVariavel(v, { name: e.target.value.trim() });
-                      }}
-                    />
-                    <select
-                      defaultValue={v.peso}
-                      onChange={(e) => saveVariavel(v, { peso: Number(e.target.value) })}
-                      disabled={savingV === v.id}
-                      style={{ width: 140 }}
-                    >
-                      {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                        <option key={n} value={n}>
-                          Peso {n}
-                        </option>
+            <div className="var-topo">
+              <div>
+                <h3 style={{ marginTop: 0 }}>Variáveis do agente</h3>
+                <p style={{ margin: 0, fontSize: 13.5 }}>Cada pergunta alimenta uma variável. O peso (1 a 10) define quanto ela pesa na urgência do lead.</p>
+              </div>
+            </div>
+            {variaveis.length > 0 && (
+              <div className="var-influencia" aria-label="Influência de cada variável na classificação">
+                <div className="var-barra" role="img" aria-label={variaveis.map((v) => `${v.name} ${Math.round((v.peso / pesoTotal) * 100)}%`).join(', ')}>
+                  {variaveis.map((v, i) => (
+                    <span key={v.id} style={{ flex: `${v.peso} 1 0`, background: COR_VAR[i % COR_VAR.length] }} title={`${v.name}: ${Math.round((v.peso / pesoTotal) * 100)}%`} />
+                  ))}
+                </div>
+                <small>Influência na classificação: quanto maior o peso, maior a fatia.</small>
+              </div>
+            )}
+            <details className="var-ajuda">
+              <summary>Como funciona</summary>
+              <p>
+                O CRM calcula a média ponderada das notas que o agente dá em cada variável e define a urgência do lead a partir dela. <strong>Detalhamento</strong> é uma variável
+                obrigatória do sistema: o CRM mede o quanto o cliente contou (demanda, observações, impacto e dados extras) e só o peso dela pode ser alterado.
+              </p>
+            </details>
+            <div className="var-lista">
+              {variaveis.map((v, i) => {
+                const usos = questions.filter((q) => q.variavel === v.id).length;
+                const pct = Math.round((v.peso / pesoTotal) * 100);
+                return (
+                  <article key={v.id} className={`step-card var-card${savingV === v.id ? ' salvando' : ''}`}>
+                    <span className="var-cor" style={{ background: COR_VAR[i % COR_VAR.length] }} aria-hidden="true" />
+                    <div className="var-nome">
+                      {v.builtin || !canEdit ? (
+                        <strong>
+                          {v.name}
+                          {v.builtin && <span className="chip chip-neutral" style={{ marginLeft: 8 }}>obrigatória</span>}
+                        </strong>
+                      ) : (
+                        <input
+                          defaultValue={v.name}
+                          aria-label={`Nome da variável ${v.name}`}
+                          onBlur={(e) => {
+                            if (e.target.value.trim() && e.target.value !== v.name) saveVariavel(v, { name: e.target.value.trim() });
+                          }}
+                        />
+                      )}
+                      <small>{v.builtin ? 'calculada pelo CRM' : usos ? `usada em ${usos} pergunta${usos === 1 ? '' : 's'}` : 'ainda sem perguntas'} · {pct}% da classificação</small>
+                    </div>
+                    <div className="var-peso" role="radiogroup" aria-label={`Peso de ${v.name}`}>
+                      {Array.from({ length: 10 }, (_, k) => k + 1).map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          role="radio"
+                          aria-checked={v.peso === n}
+                          aria-label={`Peso ${n}`}
+                          className={n <= v.peso ? 'cheio' : ''}
+                          disabled={!canEdit || savingV === v.id}
+                          onClick={() => v.peso !== n && saveVariavel(v, { peso: n })}
+                        />
                       ))}
-                    </select>
-                    <button type="button" className="danger-outline" onClick={() => removeVariavel(v)} disabled={savingV === v.id}>
-                      {savingV === v.id && <Spinner />}
-                      Remover
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <strong style={{ flex: 1 }}>{v.name}</strong>
-                    <span>peso {v.peso}</span>
-                  </>
-                )}
-              </article>
-            ))}
+                      <strong>{v.peso}</strong>
+                    </div>
+                    {!v.builtin && canEdit && (
+                      <button type="button" className="danger-outline" onClick={() => removeVariavel(v)} disabled={savingV === v.id || usos > 0} title={usos > 0 ? 'Troque a variável das perguntas antes de remover' : 'Remover variável'}>
+                        {savingV === v.id && <Spinner />}
+                        Remover
+                      </button>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
             {!busy && !variaveis.length && <div className="empty">Nenhuma variável cadastrada ainda.</div>}
 
-            {canEdit && (
-              <form onSubmit={createVariavel} style={{ display: 'flex', gap: 10, marginTop: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <label style={{ margin: 0, flex: '1 1 160px' }}>
+            {canEdit && !novaVarAberta && (
+              <button type="button" className="rot-adicionar" onClick={() => setNovaVarAberta(true)}>
+                + Nova variável do agente
+              </button>
+            )}
+            {canEdit && novaVarAberta && (
+              <form onSubmit={async (e) => { await createVariavel(e); setNovaVarAberta(false); }} className="step-card rot-nova var-nova">
+                <label style={{ margin: 0, flex: '1 1 200px' }}>
                   Nova variável
-                  <input placeholder="ex.: Urgência relatada" value={newV.name} onChange={(e) => setNewV((v) => ({ ...v, name: e.target.value }))} required />
+                  <input autoFocus placeholder="ex.: Urgência relatada" value={newV.name} onChange={(e) => setNewV((v) => ({ ...v, name: e.target.value }))} required />
                 </label>
-                <label style={{ margin: 0, width: 120 }}>
+                <label style={{ margin: 0 }}>
                   Peso
                   <select value={newV.peso} onChange={(e) => setNewV((v) => ({ ...v, peso: e.target.value }))}>
                     {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
@@ -1056,39 +1108,54 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
                 <button disabled={savingV === 'new'}>
                   {savingV === 'new' && <Spinner />}+ Adicionar
                 </button>
+                <button type="button" className="secondary" onClick={() => setNovaVarAberta(false)}>
+                  Cancelar
+                </button>
               </form>
             )}
           </section>
 
           <section className="section">
             <h3 style={{ marginTop: 0 }}>Variáveis de roteiro</h3>
-            <p style={{ marginBottom: 16, fontSize: 13.5 }}>
-              Sem peso — só guardam o texto coletado numa pergunta pra reusar como placeholder ({'{slug}'}) em outro texto
-              do roteiro, se quem escreve o fluxo quiser. Nome/Área da Lead/Demanda são fixas em toda empresa.
+            <p style={{ margin: '0 0 14px', fontSize: 13.5 }}>
+              Sem peso: guardam o texto que o cliente respondeu para reusar como marcador em outros textos. Clique no marcador para copiar.
             </p>
-            {variaveisRoteiro.map((v) => (
-              <article key={v.id} className="step-card" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <span aria-hidden style={{ width: 14, height: 14, borderRadius: '50%', background: v.cor, flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <strong>{v.name}</strong>
-                  <small style={{ display: 'block', color: 'var(--muted)', fontFamily: "'DM Mono',monospace" }}>{'{' + v.slug + '}'}</small>
-                </div>
-                {v.builtin ? (
-                  <span className="chip chip-neutral">fixa</span>
-                ) : (
-                  canEdit && (
-                    <button type="button" className="danger-outline" onClick={() => removeVariavelRoteiro(v)} disabled={savingVR === v.id}>
-                      {savingVR === v.id && <Spinner />}
-                      Remover
+            <div className="vr-lista">
+              {variaveisRoteiro.map((v) => {
+                const usos = questions.filter((q) => q.variavel_roteiro === v.id).length;
+                return (
+                  <article key={v.id} className="step-card vr-card">
+                    <span aria-hidden className="var-cor" style={{ background: v.cor }} />
+                    <div className="var-nome">
+                      <strong>{v.name}</strong>
+                      <small>{v.builtin ? 'fixa em toda empresa' : usos ? `guardada por ${usos} pergunta${usos === 1 ? '' : 's'}` : 'ainda sem pergunta'}</small>
+                    </div>
+                    <button
+                      type="button"
+                      className={`vr-token${copiado === v.slug ? ' copiado' : ''}`}
+                      title="Copiar marcador"
+                      onClick={() => {
+                        navigator.clipboard?.writeText('{' + v.slug + '}');
+                        setCopiado(v.slug);
+                        window.setTimeout(() => setCopiado(''), 1400);
+                      }}
+                    >
+                      {copiado === v.slug ? 'Copiado!' : '{' + v.slug + '}'}
                     </button>
-                  )
-                )}
-              </article>
-            ))}
+                    {!v.builtin && canEdit && (
+                      <button type="button" className="danger-outline" onClick={() => removeVariavelRoteiro(v)} disabled={savingVR === v.id}>
+                        {savingVR === v.id && <Spinner />}
+                        Remover
+                      </button>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
             {!busy && !variaveisRoteiro.length && <div className="empty">Nenhuma variável de roteiro cadastrada ainda.</div>}
 
             {canEdit && (
-              <form onSubmit={createVariavelRoteiro} style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 10, alignItems: 'flex-end' }}>
+              <form onSubmit={createVariavelRoteiro} className="vr-nova">
                 <label style={{ margin: 0, flex: 1 }}>
                   Nova variável de roteiro
                   <input placeholder="ex.: Idade" value={newVR} onChange={(e) => setNewVR(e.target.value)} required />
@@ -1113,7 +1180,7 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
             </label>
             <fieldset disabled={!canEdit || savingOpcoes || busy} style={{ border: '1px solid var(--line)', borderRadius: 8, margin: 0 }}>
               <legend>SPINs que o cliente pode acessar</legend>
-              {areas.map((area) => {
+              {areasDoFluxo.map((area) => {
                 const temPerguntas = questions.some((q) => q.area === area.id && q.text.trim());
                 const marcada = spinsIniciais.includes(area.id);
                 return (
@@ -1126,7 +1193,7 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
                         disabled={!marcada && !temPerguntas}
                         onChange={(e) => salvarInicioSpin({ spins_iniciais: e.target.checked ? [...spinsIniciais, area.id] : spinsIniciais.filter((id) => id !== area.id) })}
                       />
-                      {area.name}-SPIN
+                      {area.name}
                       {!temPerguntas && <small style={{ color: 'var(--muted)' }}>(sem perguntas com texto)</small>}
                     </label>
                     <button
@@ -1141,7 +1208,8 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
                   </div>
                 );
               })}
-              {!areas.length && <small style={{ color: 'var(--muted)' }}>Nenhuma área cadastrada ainda (tela Equipe).</small>}
+              {!areasDoFluxo.length && <small style={{ color: 'var(--muted)' }}>Nenhuma área cadastrada ainda (tela Equipe).</small>}
+              <small className="rot-fora-nota">Fora de escopo está sempre ativo: assunto sem área correspondente é desqualificado.</small>
             </fieldset>
             {spinsIniciais.length > 1 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1152,6 +1220,21 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
                 </small>
               </div>
             )}
+            {(() => {
+              const ql = offflowQuestions.find((x) => x.question_id === 'lembrete');
+              return (
+                <div className="opc-lembrete">
+                  <label>
+                    <input type="checkbox" style={{ width: 'auto' }} checked={!!ql?.habilitada} disabled={!canEdit || !ql || savingQ === ql?.id || busy} onChange={(e) => ql && saveQuestion(ql, { habilitada: e.target.checked })} />
+                    Enviar lembrete de continuidade ao cliente
+                  </label>
+                  <small>
+                    Quem fica 24 horas sem responder recebe uma mensagem do agente e, logo depois, a pergunta em que parou. Sem retorno em mais 24 horas, a triagem é apagada.
+                    O texto e o horário ficam em “Textos fora do fluxo”.
+                  </small>
+                </div>
+              );
+            })()}
             <p style={{ fontSize: 13.5, color: 'var(--muted)', margin: 0 }}>
               Marcada: o atendimento começa diretamente na SPIN habilitada (ou, com várias, na que o agente reconhecer pela
               mensagem inicial do cliente). O agente envia somente as perguntas dela,
@@ -1236,6 +1319,7 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
           onClose={() => setPalavrasArea(null)}
         />
       )}
+      </div>
     </>
   );
 }
