@@ -4117,3 +4117,27 @@ class ClassificacaoCortesERegraTests(TestCase):
         fields, erro = _aplicar_notas_urgencia(lead, self.company, {"notas": {"situacao": 8.5}})
         self.assertIsNone(erro)
         self.assertEqual(fields["temperatura"], "Quente")
+
+
+class DespachoEspecialPelaEmpresaTests(TestCase):
+    def test_empresa_sem_responsavel_marca_origem_e_dashboard_mostra_rotulo(self):
+        from .services import despachar_situacao_especial, resumo_dashboard
+        company = Company.objects.create(name="Esp Ltda")
+        empresa = get_user_model().objects.create_user("emp-esp", password="x", is_staff=True)
+        atendente = get_user_model().objects.create_user("at-esp", password="x")
+        company.members.add(empresa, atendente)
+        sem_dono = Lead.objects.create(company=company, contact="+5585900009201", name="A", situacao_especial="acompanhamento", bot_closed=True)
+        com_dono = Lead.objects.create(company=company, contact="+5585900009202", name="B", situacao_especial="acompanhamento", bot_closed=True, owner=atendente)
+        self.assertIsNone(despachar_situacao_especial(sem_dono.pk, empresa))
+        self.assertIsNone(despachar_situacao_especial(com_dono.pk, empresa))
+        sem_dono.refresh_from_db(); com_dono.refresh_from_db()
+        self.assertTrue(sem_dono.despachado_pela_empresa)
+        self.assertIsNone(sem_dono.owner_id)
+        self.assertFalse(com_dono.despachado_pela_empresa)
+        self.assertEqual(com_dono.owner_id, atendente.pk)
+        r = resumo_dashboard(company)
+        donos = {c["name"]: c["owner"] for c in r["concluidos"]}
+        self.assertEqual(donos["A"], "Despachado pela Empresa")
+        self.assertNotEqual(donos["B"], "Despachado pela Empresa")
+        # Não vira atendente no desempenho.
+        self.assertTrue(all(o["owner_id"] != empresa.pk for o in r["por_owner"]))

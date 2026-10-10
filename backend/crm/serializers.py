@@ -117,7 +117,7 @@ class LeadSerializer(serializers.ModelSerializer):
         # owner/mode só mudam via as actions assumir/despachar (services.py) --
         # nunca mais um PATCH livre de texto, pra garantir atomicidade real
         # na disputa por um lead entre atendentes.
-        read_only_fields = ["id", "company", "contact", "contact_name", "created_at", "state", "last_audio_id", "bot_closed", "pedido_humano_pendente", "situacao_especial", "last_contact", "owner", "mode", "desfecho", "variaveis_roteiro", "urgencia_detalhe", "etapa_atendimento", "desfecho_pendente", "origem_manual"]
+        read_only_fields = ["id", "company", "contact", "contact_name", "created_at", "state", "last_audio_id", "bot_closed", "pedido_humano_pendente", "situacao_especial", "last_contact", "owner", "mode", "desfecho", "variaveis_roteiro", "urgencia_detalhe", "etapa_atendimento", "desfecho_pendente", "origem_manual", "despachado_pela_empresa"]
 
     def to_representation(self, obj):
         dados = super().to_representation(obj)

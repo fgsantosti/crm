@@ -1732,6 +1732,10 @@ def despachar_situacao_especial(lead_id, user, desfecho="encerrado", especialida
     if not lead.owner_id and not user.is_staff:
         lead.owner = user
         campos.append("owner")
+    elif not lead.owner_id and user.is_staff:
+        # A Empresa não vira responsável; fica a marca para o Dashboard não mostrar "—".
+        lead.despachado_pela_empresa = True
+        campos.append("despachado_pela_empresa")
     if desfecho == "bloqueado":
         Blacklist.objects.get_or_create(
             company=lead.company, contact=lead.contact,
@@ -1886,6 +1890,12 @@ def contexto_agente(company):
         "regra_classificacao": (company.classificacao_regra or "").strip(),
     }
 
+ROTULO_DESPACHO_EMPRESA = "Despachado pela Empresa"
+
+def _responsavel_exibido(r, nomes):
+    """Nome do responsável; sem responsável e despachado pela conta Empresa, o rótulo dessa origem."""
+    return nomes.get(r["owner"], "") or (ROTULO_DESPACHO_EMPRESA if r.get("despachado_pela_empresa") else "")
+
 def _categoria_status(lead):
     """Categoria exclusiva (cada lead cai em exatamente uma) usada no donut/tiles do Dashboard:
     especial (Outras situações), desqualificado, despachado, automatico (em triagem), aguardando
@@ -1961,7 +1971,7 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
     rows = list(qs.values(
         "id", "name", "contact", "created_at", "concluido_em", "desfecho", "bot_closed", "mode",
         "temperature", "priority", "especialidade", "owner", "origem_manual", "demand", "etapa_atendimento", "situacao_especial",
-        "urgencia_detalhe",
+        "urgencia_detalhe", "despachado_pela_empresa",
     ))
     User = get_user_model()
     nomes = {u.pk: _nome_usuario(u) for u in User.objects.filter(pk__in={r["owner"] for r in rows if r["owner"]}).select_related("profile")}
@@ -2023,7 +2033,7 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
                 "id": str(r["id"]), "name": r["name"], "contact": r["contact"],
                 "demand": r["demand"], "especialidade": r["especialidade"],
                 "temperature": r["temperature"], "priority": r["priority"],
-                "owner": nomes.get(r["owner"], ""), "created_at": r["created_at"],
+                "owner": _responsavel_exibido(r, nomes), "created_at": r["created_at"],
                 "desfecho": r["desfecho"], "origem_manual": r["origem_manual"],
                 "categoria_status": _categoria_status(r),
                 "triagem_concluida": _triagem_concluida_dashboard(r),
@@ -2035,7 +2045,7 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
             {
                 "id": str(r["id"]), "name": r["name"], "contact": r["contact"],
                 "temperature": r["temperature"], "priority": r["priority"], "especialidade": r["especialidade"],
-                "desfecho": r["desfecho"], "owner_id": r["owner"], "owner": nomes.get(r["owner"], ""),
+                "desfecho": r["desfecho"], "owner_id": r["owner"], "owner": _responsavel_exibido(r, nomes),
                 "concluido_em": r["concluido_em"], "created_at": r["created_at"], "origem_manual": r["origem_manual"],
             }
             for r in concluidos

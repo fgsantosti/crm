@@ -337,6 +337,7 @@ class Lead(models.Model):
         help_text="Cliente pediu humano, mas o agente ainda está coletando as variáveis mínimas obrigatórias.",
     )
     notes = models.TextField(blank=True)
+    despachado_pela_empresa = models.BooleanField(default=False, help_text="Acompanhamento de Outras situações despachado pela conta Empresa sem responsável: no lugar do responsável o Dashboard mostra \"Despachado pela Empresa\".")
     urgencia_detalhe = models.JSONField(default=dict, blank=True, help_text="Auditoria do CLASSIFICADO por notas: {notas, pesos, score, temperatura_calculada} (ver services.calcular_urgencia).")
     variaveis_roteiro = models.JSONField(default=dict, blank=True, help_text="slug->texto coletado nas perguntas com Variável de roteiro customizada (ver services.apply_fields/render_text). Os 3 builtin (nome/especialidade/tema) não usam isto -- já são campos próprios do Lead.")
     desfecho = models.CharField(max_length=20, choices=DESFECHO_CHOICES, blank=True, help_text="Definitivo: setado ao despachar (services.enviar_despachos) ou automaticamente ao classificar como Desqualificado/Desconfiado. Lead some do Kanban quando preenchido.")
