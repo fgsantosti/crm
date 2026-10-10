@@ -173,6 +173,8 @@ export type Area = {
   name: string;
   /** Etapa Inicial com várias SPINs: palavras-chave (separadas por vírgula) que ajudam o agente a reconhecer a área. */
   palavras_chave: string;
+  /** Fora de escopo: existe em toda empresa e não pode ser removida nem renomeada. */
+  fixa?: boolean;
 };
 
 export type AtendenteInvite = {

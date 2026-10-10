@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Api } from '../api';
-import type { Area, AtendenteInvite, Company, EquipeMembro, Paginated } from '../types';
+import type { AtendenteInvite, Company, EquipeMembro, Paginated } from '../types';
 import { SkeletonCards, Spinner } from '../components/Skeleton';
 import { Avatar } from '../components/ProfileMenu';
 import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
@@ -8,13 +8,10 @@ import { ConfirmPessoa, useConfirmar } from '../components/ConfirmDialog';
 export function Equipe({ api, company }: { api: Api; company: Company }) {
   const confirmar = useConfirmar();
   const [membros, setMembros] = useState<EquipeMembro[]>([]);
-  const [areas, setAreas] = useState<Area[]>([]);
   const [convites, setConvites] = useState<AtendenteInvite[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [savingArea, setSavingArea] = useState<number | 'new' | null>(null);
   const [savingConvite, setSavingConvite] = useState(false);
-  const [newArea, setNewArea] = useState('');
   const [membroAction, setMembroAction] = useState<number | null>(null);
 
   function load() {
@@ -22,12 +19,10 @@ export function Equipe({ api, company }: { api: Api; company: Company }) {
     setError('');
     Promise.all([
       api(`/companies/${company.id}/equipe/`),
-      api(`/areas/?company=${company.id}`),
       api(`/convites/?company=${company.id}`),
     ])
-      .then(([membrosData, areasData, convitesData]: [EquipeMembro[], Paginated<Area>, Paginated<AtendenteInvite>]) => {
+      .then(([membrosData, convitesData]: [EquipeMembro[], Paginated<AtendenteInvite>]) => {
         setMembros(membrosData);
-        setAreas(areasData.results);
         setConvites(convitesData.results);
       })
       .catch((e) => setError(e.message))
@@ -38,36 +33,6 @@ export function Equipe({ api, company }: { api: Api; company: Company }) {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company.id]);
-
-  async function addArea(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!newArea.trim()) return;
-    setSavingArea('new');
-    setError('');
-    try {
-      const created = await api(`/areas/?company=${company.id}`, { method: 'POST', body: JSON.stringify({ name: newArea.trim() }) });
-      setAreas((v) => [...v, created].sort((a, b) => a.name.localeCompare(b.name)));
-      setNewArea('');
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSavingArea(null);
-    }
-  }
-
-  async function removeArea(area: Area) {
-    if (!(await confirmar({ titulo: `Remover a área "${area.name}"?`, mensagem: 'Leads já classificados com ela mantêm o registro.', tom: 'atencao', icone: 'lixeira', confirmar: 'Remover área' }))) return;
-    setSavingArea(area.id);
-    setError('');
-    try {
-      await api(`/areas/${area.id}/?company=${company.id}`, { method: 'DELETE' });
-      setAreas((v) => v.filter((a) => a.id !== area.id));
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSavingArea(null);
-    }
-  }
 
   async function convidar(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -134,7 +99,7 @@ export function Equipe({ api, company }: { api: Api; company: Company }) {
         <div>
           <small className="eyebrow">Pessoas e organização</small>
           <h1>Equipe</h1>
-          <p>Cadastre atendentes e as áreas de atendimento usadas na classificação de leads.</p>
+          <p>Cadastre e acompanhe os atendentes da empresa. As áreas de atendimento ficam em Dados da empresa.</p>
         </div>
       </header>
 
@@ -144,7 +109,7 @@ export function Equipe({ api, company }: { api: Api; company: Company }) {
         </p>
       )}
 
-      {busy && !membros.length && !areas.length ? (
+      {busy && !membros.length ? (
         <SkeletonCards count={3} height={100} />
       ) : (
         <>
@@ -245,35 +210,6 @@ export function Equipe({ api, company }: { api: Api; company: Company }) {
                 </tbody>
               </table>
               {!convites.length && <div className="empty">Nenhum convite enviado ainda.</div>}
-            </div>
-          </section>
-
-          <section className="panel">
-            <div className="panel-toolbar">
-              <h2>Áreas de atendimento</h2>
-            </div>
-            <form onSubmit={addArea} style={{ display: 'flex', gap: 10, padding: '0 24px 16px' }}>
-              <input placeholder="Nova área" value={newArea} onChange={(e) => setNewArea(e.target.value)} style={{ flex: 1 }} />
-              <button disabled={savingArea === 'new'}>
-                {savingArea === 'new' && <Spinner />}+ Adicionar
-              </button>
-            </form>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, padding: '0 24px 24px' }}>
-              {areas.map((area) => (
-                <span key={area.id} className="tag-pill" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {area.name}
-                  <button
-                    type="button"
-                    aria-label={`Remover área ${area.name}`}
-                    onClick={() => removeArea(area)}
-                    disabled={savingArea === area.id}
-                    style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', color: 'inherit' }}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-              {!areas.length && <div className="empty">Nenhuma área cadastrada ainda.</div>}
             </div>
           </section>
         </>

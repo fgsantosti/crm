@@ -1137,3 +1137,20 @@ nav.adm-caminho { flex-direction: row; justify-content: flex-start; align-items:
 .var-card .danger-outline, .var-espaco { width: 104px; justify-self: end; }
 .var-espaco { height: 1px; display: block; }
 @media (max-width: 760px) { .var-card { grid-template-columns: 12px 1fr; } .var-card .var-peso { grid-column: 2; } .var-card .danger-outline { grid-column: 2; justify-self: start; } .var-espaco { display: none; } }
+
+/* Dados da empresa: como o agente usa, áreas e entradas em acordeão */
+.dados-como { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px 24px; margin-bottom: 18px; }
+.dados-como h2 { font-size: 18px; margin: 0 0 12px; }
+.dados-como ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 14px; counter-reset: passo; }
+.dados-como li { counter-increment: passo; display: flex; flex-direction: column; gap: 6px; position: relative; padding-left: 38px; font-size: 13.5px; line-height: 1.55; color: #4E4136; }
+.dados-como li::before { content: counter(passo); position: absolute; left: 0; top: 0; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+.dados-como li strong { color: var(--ink); font-size: 14px; }
+.dados-areas { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 12px; }
+.dados-area { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; transition: border-color .15s, box-shadow .15s; }
+.dados-area:hover { border-color: #E2CDB4; }
+.dados-area > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.dados-area small { color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.dados-area-fixa { background: #F7F1E8; border-style: dashed; order: 99; }
+.dados-cadeado { color: var(--muted); display: flex; }
+.dados-nova { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-top: 12px; }
+.dados-areas + .rot-adicionar, .dados-areas + .dados-nova { margin-top: 14px; }

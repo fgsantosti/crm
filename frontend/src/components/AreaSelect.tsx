@@ -9,7 +9,7 @@ export function AreaSelect({ api, companyId, value, onChange }: { api: Api; comp
   useEffect(() => {
     let active = true;
     fetchTodasAsPaginas<Area>(api, `/areas/?company=${companyId}`)
-      .then((todas) => active && setAreas(todas))
+      .then((todas) => active && setAreas(todas.filter((a) => !a.fixa))) // despacho humano não usa "Fora de escopo"
       .catch(() => undefined);
     return () => {
       active = false;
