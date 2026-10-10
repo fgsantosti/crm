@@ -1,4 +1,4 @@
-# Conecta CRM
+# Conecta Axioma CRM
 
 Base de CRM multiempresa para qualificação de leads de WhatsApp. Backend Django REST Framework, PostgreSQL e frontend React + TypeScript + Vite.
 

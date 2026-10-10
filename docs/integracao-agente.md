@@ -1,8 +1,8 @@
-# Integração de um agent com o Conecta CRM
+# Integração de um agent com o Conecta Axioma CRM
 
 Este documento é **genérico**: serve para integrar **qualquer agent**
 (qualquer nome, qualquer plataforma/runtime de agent — OpenClaw ou outro) e
-seu Gateway WhatsApp ao Conecta CRM via API, em vez de planilha ou qualquer
+seu Gateway WhatsApp ao Conecta Axioma CRM via API, em vez de planilha ou qualquer
 outro armazenamento local. Não é específico de nenhuma instância de agent
 nem de nenhum plugin — se você está montando um Gateway do zero, ver também
 `BUILD_PROMPT.md`.
