@@ -50,33 +50,39 @@ gere um token novo nesse ambiente (mesmo procedimento, outro host) e nunca
 reaproveite o de dev. O token não deve ser salvo em código ou planilha — só em
 variável de ambiente/cofre do lado do plugin.
 
-**Validade:** por padrão o token não expira (igual sempre foi). Opcionalmente,
-na tela `Tokens` do Django Admin dá pra definir uma validade por tempo — a
-empresa recebe um campo "Validade" no token (inline `AgentTokenExpiry`),
-padrão sugerido de 6 meses, teto de 2 anos a partir de hoje. Passado esse
-prazo, o token para de autenticar (`401 Token expirado.`) e precisa ser
-renovado manualmente no Admin — não há renovação automática.
+**Quem autentica com token fixo:** só a conta de serviço do agente, ou seja, um
+usuário do grupo Django `agente` **com validade** cadastrada (`AgentTokenExpiry`).
+Token de qualquer outro usuário (por exemplo, criado à mão para uma conta Empresa)
+e token de agente **sem** validade são recusados com `401`. Gere e renove pelo
+Painel Admin (Empresas → credenciais do agente), que já cria a validade: padrão de
+6 meses, teto de 2 anos. Passado o prazo, o token para de autenticar (`401 Token
+expirado.`) e precisa ser renovado; não há renovação automática.
 
-Para gerar um token de verdade mais pra frente (quando a empresa real for
-cadastrada em produção), o fluxo é:
+**Rotas exclusivas da conta do agente:** `/incoming/`, `/delivery/`,
+`/agente/contexto/`, `/agente/contato/` e `/agente/lembretes/` respondem `403`
+para atendentes e contas Empresa (eles usam a tela, nunca essas rotas). Cada
+evento criado pelo `/incoming/` grava a conta que chamou (`Event.autor`). Na
+direção oposta, a conta do agente não alcança as rotas de perfil
+(`/api/me/*`, `/api/trocar-senha/`) nem as de dados do CRM (leads, roteiro,
+equipe).
+
+Para gerar um token de verdade pelo shell (o caminho normal é o Painel Admin):
 
 ```python
 # manage.py shell, no ambiente de produção
-from django.contrib.auth.models import User
-from crm.models import Company
+from datetime import timedelta
+from django.contrib.auth.models import Group, User
+from django.utils import timezone
+from crm.models import AgentTokenExpiry, Company
 from rest_framework.authtoken.models import Token
 
 company = Company.objects.get(name="<nome da empresa real>")
 user = User.objects.create_user(username="agente.<slug-da-empresa>")
+user.groups.add(Group.objects.get_or_create(name="agente")[0])  # obrigatório
 company.members.add(user)
 token = Token.objects.create(user=user)
+AgentTokenExpiry.objects.create(token=token, expires_at=timezone.now() + timedelta(days=183))  # obrigatório
 print(token.key)
-
-# Opcional: validade por tempo (sem isso, o token nunca expira)
-from datetime import timedelta
-from django.utils import timezone
-from crm.models import AgentTokenExpiry
-AgentTokenExpiry.objects.create(token=token, expires_at=timezone.now() + timedelta(days=183))  # 6 meses
 ```
 
 Alternativa sem shell: criar o usuário pelo Django Admin (`/admin/`), vincular
