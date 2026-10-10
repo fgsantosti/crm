@@ -9,3 +9,6 @@ dist/
 staticfiles/
 celerybeat.pid
 celerybeat-schedule*
+# Arquivos enviados em desenvolvimento (avatares, logos, comprovantes): nunca versionar.
+backend/media/
+backend/privado/

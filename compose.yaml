@@ -59,6 +59,8 @@ services:
     <<: *backend
     volumes:
       - media_data:/app/media
+      # Comprovantes de pagamento: volume que o proxy NÃO monta (nunca saem por /media/).
+      - private_data:/app/privado
     depends_on:
       setup:
         condition: service_completed_successfully
@@ -106,3 +108,4 @@ volumes:
   redis_data:
   static_data:
   media_data:
+  private_data:
