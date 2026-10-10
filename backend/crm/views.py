@@ -14,8 +14,9 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, Toke
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from .models import Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, VariavelRoteiro, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
-from .serializers import BlacklistSerializer, CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer, VariavelRoteiroSerializer
+from . import billing
+from .models import Cobranca, Gestor, Pagamento, Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, VariavelRoteiro, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
+from .serializers import GestorSerializer, RegraCobrancaSerializer, BlacklistSerializer, CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer, VariavelRoteiroSerializer
 from .services import (
     aplicar_audio,
     assumir_situacao_especial as assumir_situacao_especial_service,
@@ -938,3 +939,71 @@ class AdminPrecosView(APIView):
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
         return Response(tabela_de_precos(), status=201)
+
+
+class AdminGestorViewSet(viewsets.ModelViewSet):
+    """Painel Admin, Gestores: cliente que paga e as empresas dele. Só superusuário (visão cross-tenant)."""
+    queryset = Gestor.objects.all().order_by("nome")
+    serializer_class = GestorSerializer
+    permission_classes = [IsSuperUser]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+    def perform_destroy(self, instance):
+        # As empresas ficam (só perdem o gestor); cobranças e pagamentos dele vão junto.
+        instance.delete()
+    @action(detail=True, methods=["post"])
+    def vincular(self, request, pk=None):
+        gestor = self.get_object()
+        company = get_object_or_404(Company, pk=request.data.get("company_id"))
+        company.gestor = gestor
+        company.save(update_fields=["gestor"])
+        return Response(GestorSerializer(gestor).data)
+    @action(detail=True, methods=["post"])
+    def desvincular(self, request, pk=None):
+        gestor = self.get_object()
+        Company.objects.filter(pk=request.data.get("company_id"), gestor=gestor).update(gestor=None)
+        return Response(GestorSerializer(gestor).data)
+    @action(detail=True, methods=["post"])
+    def implantacao(self, request, pk=None):
+        """Emite a cobrança única de implantação (com o abatimento do piloto, se a regra estiver ligada)."""
+        try:
+            cobranca = billing.gerar_implantacao(self.get_object())
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(billing._item_cobranca(cobranca, timezone.localdate()), status=201)
+
+class AdminFaturamentoView(APIView):
+    """GET /api/admin-faturamento/?mes=AAAA-MM: KPIs, cobranças do mês (por gestor/empresa/agente), inadimplência, pagamentos e contratos."""
+    permission_classes = [IsSuperUser]
+    def get(self, request):
+        try:
+            ref = billing.parse_mes(request.query_params.get("mes"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(billing.resumo_faturamento(ref))
+
+class AdminPagamentoView(APIView):
+    """POST /api/admin-cobrancas/{id}/pagamentos/ registra um recebimento; DELETE /api/admin-pagamentos/{id}/ o desfaz."""
+    permission_classes = [IsSuperUser]
+    def post(self, request, cobranca_id):
+        cobranca = get_object_or_404(Cobranca, pk=cobranca_id)
+        try:
+            billing.registrar_pagamento(cobranca, request.data.get("data"), request.data.get("valor"), request.data.get("forma") or "", request.data.get("comprovante") or "", request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        return Response(billing._item_cobranca(cobranca, timezone.localdate()), status=201)
+    def delete(self, request, pagamento_id):
+        pagamento = get_object_or_404(Pagamento, pk=pagamento_id)
+        cobranca = pagamento.cobranca
+        pagamento.delete()
+        return Response(billing._item_cobranca(cobranca, timezone.localdate()))
+
+class AdminRegrasCobrancaView(APIView):
+    """Regras de cobrança da plataforma (pro-rata, desconto por tempo, abatimento do piloto, reajuste, faixas de atraso)."""
+    permission_classes = [IsSuperUser]
+    def get(self, request):
+        return Response(RegraCobrancaSerializer(billing.regra()).data)
+    def patch(self, request):
+        ser = RegraCobrancaSerializer(billing.regra(), data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        return Response(ser.data)

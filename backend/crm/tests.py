@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.test import Client, TestCase
@@ -4330,3 +4331,126 @@ class CobrancasPrecosETesteTests(TestCase):
         Company.objects.create(name="Piloto Ltda", em_teste=True)
         itens = {i["item"]: i for i in tabela_de_precos()["itens"]}
         self.assertEqual((itens["piloto"]["em_uso"], itens["base"]["em_uso"]), (1, 1))
+
+
+class FaturamentoDoAdminTests(TestCase):
+    def setUp(self):
+        from datetime import date
+        from django.contrib.auth.models import Group
+        self.admin = get_user_model().objects.create_superuser("adm-fat", password="x")
+        self.api = APIClient(); self.api.force_authenticate(self.admin)
+        self.gestor = self.api.post("/api/admin-gestores/", {"nome": "Paulo Menezes", "email": "paulo@menezes.example", "dia_vencimento": 15, "forma_pagamento": "boleto", "contrato_inicio": "2025-01-10"}, format="json").json()
+        grupo, _ = Group.objects.get_or_create(name="agente")
+        self.empresas = []
+        for nome, n_agentes in (("Menezes A", 2), ("Menezes B", 1)):
+            c = Company.objects.create(name=nome)
+            for i in range(n_agentes):
+                u = get_user_model().objects.create_user(f"agente.{nome[-1].lower()}{i}", password="x")
+                u.groups.add(grupo); c.members.add(u)
+            self.api.post(f"/api/admin-gestores/{self.gestor['id']}/vincular/", {"company_id": c.pk}, format="json")
+            self.empresas.append(c)
+        self.mes = date(2026, 10, 1)
+
+    def fat(self, mes="2026-10"):
+        return self.api.get(f"/api/admin-faturamento/?mes={mes}").json()
+
+    def test_so_superusuario(self):
+        comum = APIClient(); comum.force_authenticate(get_user_model().objects.create_user("emp-fat", password="x", is_staff=True))
+        for url in ("/api/admin-faturamento/", "/api/admin-gestores/", "/api/admin-regras-cobranca/"):
+            self.assertEqual(comum.get(url).status_code, 403, url)
+
+    def test_mensalidade_base_mais_empresa_e_agente_adicional_com_desconto_por_tempo(self):
+        d = self.fat()
+        c = next(x for x in d["cobrancas"] if x["tipo"] == "mensalidade")
+        # 890 base + 400 agente adicional + 890 empresa adicional = 2.180; contrato desde 01/2025: 21 meses -> 5% (12 meses)
+        descricoes = [l["descricao"] for l in c["linhas"]]
+        self.assertEqual(descricoes[:3], ["Conta de empresa (plano base) · Menezes A", "Agente adicional · Menezes A", "Empresa adicional · Menezes B"])
+        self.assertTrue(any("Desconto por tempo de contrato (5%)" in x for x in descricoes))
+        self.assertEqual(c["valor"], "2071.00")  # 2180 - 5%
+        self.assertEqual(d["kpis"]["previsto"], "2071.00")
+        self.assertEqual({e["empresa"] for e in d["por_empresa"]}, {"Menezes A", "Menezes B"})
+        self.assertEqual(len(d["por_agente"]), 3)
+
+    def test_pro_rata_no_mes_de_inicio_do_contrato(self):
+        self.api.patch(f"/api/admin-gestores/{self.gestor['id']}/", {"contrato_inicio": "2026-10-21"}, format="json")
+        c = next(x for x in self.fat()["cobrancas"] if x["tipo"] == "mensalidade")
+        self.assertTrue(any("Pro-rata do 1º mês (11 de 31 dias)" in l["descricao"] for l in c["linhas"]))
+        self.assertEqual(c["valor"], "773.55")  # 2180 * 11/31
+
+    def test_emitida_uma_vez_e_valor_fotografado(self):
+        from .models import Cobranca
+        self.fat()
+        self.api.post("/api/admin-precos/", {"item": "base", "valor": "1000", "vigente_desde": "2026-01-02", "escopo": "todos"}, format="json")
+        self.fat()
+        self.assertEqual(Cobranca.objects.filter(tipo="mensalidade", referencia=self.mes).count(), 1)
+        self.assertEqual(Cobranca.objects.get(tipo="mensalidade").valor, Decimal("2071.00"))  # não mudou depois da alteração de preço
+
+    def test_pagamento_parcial_quitacao_e_desfazer(self):
+        cobranca = next(x for x in self.fat()["cobrancas"] if x["tipo"] == "mensalidade")
+        url = f"/api/admin-cobrancas/{cobranca['id']}/pagamentos/"
+        r = self.api.post(url, {"data": "2026-10-10", "valor": "1000", "forma": "pix", "comprovante": "pix-1010.pdf"}, format="json")
+        self.assertEqual((r.status_code, r.json()["pago"]), (201, "1000.00"))
+        self.assertNotEqual(r.json()["status"], "recebido")
+        self.assertEqual(self.api.post(url, {"valor": "99999"}, format="json").status_code, 400)
+        r = self.api.post(url, {}, format="json")  # valor em branco = saldo
+        self.assertEqual((r.json()["status"], r.json()["saldo"]), ("recebido", "0.00"))
+        self.assertEqual(self.api.post(url, {}, format="json").status_code, 400)  # já quitada
+        d = self.fat()
+        self.assertEqual(d["kpis"]["recebido"], "2071.00")
+        self.assertEqual(d["pagamentos"][0]["por"], self.admin.username)
+        from .models import Pagamento
+        pid = Pagamento.objects.first().pk
+        r = self.api.delete(f"/api/admin-pagamentos/{pid}/")
+        self.assertNotEqual(r.json()["status"], "recebido")
+
+    def test_inadimplencia_por_faixa(self):
+        from datetime import date, timedelta
+        from .models import Cobranca
+        self.fat("2026-09")
+        c = Cobranca.objects.get(tipo="mensalidade", referencia=date(2026, 9, 1))
+        from .billing import estado_da_cobranca
+        e = estado_da_cobranca(c, c.vencimento + timedelta(days=9))
+        self.assertEqual((e["status"], e["faixa"], e["dias_atraso"]), ("em_atraso", 2, 9))
+        self.assertEqual(estado_da_cobranca(c, c.vencimento + timedelta(days=3))["faixa"], 1)
+        self.assertEqual(estado_da_cobranca(c, c.vencimento + timedelta(days=20))["faixa"], 3)
+        self.assertEqual(estado_da_cobranca(c, c.vencimento)["status"], "a_receber")
+
+    def test_empresa_em_teste_cobra_piloto_e_implantacao_abate_o_piloto(self):
+        from datetime import date
+        from .models import Cobranca
+        piloto = Company.objects.create(name="Piloto Ltda")
+        gest2 = self.api.post("/api/admin-gestores/", {"nome": "Camila", "dia_vencimento": 10}, format="json").json()
+        self.api.post(f"/api/admin-gestores/{gest2['id']}/vincular/", {"company_id": piloto.pk}, format="json")
+        self.api.post(f"/api/admin-companies/{piloto.pk}/teste/", {"em_teste": True, "inicio": "2026-10-12", "dias": 30}, format="json")
+        d = self.fat()
+        p = next(x for x in d["cobrancas"] if x["tipo"] == "piloto")
+        self.assertEqual((p["gestor"], p["valor"]), ("Camila", "2900.00"))
+        self.assertFalse(any(x["gestor"] == "Camila" and x["tipo"] == "mensalidade" for x in d["cobrancas"]))  # em teste não cobra mensalidade
+        self.api.post(f"/api/admin-cobrancas/{p['id']}/pagamentos/", {}, format="json")
+        r = self.api.post(f"/api/admin-gestores/{gest2['id']}/implantacao/", format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["valor"], "3000.00")  # 5900 - 100% do piloto pago (2900)
+        self.assertEqual(self.api.post(f"/api/admin-gestores/{gest2['id']}/implantacao/", format="json").status_code, 400)
+
+    def test_contratos_alertam_reajuste_a_60_dias(self):
+        from datetime import date, timedelta
+        from .billing import contratos
+        hoje = date(2026, 12, 20)
+        c = next(x for x in contratos(hoje) if x["gestor"] == "Paulo Menezes")
+        self.assertEqual(str(c["proximo_reajuste"]), "2027-01-10")
+        self.assertTrue(c["alerta_reajuste"])
+        self.assertEqual(c["desconto_por_tempo_pct"], 5)
+
+    def test_regras_de_cobranca_validam_e_gravam(self):
+        r = self.api.patch("/api/admin-regras-cobranca/", {"descontos": [[24, 10], [12, 5]], "faixa_atraso_curta": 7, "faixa_atraso_media": 20}, format="json")
+        self.assertEqual((r.status_code, r.json()["descontos"]), (200, [[12, 5], [24, 10]]))
+        self.assertEqual(self.api.patch("/api/admin-regras-cobranca/", {"faixa_atraso_curta": 20, "faixa_atraso_media": 10}, format="json").status_code, 400)
+        self.assertEqual(self.api.patch("/api/admin-regras-cobranca/", {"descontos": [[0, 500]]}, format="json").status_code, 400)
+
+    def test_gestor_vincular_desvincular_e_excluir_mantem_empresas(self):
+        gid = self.gestor["id"]
+        r = self.api.post(f"/api/admin-gestores/{gid}/desvincular/", {"company_id": self.empresas[0].pk}, format="json")
+        self.assertEqual([e["name"] for e in r.json()["empresas"]], ["Menezes B"])
+        self.api.delete(f"/api/admin-gestores/{gid}/")
+        self.empresas[1].refresh_from_db()
+        self.assertIsNone(self.empresas[1].gestor_id)

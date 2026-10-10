@@ -1,7 +1,7 @@
 import re
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, VariavelRoteiro, MANDATORY_OFFFLOW_QUESTION_IDS, MANDATORY_QUESTION_IDS, SITUACOES_ESPECIAIS
+from .models import Gestor, RegraCobranca, Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, VariavelRoteiro, MANDATORY_OFFFLOW_QUESTION_IDS, MANDATORY_QUESTION_IDS, SITUACOES_ESPECIAIS
 
 # Obrigatórias que nunca entram numa lista SPIN (a área só é conhecida depois delas).
 FIXED_QUESTION_IDS = {"nome", "situacao"}
@@ -426,3 +426,46 @@ class BlacklistSerializer(serializers.ModelSerializer):
         model = Blacklist
         fields = ["id", "contact", "motivo", "adicionado_por", "adicionado_por_nome", "created_at"]
         read_only_fields = ["id", "adicionado_por", "adicionado_por_nome", "created_at"]
+
+
+class GestorSerializer(serializers.ModelSerializer):
+    """Painel Admin: cliente que paga. As empresas vinculam-se por actions (vincular/desvincular), não por este campo."""
+    empresas = serializers.SerializerMethodField()
+    usuario_email = serializers.SerializerMethodField()
+    class Meta:
+        model = Gestor
+        fields = ["id", "nome", "email", "usuario", "usuario_email", "dia_vencimento", "forma_pagamento", "contrato_inicio", "indice_reajuste", "notas", "empresas", "criado_em"]
+        read_only_fields = ["id", "empresas", "usuario_email", "criado_em"]
+    def get_empresas(self, obj):
+        return [{"id": c.pk, "name": c.name, "em_teste": c.em_teste} for c in obj.empresas.order_by("id")]
+    def get_usuario_email(self, obj):
+        return (obj.usuario.email or obj.usuario.username) if obj.usuario else ""
+    def validate_nome(self, valor):
+        valor = (valor or "").strip()
+        if not valor:
+            raise serializers.ValidationError("Informe o nome do gestor.")
+        return valor
+    def validate_dia_vencimento(self, valor):
+        if valor < 1 or valor > 28:
+            raise serializers.ValidationError("O dia de vencimento fica entre 1 e 28.")
+        return valor
+
+class RegraCobrancaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RegraCobranca
+        fields = ["id", "prorata_ativo", "descontos", "abater_piloto", "abatimento_pct", "indice_padrao", "alerta_reajuste_dias", "faixa_atraso_curta", "faixa_atraso_media", "aviso_desligamento_dias"]
+        read_only_fields = ["id"]
+    def validate_descontos(self, valor):
+        try:
+            limpo = sorted([[int(m), int(p)] for m, p in valor])
+        except (TypeError, ValueError):
+            raise serializers.ValidationError("Use pares [meses, percentual].")
+        if any(m < 1 or p < 1 or p > 100 for m, p in limpo):
+            raise serializers.ValidationError("Meses a partir de 1 e percentual de 1 a 100.")
+        return limpo
+    def validate(self, attrs):
+        curta = attrs.get("faixa_atraso_curta", getattr(self.instance, "faixa_atraso_curta", 5))
+        media = attrs.get("faixa_atraso_media", getattr(self.instance, "faixa_atraso_media", 15))
+        if curta < 1 or media <= curta:
+            raise serializers.ValidationError({"faixa_atraso_media": "A 2ª faixa precisa terminar depois da 1ª."})
+        return attrs

@@ -15,6 +15,7 @@ class Company(models.Model):
     allow_transcription = models.BooleanField(default=False)
     # Portão do Admin: com ele ligado, o CRM guarda as mensagens do cliente (e transcrições de áudio) de cada
     # lead, da primeira até a que o classificou, para a equipe consultar em "Histórico de conversa".
+    gestor = models.ForeignKey("Gestor", null=True, blank=True, on_delete=models.SET_NULL, related_name="empresas", help_text="Cliente que paga por esta empresa (Painel Admin, Gestores).")
     em_teste = models.BooleanField(default=False, help_text="Empresa em fase de teste (piloto): cobra o valor do piloto em vez da mensalidade (Painel Admin, Cobranças).")
     teste_inicio = models.DateField(null=True, blank=True)
     teste_dias = models.PositiveSmallIntegerField(default=30, help_text="Duração do teste em dias (cresce com as prorrogações).")
@@ -439,3 +440,59 @@ class PrecoCobranca(models.Model):
     class Meta:
         ordering = ["-vigente_desde", "-id"]
         indexes = [models.Index(fields=["item", "-vigente_desde"])]
+
+
+class Gestor(models.Model):
+    """Cliente da Axioma: quem paga. Reúne as empresas dele (Company.gestor) e carrega os dados de cobrança e de contrato.
+    A conta Empresa (login) do gestor continua sendo um usuário membro das empresas; `usuario` só aponta qual é."""
+    FORMAS = [("pix", "PIX"), ("boleto", "Boleto"), ("cartao", "Cartão"), ("outro", "Outro")]
+    nome = models.CharField(max_length=160)
+    email = models.EmailField(blank=True, default="", help_text="E-mail de contato e de cobrança.")
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+", help_text="Conta Empresa (login) do gestor.")
+    dia_vencimento = models.PositiveSmallIntegerField(default=10, validators=[MinValueValidator(1), MaxValueValidator(28)])
+    forma_pagamento = models.CharField(max_length=10, choices=FORMAS, default="pix")
+    contrato_inicio = models.DateField(null=True, blank=True, help_text="Início do contrato: base do pro-rata, do desconto por tempo e do reajuste anual.")
+    indice_reajuste = models.CharField(max_length=20, default="IPCA")
+    notas = models.TextField(blank=True, default="")
+    criado_em = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        ordering = ["nome"]
+    def __str__(self): return self.nome
+
+class RegraCobranca(models.Model):
+    """Regras de cobrança da plataforma (uma linha só): pro-rata, desconto por tempo, abatimento do piloto, reajuste e faixas de atraso."""
+    prorata_ativo = models.BooleanField(default=True)
+    descontos = models.JSONField(default=list, blank=True, help_text='Lista [[meses_de_contrato, percentual], ...]; vale o maior percentual cujo prazo já passou. Ex.: [[12, 5], [24, 10]].')
+    abater_piloto = models.BooleanField(default=True)
+    abatimento_pct = models.PositiveSmallIntegerField(default=100)
+    indice_padrao = models.CharField(max_length=20, default="IPCA")
+    alerta_reajuste_dias = models.PositiveSmallIntegerField(default=60)
+    faixa_atraso_curta = models.PositiveSmallIntegerField(default=5)
+    faixa_atraso_media = models.PositiveSmallIntegerField(default=15)
+    aviso_desligamento_dias = models.PositiveSmallIntegerField(default=5)
+
+class Cobranca(models.Model):
+    """Cobrança emitida a um gestor. O valor e as linhas são fotografados na emissão: mudar a tabela de valores depois não
+    altera cobranças já emitidas. Estar pago = soma dos pagamentos >= valor."""
+    TIPOS = [("mensalidade", "Mensalidade"), ("piloto", "Piloto"), ("implantacao", "Implantação")]
+    gestor = models.ForeignKey(Gestor, on_delete=models.CASCADE, related_name="cobrancas")
+    tipo = models.CharField(max_length=12, choices=TIPOS, default="mensalidade")
+    referencia = models.DateField(help_text="Primeiro dia do mês de referência.")
+    vencimento = models.DateField()
+    valor = models.DecimalField(max_digits=10, decimal_places=2)
+    linhas = models.JSONField(default=list, blank=True, help_text="[{descricao, valor, empresa, agente}] (descontos entram com valor negativo).")
+    criado_em = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        ordering = ["-referencia", "-id"]
+        constraints = [models.UniqueConstraint(fields=["gestor", "tipo", "referencia"], name="unique_cobranca_gestor_tipo_mes")]
+
+class Pagamento(models.Model):
+    cobranca = models.ForeignKey(Cobranca, on_delete=models.CASCADE, related_name="pagamentos")
+    data = models.DateField()
+    valor = models.DecimalField(max_digits=10, decimal_places=2)
+    forma = models.CharField(max_length=10, choices=Gestor.FORMAS, default="pix")
+    comprovante = models.CharField(max_length=300, blank=True, default="", help_text="Nome do arquivo ou link do comprovante.")
+    registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    criado_em = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        ordering = ["-data", "-id"]
