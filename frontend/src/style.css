@@ -890,3 +890,28 @@ dialog[data-saindo]::backdrop { animation: popup-fundo-sai .17s ease-in forwards
 .chave-switch > span { width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(36,26,18,.3); }
 @media (max-width: 800px) { .cob-historico li { grid-template-columns: 1fr; gap: 4px; } }
 @media (prefers-reduced-motion: reduce) { .chave-switch { transition: none; } }
+.gestor-form { gap: 16px; }
+.gestor-form label { margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; }
+.gestor-form input, .gestor-form select { height: 44px; border-radius: 10px; }
+.gestor-lista { display: flex; flex-direction: column; gap: 14px; }
+.gestor-topo { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.gestor-topo h2 { font-size: 22px; }
+.gestor-empresas { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.gestor-empresas li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line-soft); }
+.gestor-empresas li strong { flex: 1; font-weight: 600; }
+.gestor-empresas li button { padding: 6px 12px; font-size: 12px; }
+.gestor-vincular { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.fat-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 14px; }
+.fat-kpis .dash-card { padding: 18px 20px; gap: 6px; border-radius: 16px; }
+.fat-kpis strong { font-family: 'Neuton', serif; font-size: 32px; font-weight: 800; line-height: 1.1; }
+.fat-composicao { font-size: 12.5px; color: #4E4136; line-height: 1.5; max-width: 420px; }
+.fat-contratos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.fat-contratos li { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line-soft); font-size: 13px; }
+.fat-contrato-topo { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.fat-faixas { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 14px; }
+.fat-faixas article { border: 1px solid var(--line); border-top: 5px solid; border-radius: 16px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
+.fat-faixa-valor { font-family: 'Neuton', serif; font-size: 28px; font-weight: 800; line-height: 1.1; }
+.fat-atrasados { list-style: none; margin: 0; padding: 0; }
+.fat-atrasados li { padding: 12px 0; border-top: 1px solid var(--line-soft); }
+.fat-atrasados small { display: block; color: var(--muted); }

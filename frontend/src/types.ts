@@ -271,3 +271,41 @@ export type AdminContaEmpresa = {
   date_joined: string;
   companies: string[];
 };
+
+
+export type GestorEmpresa = { id: number; name: string; em_teste: boolean };
+export type Gestor = {
+  id: number;
+  nome: string;
+  email: string;
+  usuario: number | null;
+  usuario_email: string;
+  dia_vencimento: number;
+  forma_pagamento: 'pix' | 'boleto' | 'cartao' | 'outro';
+  contrato_inicio: string | null;
+  indice_reajuste: string;
+  notas: string;
+  empresas: GestorEmpresa[];
+};
+
+export type CobrancaItem = {
+  id: number; gestor_id: number; gestor: string; forma: string; tipo: 'mensalidade' | 'piloto' | 'implantacao'; tipo_rotulo: string;
+  referencia: string; vencimento: string; valor: string; pago: string; saldo: string;
+  status: 'recebido' | 'a_receber' | 'em_atraso' | 'sem_cobranca'; dias_atraso: number; faixa: number;
+  linhas: { descricao: string; valor: string; empresa: string; agente: string }[]; recebido_em: string | null;
+};
+export type Faturamento = {
+  mes: string;
+  kpis: { previsto: string; recebido: string; a_receber: string; em_atraso: string };
+  cobrancas: CobrancaItem[];
+  por_empresa: { empresa: string; gestor: string; valor: string; linhas: string[] }[];
+  por_agente: { agente: string; empresa: string; gestor: string; valor: string; linhas: string[] }[];
+  inadimplencia: {
+    faixas: { faixa: number; n: number; valor: string }[];
+    atrasados: { cobranca_id: number; gestor: string; tipo_rotulo: string; saldo: string; vencimento: string; dias_atraso: number; faixa: number }[];
+    limites: { curta: number; media: number; aviso_desligamento_dias: number };
+  };
+  pagamentos: { id: number; data: string; gestor: string; referencia: string; valor: string; forma: string; comprovante: string; por: string }[];
+  contratos: { gestor_id: number; gestor: string; contrato_inicio: string | null; indice: string; proximo_reajuste: string | null; dias_para_reajuste: number | null; alerta_reajuste: boolean; desconto_por_tempo_pct: number; implantacao: string; em_teste: boolean }[];
+  recorrente: { mes: string; valor: string; projecao: boolean }[];
+};

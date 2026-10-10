@@ -6,12 +6,14 @@ import type { Api } from '../api';
 import type { Me } from '../types';
 import { confirmarSaida, useConfirmar } from './ConfirmDialog';
 
-export type AdminView = 'dashboard' | 'equipe' | 'painel' | 'cobrancas';
+export type AdminView = 'dashboard' | 'equipe' | 'painel' | 'gestores' | 'faturamento' | 'cobrancas';
 
 const ITEMS: { key: AdminView; label: string }[] = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'equipe', label: 'Equipe' },
   { key: 'painel', label: 'Painel admin interno' },
+  { key: 'gestores', label: 'Gestores' },
+  { key: 'faturamento', label: 'Faturamento' },
   { key: 'cobrancas', label: 'Cobranças' },
 ];
 
