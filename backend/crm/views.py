@@ -38,7 +38,7 @@ from .services import (
     criar_lead_manual as criar_lead_manual_service,
     criar_situacao_especial_manual as criar_situacao_especial_manual_service,
     seed_roteiro_padrao,
-    resumo_dashboard, fora_do_kanban,
+    resumo_dashboard, fora_do_kanban, calcular_impacto_classificacao,
 )
 from .serializers import DashboardPeriodSerializer
 
@@ -244,10 +244,23 @@ class CompanyViewSet(viewsets.ModelViewSet):
         if self.action == "equipe":
             # Lista e-mails da equipe: nunca para a conta de serviço do agente.
             return [permissions.IsAuthenticated(), NotAgentAccount()]
-        if self.action == "identidade":
+        if self.action in ("identidade", "classificacao_impacto"):
             # Identidade visual: só a conta Empresa da própria empresa altera.
             return [permissions.IsAdminUser(), NotAgentAccount()]
         return [permissions.IsAuthenticated()]
+    @action(detail=True, methods=["post"], url_path="classificacao/impacto")
+    def classificacao_impacto(self, request, pk=None):
+        """Simulação para a aba Classificações: quais leads de Classificados sairiam do Kanban com estes cortes e este
+        limite. Não grava nada. Só a conta Empresa (quem edita as faixas)."""
+        company = self.get_object()
+        try:
+            impacto = calcular_impacto_classificacao(
+                company, request.data.get("classificacao_cortes"),
+                request.data.get("classificacao_kanban_a_partir_de", company.classificacao_kanban_a_partir_de),
+            )
+        except (ValueError, TypeError) as exc:
+            return Response({"detail": str(exc) or "Informe os cortes e o limite do Kanban."}, status=400)
+        return Response({**impacto, "total": len(impacto["afetadas"])})
     @action(detail=True, methods=["post"], parser_classes=[MultiPartParser, FormParser, JSONParser])
     def identidade(self, request, pk=None):
         """Identidade visual da empresa: nome e logo exibidos na barra lateral e as duas cores do gradiente

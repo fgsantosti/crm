@@ -37,11 +37,11 @@ class CompanySerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Escolha de 0 a 4 (Quente sempre vai para o Kanban).")
         return valor
     def update(self, instance, validated_data):
-        from .services import aplicar_novo_limite_kanban
-        antes = instance.classificacao_kanban_a_partir_de
+        from .services import aplicar_classificacao_aos_leads
+        antes = (list(instance.classificacao_cortes or []), instance.classificacao_kanban_a_partir_de)
         instance = super().update(instance, validated_data)
-        if instance.classificacao_kanban_a_partir_de != antes:
-            aplicar_novo_limite_kanban(instance)
+        if (list(instance.classificacao_cortes or []), instance.classificacao_kanban_a_partir_de) != antes:
+            aplicar_classificacao_aos_leads(instance)
         return instance
     def validate_classificacao_regra(self, valor):
         from .services import MAX_REGRA_CLASSIFICACAO

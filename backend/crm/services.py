@@ -2131,14 +2131,90 @@ def atualizar_identidade_visual(company, dados, logo=None):
     return None
 
 
-def aplicar_novo_limite_kanban(company):
-    """A empresa mudou quais classificações vão ao Kanban: leads abertos, sem responsável, que passaram a ficar
-    de fora concluem sozinhos como desqualificados (senão prenderiam o número sem ninguém poder atendê-los).
-    Leads já assumidos por um atendente ou já concluídos não mudam. Devolve quantos foram concluídos."""
-    fora = fora_do_kanban(company)
-    if not fora:
-        return 0
+def temperatura_do_score(score, faixas):
+    """Classificação em que uma média (0-10) cai, dado o conjunto de faixas (faixas_da_empresa)."""
+    for minimo, maximo_exclusivo, temperatura in faixas:
+        if score >= minimo and (maximo_exclusivo is None or score < maximo_exclusivo):
+            return temperatura
+    return faixas[0][2]
+
+def _classificados_da_empresa(company):
+    """Leads na coluna "Classificados" do Kanban (mesma regra de Leads.columnOf no frontend): triagem concluída, sem
+    responsável, ainda não em espera/negociação/despacho, nem concluída, manual ou de Outras situações."""
     return Lead.objects.filter(
-        company=company, desfecho="", bot_closed=True, mode="AUTOMÁTICO", owner__isnull=True, origem_manual=False,
-        situacao_especial="", etapa_atendimento="", temperature__in=fora,
-    ).update(desfecho="desqualificado", concluido_em=timezone.now(), next_action="")
+        Q(bot_closed=True) | Q(mode="HUMANO"), company=company, desfecho="", owner__isnull=True, origem_manual=False,
+        situacao_especial="", etapa_atendimento="",
+    )
+
+def _faixas_com_cortes(cortes):
+    class _Cfg:  # só os campos que faixas_da_empresa lê
+        classificacao_cortes = cortes
+    return faixas_da_empresa(_Cfg)
+
+def calcular_impacto_classificacao(company, cortes, kanban_a_partir_de):
+    """Simulação (não grava nada): o que mudaria nos leads de Classificados se a empresa adotasse estes cortes e este
+    limite do Kanban. Só Classificados pode perder leads (em espera, em negociação, despacho e concluídos nunca são
+    tocados). Lead com média guardada (urgencia_detalhe.score) é reclassificada pelas faixas novas; sem média, só vale
+    a classificação atual contra o novo limite. Devolve {"afetadas": [...], "reclassificadas": n}: afetadas = leads que
+    estão no Kanban hoje e sairiam dele (concluem como desqualificadas)."""
+    cortes = validar_cortes(cortes)
+    kanban_a_partir_de = min(4, max(0, int(kanban_a_partir_de)))
+    faixas_novas = _faixas_com_cortes(cortes)
+    fora_atual = fora_do_kanban(company)
+    fora_novo = set(NOMES_CLASSIFICACAO[:kanban_a_partir_de])
+    afetadas, reclassificadas = [], 0
+    for lead in _classificados_da_empresa(company).order_by("-created_at"):
+        if lead.temperature in fora_atual:
+            continue  # já fora do Kanban hoje (lead preso de uma configuração anterior): não é "afetada" por esta mudança
+        score = (lead.urgencia_detalhe or {}).get("score")
+        nova = temperatura_do_score(float(score), faixas_novas) if isinstance(score, (int, float)) else lead.temperature
+        if nova in fora_novo:
+            afetadas.append({
+                "id": str(lead.pk), "name": lead.name, "contact": lead.contact, "especialidade": lead.especialidade,
+                "media": round(float(score), 2) if isinstance(score, (int, float)) else None,
+                "de": lead.temperature, "para": nova,
+            })
+        elif nova != lead.temperature:
+            reclassificadas += 1
+    return {"afetadas": afetadas, "reclassificadas": reclassificadas}
+
+@transaction.atomic
+def aplicar_classificacao_aos_leads(company):
+    """Depois de salvar cortes/limite do Kanban: os leads de Classificados passam a seguir as regras novas. Com média
+    guardada, a temperatura é recalculada (e a prioridade acompanha, se ainda era a padrão da classificação antiga);
+    quem cai numa classificação fora do Kanban conclui sozinho como desqualificado e libera o número. Só mexe em
+    Classificados. Devolve {"concluidas": n, "reclassificadas": m}."""
+    Company.objects.select_for_update().get(pk=company.pk)  # mesmo lock do receive()
+    faixas = faixas_da_empresa(company)
+    fora = fora_do_kanban(company)
+    agora = timezone.now()
+    concluidas = reclassificadas = 0
+    for lead in _classificados_da_empresa(company).select_for_update():
+        score = (lead.urgencia_detalhe or {}).get("score")
+        nova = temperatura_do_score(float(score), faixas) if isinstance(score, (int, float)) else lead.temperature
+        campos = []
+        mudou = nova != lead.temperature
+        if mudou:
+            if lead.priority == PRIORIDADE_POR_TEMPERATURA.get(lead.temperature, "Baixa"):
+                lead.priority = PRIORIDADE_POR_TEMPERATURA.get(nova, "Baixa")
+                campos.append("priority")
+            lead.temperature = nova
+            detalhe = dict(lead.urgencia_detalhe or {})
+            detalhe["temperatura_calculada"] = nova
+            lead.urgencia_detalhe = detalhe
+            campos += ["temperature", "urgencia_detalhe"]
+        if lead.temperature in fora:
+            lead.desfecho = "desqualificado"
+            lead.concluido_em = agora
+            lead.next_action = ""
+            campos += ["desfecho", "concluido_em", "next_action"]
+            concluidas += 1
+        elif mudou:
+            reclassificadas += 1
+        if campos:
+            lead.save(update_fields=list(dict.fromkeys(campos)))
+    return {"concluidas": concluidas, "reclassificadas": reclassificadas}
+
+def aplicar_novo_limite_kanban(company):
+    """Compatibilidade: reaplica a classificação aos leads de Classificados (ver aplicar_classificacao_aos_leads)."""
+    return aplicar_classificacao_aos_leads(company)["concluidas"]

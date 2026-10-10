@@ -4197,3 +4197,64 @@ class KanbanAPartirDeTests(TestCase):
         self.company.refresh_from_db()
         r = resumo_dashboard(self.company)
         self.assertEqual((r["status"]["desqualificado"], r["status"]["aguardando"]), (0, 1))
+
+
+class ImpactoDaClassificacaoTests(TestCase):
+    def setUp(self):
+        self.company = Company.objects.create(name="Impacto Ltda")
+        seed_roteiro_padrao(self.company)
+        self.staff = get_user_model().objects.create_user("emp-imp", password="x", is_staff=True)
+        self.atendente = get_user_model().objects.create_user("at-imp", password="x")
+        self.company.members.add(self.staff, self.atendente)
+        self.api = APIClient(); self.api.force_authenticate(self.staff)
+        self.url = f"/api/companies/{self.company.pk}/classificacao/impacto/"
+        mk = lambda i, media, temp, **kw: Lead.objects.create(
+            company=self.company, contact=f"+558590000950{i}", name=f"L{i}", temperature=temp, bot_closed=True,
+            urgencia_detalhe={"score": media, "temperatura_calculada": temp}, **kw)
+        self.quente = mk(1, 9.4, "Quente", priority="Alta")
+        self.qualif = mk(2, 7.6, "Qualificado", priority="Média")
+        self.frio = mk(3, 5.8, "Frio", priority="Baixa")
+        self.espera = mk(4, 5.2, "Frio", etapa_atendimento="espera")
+        self.negociando = mk(5, 5.2, "Frio", etapa_atendimento="negociacao", owner=self.atendente, mode="HUMANO")
+
+    def impacto(self, **corpo):
+        return self.api.post(self.url, corpo, format="json")
+
+    def test_simulacao_lista_so_classificados_que_sairiam_e_nao_grava_nada(self):
+        r = self.impacto(classificacao_cortes=[3, 6, 8, 9])  # Frio vira Desconfiado (média 5,8 < 6): sai do Kanban
+        self.assertEqual(r.status_code, 200, r.content)
+        dados = r.json()
+        self.assertEqual(dados["total"], 1)
+        item = dados["afetadas"][0]
+        self.assertEqual((item["name"], item["de"], item["para"], item["media"]), ("L3", "Frio", "Desconfiado", 5.8))
+        self.assertEqual(dados["reclassificadas"], 1)  # Qualificado (7,6) vira Frio: continua no Kanban
+        self.frio.refresh_from_db()
+        self.assertEqual((self.frio.temperature, self.frio.desfecho), ("Frio", ""))  # simulação não grava
+
+    def test_em_espera_e_em_negociacao_nunca_aparecem(self):
+        r = self.impacto(classificacao_cortes=[3, 6, 8, 9])
+        nomes = {a["name"] for a in r.json()["afetadas"]}
+        self.assertNotIn("L4", nomes)
+        self.assertNotIn("L5", nomes)
+
+    def test_limite_do_kanban_tambem_afeta(self):
+        r = self.impacto(classificacao_cortes=[3, 5, 7, 9], classificacao_kanban_a_partir_de=3)  # Frio sai
+        self.assertEqual([a["name"] for a in r.json()["afetadas"]], ["L3"])
+
+    def test_sem_efeito_retorna_vazio_e_valida_entrada(self):
+        self.assertEqual(self.impacto(classificacao_cortes=[3, 5, 7, 9]).json()["total"], 0)
+        self.assertEqual(self.impacto(classificacao_cortes=[5, 4, 6, 8]).status_code, 400)
+        self.assertEqual(self.impacto().status_code, 400)
+        atendente = APIClient(); atendente.force_authenticate(self.atendente)
+        self.assertEqual(atendente.post(self.url, {"classificacao_cortes": [3, 5, 7, 9]}, format="json").status_code, 403)
+
+    def test_salvar_reclassifica_classificados_e_conclui_os_que_saem_do_kanban(self):
+        r = self.api.patch(f"/api/companies/{self.company.pk}/", {"classificacao_cortes": [3, 6, 8, 9]}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        for l in (self.quente, self.qualif, self.frio, self.espera, self.negociando):
+            l.refresh_from_db()
+        self.assertEqual((self.frio.temperature, self.frio.desfecho), ("Desconfiado", "desqualificado"))
+        self.assertEqual((self.qualif.temperature, self.qualif.priority, self.qualif.desfecho), ("Frio", "Baixa", ""))
+        self.assertEqual((self.quente.temperature, self.quente.priority), ("Quente", "Alta"))
+        self.assertEqual((self.espera.temperature, self.espera.desfecho), ("Frio", ""))  # em espera: intacta
+        self.assertEqual((self.negociando.temperature, self.negociando.desfecho), ("Frio", ""))
