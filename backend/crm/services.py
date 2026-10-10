@@ -13,7 +13,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.authtoken.models import Token
 from .emails import send_credentials_email, send_invite_email, send_email_change_code, send_password_reset_by_admin_email
-from .models import Profile, Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, VARIAVEL_DETALHAMENTO, PESO_PADRAO_DETALHAMENTO, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, TEXTO_PADRAO_LEMBRETE, DEFAULT_HUMAN_MESSAGE, SITUACOES_ESPECIAIS, ESPECIAL_QUESTION_IDS, ContagemDiaria, PrecoCobranca
+from .models import Profile, Lead, Question, Event, Company, Blacklist, Area, AtendenteInvite, PasswordChangeRequired, EmailChangeRequest, AgentTokenExpiry, Variavel, VariavelRoteiro, VARIAVEL_DETALHAMENTO, PESO_PADRAO_DETALHAMENTO, CompanyInfo, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS, TEXTO_PADRAO_LEMBRETE, DEFAULT_HUMAN_MESSAGE, SITUACOES_ESPECIAIS, ESPECIAL_QUESTION_IDS, ContagemDiaria, PrecoCobranca, NOME_FORA_DE_ESCOPO
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,12 @@ def variavel_detalhamento(company):
         variavel.save(update_fields=["builtin"])
     return variavel
 
+def garantir_fora_de_escopo(company):
+    """Toda empresa tem a Área "Fora de escopo" (fixa): é onde o agente classifica o assunto que o escritório não atende.
+    Respeita um nome já existente com outra caixa (ex.: "Fora de Escopo")."""
+    if not company.areas.filter(name__iexact=NOME_FORA_DE_ESCOPO).exists():
+        Area.objects.create(company=company, name=NOME_FORA_DE_ESCOPO)
+
 def seed_roteiro_padrao(company):
     """Garante o mínimo pra uma empresa nova conseguir operar o funil: a Variavel
     padrão, as 3 perguntas obrigatórias de triagem (nome/situacao/demanda) já
@@ -61,6 +67,7 @@ def seed_roteiro_padrao(company):
         })
     for title in CompanyInfo.MANDATORY_TITLES:
         CompanyInfo.objects.get_or_create(company=company, title=title, defaults={"obrigatorio": True})
+    garantir_fora_de_escopo(company)
 
 def slugify_variavel_roteiro(company, name):
     """Deriva um slug/placeholder ({slug}) a partir do nome digitado: só letras
@@ -1826,7 +1833,7 @@ def contexto_agente(company):
     fora_do_fluxo = []
     areas = list(company.areas.order_by("name"))
     # Uma chave por área cadastrada, mesmo sem perguntas: o agente sabe que a área existe mas não tem SPIN.
-    spin = {a.name: [] for a in areas}
+    spin = {a.name: [] for a in areas if not a.fixa}  # Fora de escopo está em `areas`, mas não tem lista SPIN
     nomes_area = {a.id: a.name for a in areas}
     for q in Question.objects.filter(company=company).select_related("variavel", "variavel_roteiro").order_by("ordem", "id"):
         if not (q.text or "").strip():

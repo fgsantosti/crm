@@ -2419,7 +2419,7 @@ class SpinPorAreaTests(TestCase):
         self.criar("trab_situacao", self.trab, "situacao")
         r = self.client.delete(f"/api/areas/{self.trab.id}/?company={self.company.id}")
         self.assertEqual(r.status_code, 400)
-        self.assertIn("Trabalhista-SPIN", r.json()["detail"])
+        self.assertIn("lista Trabalhista", r.json()["detail"])
         self.assertEqual(self.client.delete(f"/api/areas/{self.prev.id}/?company={self.company.id}").status_code, 204)
 
     def test_contexto_separa_fixas_e_spin_por_area(self):
@@ -3280,7 +3280,7 @@ class SituacaoEspecialTests(TestCase):
         self.assertEqual(Lead.objects.get().situacao_especial, "acompanhamento")
 
     def test_etapa_inicial_ligada_classifica_em_silencio(self):
-        area = Area.objects.get(company=self.company)
+        area = Area.objects.exclude(name__iexact="Fora de escopo").get(company=self.company)
         Question.objects.create(company=self.company, question_id="cons_a", text="Pergunta?", area=area, etapa_spin="situacao")
         Company.objects.filter(pk=self.company.pk).update(etapa_inicial=True, spin_inicial=area)
         self.company.refresh_from_db()
@@ -4638,3 +4638,45 @@ class PainelAdminVisaoELeadsTests(TestCase):
         Company.objects.create(name="Sem gestor")
         d = self.api.get("/api/admin-visao-geral/").json()
         self.assertTrue(any(a["titulo"] == "Empresa sem gestor" for a in d["alertas"]))
+
+
+class ForaDeEscopoFixaTests(TestCase):
+    def setUp(self):
+        from .services import seed_roteiro_padrao
+        self.company = Company.objects.create(name="Fixa LTDA")
+        seed_roteiro_padrao(self.company)
+        self.user = get_user_model().objects.create_user("emp-fixa", password="x", is_staff=True)
+        self.company.members.add(self.user)
+        self.api = APIClient(); self.api.force_authenticate(self.user)
+        self.url = f"/api/areas/?company={self.company.pk}"
+
+    def test_empresa_nova_ja_tem_fora_de_escopo_fixa(self):
+        itens = self.api.get(self.url).json()["results"]
+        fora = [a for a in itens if a["name"] == "Fora de escopo"]
+        self.assertEqual((len(fora), fora[0]["fixa"]), (1, True))
+
+    def test_nao_remove_nem_renomeia_nem_recria(self):
+        area = self.company.areas.get(name="Fora de escopo")
+        r = self.api.delete(f"/api/areas/{area.pk}/?company={self.company.pk}")
+        self.assertEqual(r.status_code, 400)
+        self.assertTrue(self.company.areas.filter(pk=area.pk).exists())
+        self.assertEqual(self.api.patch(f"/api/areas/{area.pk}/?company={self.company.pk}", {"name": "Outra"}, format="json").status_code, 400)
+        for nome in ("Fora de escopo", "fora de ESCOPO"):
+            self.assertEqual(self.api.post(self.url, {"name": nome}, format="json").status_code, 400, nome)
+
+    def test_listar_cria_para_empresa_antiga_sem_duplicar_nome_com_outra_caixa(self):
+        antiga = Company.objects.create(name="Antiga")
+        antiga.members.add(self.user)
+        Area.objects.create(company=antiga, name="Fora de Escopo")
+        nomes = [a["name"] for a in self.api.get(f"/api/areas/?company={antiga.pk}").json()["results"]]
+        self.assertEqual(nomes, ["Fora de Escopo"])
+        outra = Company.objects.create(name="Sem area")
+        outra.members.add(self.user)
+        nomes = [a["name"] for a in self.api.get(f"/api/areas/?company={outra.pk}").json()["results"]]
+        self.assertEqual(nomes, ["Fora de escopo"])
+
+    def test_contexto_do_agente_lista_a_area_mas_nao_cria_spin(self):
+        from .services import contexto_agente
+        ctx = contexto_agente(self.company)
+        self.assertIn("Fora de escopo", ctx["areas"])
+        self.assertNotIn("Fora de escopo", ctx["spin"])

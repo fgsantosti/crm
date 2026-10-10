@@ -199,6 +199,13 @@ class CompanyInfo(models.Model):
     class Meta:
         ordering = ["title"]
 
+NOME_FORA_DE_ESCOPO = "Fora de escopo"
+
+
+def eh_area_fora_de_escopo(nome):
+    return (nome or "").strip().lower() == NOME_FORA_DE_ESCOPO.lower()
+
+
 class Area(models.Model):
     """Área de atendimento cadastrada pela própria empresa (tela "Equipe").
 
@@ -217,6 +224,10 @@ class Area(models.Model):
         constraints = [models.UniqueConstraint(fields=["company", "name"], name="unique_company_area")]
         ordering = ["name"]
     def __str__(self): return self.name
+    @property
+    def fixa(self):
+        """Fora de escopo existe em toda empresa e não pode ser removida nem renomeada."""
+        return eh_area_fora_de_escopo(self.name)
 
 class AtendenteInvite(models.Model):
     """Convite de um novo atendente, validado por código de 6 dígitos enviado por e-mail.

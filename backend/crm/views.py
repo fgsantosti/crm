@@ -880,13 +880,19 @@ class AreaViewSet(TenantMixin, viewsets.ModelViewSet):
         base = [permissions.IsAuthenticated()] if self.request.method in permissions.SAFE_METHODS else [permissions.IsAdminUser()]
         return base + [NotAgentAccount()]
     def perform_create(self, serializer): serializer.save(company=self.company())
+    def list(self, request, *args, **kwargs):
+        from .services import garantir_fora_de_escopo
+        garantir_fora_de_escopo(self.company())  # toda empresa tem "Fora de escopo", mesmo as criadas por outros caminhos
+        return super().list(request, *args, **kwargs)
     def destroy(self, request, *args, **kwargs):
         from django.db.models import ProtectedError
+        if self.get_object().fixa:
+            return Response({"detail": "\"Fora de escopo\" é fixa: existe em toda empresa e não pode ser removida."}, status=400)
         try:
             return super().destroy(request, *args, **kwargs)
         except ProtectedError:
             area = self.get_object()
-            return Response({"detail": f"A área '{area.name}' tem perguntas na lista {area.name}-SPIN do Roteiro -- "
+            return Response({"detail": f"A área '{area.name}' tem perguntas na lista {area.name} do Roteiro -- "
                              "exclua ou mova essas perguntas antes de excluir a área."}, status=400)
 
 class BlacklistViewSet(TenantMixin, viewsets.ModelViewSet):

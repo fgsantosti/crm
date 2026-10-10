@@ -1,7 +1,7 @@
 import re
 from django.utils import timezone
 from rest_framework import serializers
-from .models import ConfigNotificacao, Gestor, RegraCobranca, Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, VariavelRoteiro, MANDATORY_OFFFLOW_QUESTION_IDS, MANDATORY_QUESTION_IDS, SITUACOES_ESPECIAIS
+from .models import ConfigNotificacao, Gestor, RegraCobranca, Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, VariavelRoteiro, MANDATORY_OFFFLOW_QUESTION_IDS, MANDATORY_QUESTION_IDS, SITUACOES_ESPECIAIS, eh_area_fora_de_escopo
 
 # Obrigatórias que nunca entram numa lista SPIN (a área só é conhecida depois delas).
 FIXED_QUESTION_IDS = {"nome", "situacao"}
@@ -385,14 +385,17 @@ class DeliverySerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=["SENT", "FAILED"])
 
 class AreaSerializer(serializers.ModelSerializer):
+    fixa = serializers.BooleanField(read_only=True)
     class Meta:
         model = Area
-        fields = ["id", "name", "palavras_chave"]
-        read_only_fields = ["id"]
+        fields = ["id", "name", "palavras_chave", "fixa"]
+        read_only_fields = ["id", "fixa"]
     def validate_name(self, value):
         # Renomear quebraria a área já gravada nos leads e nas listas SPIN: só as palavras-chave são editáveis.
         if self.instance and value != self.instance.name:
             raise serializers.ValidationError("O nome da área não pode ser alterado.")
+        if not self.instance and eh_area_fora_de_escopo(value):
+            raise serializers.ValidationError("\"Fora de escopo\" já existe em toda empresa e não pode ser criada de novo.")
         return value
 
 class AtendenteInviteSerializer(serializers.ModelSerializer):
