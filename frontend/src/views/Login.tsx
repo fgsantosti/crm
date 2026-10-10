@@ -27,7 +27,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
       <div className="login-form-side">
         <form onSubmit={submit}>
           <Logo size={64} />
-          <h1>Conecta CRM</h1>
+          <h1>Conecta Axioma CRM</h1>
           <p className="tagline">Conversas que se tornam oportunidades.</p>
           {error && (
             <p role="alert" className="login-error">

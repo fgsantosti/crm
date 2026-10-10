@@ -302,7 +302,7 @@ export function Admin({ api }: { api: Api }) {
         <section className="dash-card" aria-labelledby="emp-agente">
           <div>
             <h2 id="emp-agente">Credenciais do agente</h2>
-            <small>Usadas pelo agente Axioma desta empresa para autenticar no Conecta CRM.</small>
+            <small>Usadas pelo agente Axioma desta empresa para autenticar no Conecta Axioma CRM.</small>
           </div>
           {agentError && <p className="error">{agentError}</p>}
           {agentStatus?.existe && (

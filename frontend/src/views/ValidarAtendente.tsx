@@ -29,7 +29,7 @@ export function ValidarAtendente({ inviteId }: { inviteId: string }) {
         {done ? (
           <div>
             <Logo size={64} />
-            <h1>Conecta CRM</h1>
+            <h1>Conecta Axioma CRM</h1>
             <p className="tagline">Cadastro confirmado!</p>
             <p style={{ marginTop: 20 }}>
               Enviamos a senha provisória de acesso para o seu e-mail. Você vai precisar definir uma senha nova no
@@ -39,7 +39,7 @@ export function ValidarAtendente({ inviteId }: { inviteId: string }) {
         ) : (
           <form onSubmit={submit}>
             <Logo size={64} />
-            <h1>Conecta CRM</h1>
+            <h1>Conecta Axioma CRM</h1>
             <p className="tagline">Confirme seu cadastro na equipe.</p>
             {error && (
               <p role="alert" className="login-error">

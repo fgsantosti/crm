@@ -38,7 +38,7 @@ export function TrocarSenhaObrigatoria({ api, onDone, onLogout }: { api: Api; on
       <div className="login-form-side">
         <form onSubmit={submit}>
           <Logo size={64} />
-          <h1>Conecta CRM</h1>
+          <h1>Conecta Axioma CRM</h1>
           <p className="tagline">Defina sua senha definitiva para continuar.</p>
           {error && (
             <p role="alert" className="login-error">

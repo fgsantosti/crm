@@ -56,7 +56,7 @@ export function TrocarSenhaPagina({ api, me, onDone, onCancel }: { api: Api; me:
         {step === 'reauth' ? (
           <form onSubmit={reauth}>
             <Logo size={64} />
-            <h1>Conecta CRM</h1>
+            <h1>Conecta Axioma CRM</h1>
             <p className="tagline">Confirme sua senha para continuar.</p>
             {error && (
               <p role="alert" className="login-error">
@@ -82,7 +82,7 @@ export function TrocarSenhaPagina({ api, me, onDone, onCancel }: { api: Api; me:
         ) : (
           <form onSubmit={salvar}>
             <Logo size={64} />
-            <h1>Conecta CRM</h1>
+            <h1>Conecta Axioma CRM</h1>
             <p className="tagline">Defina sua nova senha.</p>
             {error && (
               <p role="alert" className="login-error">

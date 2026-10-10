@@ -66,7 +66,7 @@ export function TrocarEmailPagina({ api, me, onDone, onCancel }: { api: Api; me:
         {step === 'reauth' && (
           <form onSubmit={reauth}>
             <Logo size={64} />
-            <h1>Conecta CRM</h1>
+            <h1>Conecta Axioma CRM</h1>
             <p className="tagline">Confirme sua senha para continuar.</p>
             {error && (
               <p role="alert" className="login-error">
@@ -94,7 +94,7 @@ export function TrocarEmailPagina({ api, me, onDone, onCancel }: { api: Api; me:
         {step === 'email' && (
           <form onSubmit={solicitar}>
             <Logo size={64} />
-            <h1>Conecta CRM</h1>
+            <h1>Conecta Axioma CRM</h1>
             <p className="tagline">Qual é o novo e-mail?</p>
             {error && (
               <p role="alert" className="login-error">
@@ -118,7 +118,7 @@ export function TrocarEmailPagina({ api, me, onDone, onCancel }: { api: Api; me:
         {step === 'code' && (
           <form onSubmit={confirmar}>
             <Logo size={64} />
-            <h1>Conecta CRM</h1>
+            <h1>Conecta Axioma CRM</h1>
             <p className="tagline">Enviamos um código de confirmação para {novoEmail}.</p>
             {error && (
               <p role="alert" className="login-error">
