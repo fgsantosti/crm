@@ -27,10 +27,10 @@ export type ColumnKey = 'novos' | 'qualificados' | 'espera' | 'negociacao' | 'de
 
 export const COLUMNS: { key: ColumnKey; label: string; cor: string; regra: string }[] = [
   { key: 'novos', label: 'Novos Leads', cor: '#2563EB', regra: 'Triagem do agente em andamento' },
-  { key: 'qualificados', label: 'Qualificados', cor: '#C88A1E', regra: 'Maior urgência primeiro' },
-  { key: 'espera', label: 'Atendimentos em espera', cor: '#C88A1E', regra: 'Maior urgência primeiro' },
+  { key: 'qualificados', label: 'Qualificados', cor: '#C88A1E', regra: 'Mais quentes e mais recentes primeiro' },
+  { key: 'espera', label: 'Atendimentos em espera', cor: '#C88A1E', regra: 'Mais quentes e mais recentes primeiro' },
   { key: 'negociacao', label: 'Em negociação', cor: '#D9531A', regra: 'Ordem de chegada' },
-  { key: 'despacho', label: 'Despacho', cor: '#2F7D5C', regra: 'Aguardando “Enviar Despachos”' },
+  { key: 'despacho', label: 'Despacho', cor: '#2F7D5C', regra: 'Mais quentes e mais recentes primeiro' },
 ];
 
 export function columnOf(l: Lead): ColumnKey {
@@ -55,9 +55,10 @@ export function ordenarColuna(key: ColumnKey, items: Lead[]): Lead[] {
     return [...items].sort(chegada);
   }
   if (key === 'qualificados' || key === 'espera' || key === 'despacho') {
-    // Maior urgência primeiro; empate segue a ordem de chegada.
+    // Mais quente primeiro; na mesma temperatura, o mais recente (data e hora de chegada) em cima.
+    // Resultado: quentes e recentes no topo, frios e antigos embaixo.
     return [...items].sort((a, b) => (b.urgencia_rank ?? URGENCIA_RANK[b.temperature] ?? -1)
-      - (a.urgencia_rank ?? URGENCIA_RANK[a.temperature] ?? -1) || chegada(a, b));
+      - (a.urgencia_rank ?? URGENCIA_RANK[a.temperature] ?? -1) || chegada(b, a));
   }
   return items;
 }
