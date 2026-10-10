@@ -49,6 +49,8 @@ export type Lead = {
   last_contact: string | null;
   /** Lembrete de 24h sem resposta confirmado (SENT); null se não houve. */
   lembrete_enviado_em?: string | null;
+  /** Acompanhamento despachado pela conta Empresa sem responsável. */
+  despachado_pela_empresa?: boolean;
   next_action: string;
   return_at: string | null;
   priority: 'Alta' | 'Média' | 'Baixa';
