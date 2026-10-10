@@ -1,7 +1,7 @@
 {% extends "admin/base.html" %}
 {% load i18n static %}
 
-{% block title %}{{ title }} | {{ site_title|default:_('Conecta CRM') }}{% endblock %}
+{% block title %}{{ title }} | {{ site_title|default:_('Conecta Axioma CRM') }}{% endblock %}
 
 {% block extrastyle %}
   {{ block.super }}
@@ -9,7 +9,7 @@
 {% endblock %}
 
 {% block branding %}
-<div id="site-name"><a href="{% url 'admin:index' %}">{{ site_header|default:_('Conecta CRM') }}</a></div>
+<div id="site-name"><a href="{% url 'admin:index' %}">{{ site_header|default:_('Conecta Axioma CRM') }}</a></div>
 {% endblock %}
 
 {% block nav-global %}{% endblock %}

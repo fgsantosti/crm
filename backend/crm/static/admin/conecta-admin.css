@@ -1,4 +1,4 @@
-/* Reskin do Django Admin com a identidade visual da Conecta CRM (mesma
+/* Reskin do Django Admin com a identidade visual do Conecta Axioma CRM (mesma
    paleta do frontend em frontend/src/style.css). Só redefine as CSS custom
    properties que o tema padrão do Django já usa — nenhum CSS novo por baixo,
    então continua funcionando em telas/componentes futuros do admin sem
