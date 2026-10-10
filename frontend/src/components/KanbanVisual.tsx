@@ -87,7 +87,7 @@ export function KanbanCardConteudo({ lead, coluna, meId, compacto = false, onDet
   const temp = TEMPERATURA_VISUAL[lead.temperature];
   const desfecho = coluna === 'despacho' ? DESFECHO_VISUAL[lead.desfecho_pendente] : undefined;
   // Novos: a etapa vai numa linha própria (o id da pergunta é longo e cortaria o nome).
-  const selo = compacto || coluna === 'novos'
+  const selo = coluna === 'novos'
     ? null
     : desfecho
       ? desfecho
@@ -104,12 +104,12 @@ export function KanbanCardConteudo({ lead, coluna, meId, compacto = false, onDet
           <strong>{lead.name || 'Sem nome informado'}</strong>
           <small>{lead.contact}</small>
           {coluna === 'novos' && <span className="kb-etapa">{lead.state ? `na pergunta: ${lead.state}` : 'em triagem'}</span>}
-          {selo && (
-            <span className="kb-etapa" style={{ background: selo.fundo, color: selo.texto }}>
-              {selo.rotulo}
-            </span>
-          )}
         </div>
+        {selo && (
+          <span className="kb-selo" style={{ background: selo.fundo, color: selo.texto }}>
+            {selo.rotulo}
+          </span>
+        )}
       </div>
       {!compacto && coluna !== 'novos' && lead.demand && <p className="kb-card-demanda">{lead.demand}</p>}
       {(!compacto || onDetalhar) && (

@@ -296,7 +296,7 @@ export function Dashboard({ api, company, role }: { api: Api; company: Company; 
                 <h2 id="dash-panorama-t">Atendimentos no período</h2>
                 <div className="dash-total">
                   <strong>{total}</strong>
-                  {resumo.novas_hoje > 0 && <span>{resumo.novas_hoje} novo{resumo.novas_hoje === 1 ? '' : 's'} hoje</span>}
+                  {periodo !== 'custom' && resumo.novas_hoje > 0 && <span>{resumo.novas_hoje} novo{resumo.novas_hoje === 1 ? '' : 's'} hoje</span>}
                 </div>
               </div>
               <button type="button" className="dash-botao-claro" aria-haspopup="dialog" disabled={bloqueado} onClick={() => abrirPopup('Total de atendimentos', 'Todos os atendimentos do período selecionado.', () => true)}>

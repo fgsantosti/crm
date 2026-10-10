@@ -9,6 +9,7 @@ import { IconeWhatsapp } from '../components/Icones';
 import { CadastroAtendimentoDialog, Overlay, TriagemResumo } from '../components/CadastroAtendimento';
 import { KanbanCardConteudo, KanbanColunaHead, TEMPERATURA_VISUAL } from '../components/KanbanVisual';
 import { LeadDetalheDialog } from '../components/LeadDetalheDialog';
+import { FiltroAreas, SEM_AREA } from '../components/FiltroAreas';
 
 // Mesma ordem de services.FAIXAS_URGENCIA no backend (menos urgente -> mais urgente).
 export const URGENCIA_RANK: Record<string, number> = { Desqualificado: 0, Desconfiado: 1, Frio: 2, Qualificado: 3, Quente: 4 };
@@ -114,6 +115,8 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
   const [desqualificadosCount, setDesqualificadosCount] = useState(0);
   const [historicoAberto, setHistoricoAberto] = useState(false);
   const [detalhe, setDetalhe] = useState<Lead | null>(null);
+  const [nomesAreas, setNomesAreas] = useState<string[]>([]);
+  const [areasFiltro, setAreasFiltro] = useState<string[]>([]);
 
   const podeAtender = role === 'atendente';
 
@@ -240,7 +243,19 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
   }
 
 
-  const visible = leadsVisiveisNoKanban(leads).filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()));
+  useEffect(() => {
+    let ativo = true;
+    fetchTodasAsPaginas<{ name: string }>(api, `/areas/?company=${company.id}`)
+      .then((todas) => ativo && setNomesAreas(todas.map((a) => a.name)))
+      .catch(() => undefined);
+    return () => {
+      ativo = false;
+    };
+  }, [company.id]);
+
+  const visible = leadsVisiveisNoKanban(leads)
+    .filter((l) => `${l.name} ${l.contact}`.toLowerCase().includes(search.toLowerCase()))
+    .filter((l) => !areasFiltro.length || areasFiltro.includes(l.especialidade || SEM_AREA));
   const visibleColumns = COLUMNS.filter((col) => mostrarNovasLeads || col.key !== 'novos');
 
   function orderedItems(key: ColumnKey) {
@@ -346,6 +361,7 @@ export function Leads({ api, company, role, me }: { api: Api; company: Company; 
             </svg>
             <input placeholder="Buscar nome ou telefone" aria-label="Buscar leads" value={search} onChange={(e) => setSearch(e.target.value)} />
           </label>
+          <FiltroAreas areas={nomesAreas} selecionadas={areasFiltro} onChange={setAreasFiltro} />
         </div>
 
       <ol className="kb-trilha" aria-label="Etapas do fluxo">
