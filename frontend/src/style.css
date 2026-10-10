@@ -799,18 +799,18 @@ dialog[data-saindo]::backdrop { animation: popup-fundo-sai .17s ease-in forwards
 .nav-texto { min-width: 0; }
 @media (min-width: 901px) {
   .sidebar-slot { position: relative; flex: 0 0 72px; width: 72px; min-width: 72px; z-index: 40; transition: flex-basis .22s ease, width .22s ease, min-width .22s ease; }
-  .sidebar-slot.fixa { flex-basis: 272px; width: 272px; min-width: 272px; }
+  /* A página acompanha o painel: ao expandir (fixo, mouse ou foco) o espaço é aberto, nada fica coberto. */
+  .sidebar-slot.fixa, .sidebar-slot:has(> .sidebar:hover), .sidebar-slot:has(:focus-visible) { flex-basis: 272px; width: 272px; min-width: 272px; }
   .sidebar-slot > .sidebar { position: absolute; top: 0; bottom: 0; left: 0; width: 72px; min-width: 72px; flex: none; padding-left: 14px; padding-right: 14px; overflow: hidden; transition: width .22s ease, min-width .22s ease, box-shadow .22s ease, padding .22s ease; }
   .sidebar-slot > .sidebar > :not(.sidebar-glow):not(.sidebar-dots):not(.painel-fixar) { min-width: 232px; flex-shrink: 0; }
-  .sidebar-slot.fixa > .sidebar, .sidebar-slot:not(.fixa) > .sidebar:hover, .sidebar-slot:not(.fixa) > .sidebar:focus-within { width: 272px; min-width: 272px; padding-left: 24px; padding-right: 24px; }
-  .sidebar-slot:not(.fixa) > .sidebar:hover, .sidebar-slot:not(.fixa) > .sidebar:focus-within { box-shadow: 18px 0 40px -18px rgba(36,26,18,.55); }
+  .sidebar-slot.fixa > .sidebar, .sidebar-slot:not(.fixa) > .sidebar:hover, .sidebar-slot:not(.fixa) > .sidebar:has(:focus-visible) { width: 272px; min-width: 272px; padding-left: 24px; padding-right: 24px; }
   /* Recolhido: só os ícones; o resto some com fade para não aparecer cortado. */
-  .sidebar-slot:not(.fixa) > .sidebar:not(:hover):not(:focus-within) :is(.workspace, .sidebar-note, .nav-count, .nav-texto, .logout, .brand > span) { opacity: 0; }
+  .sidebar-slot:not(.fixa) > .sidebar:not(:hover):not(:has(:focus-visible)) :is(.workspace, .sidebar-note, .nav-count, .nav-texto, .logout, .brand > span) { opacity: 0; }
   .sidebar-slot > .sidebar :is(.workspace, .sidebar-note, .nav-count, .nav-texto, .logout, .brand > span) { transition: opacity .15s ease; }
   .sidebar-slot > .sidebar nav button .nav-label { flex: none; }
   .sidebar-slot > .sidebar nav button { white-space: nowrap; }
   .painel-fixar { display: inline-flex; position: absolute; top: 30px; right: 14px; z-index: 2; width: 32px; height: 32px; padding: 0; align-items: center; justify-content: center; border-radius: 9px; background: transparent; color: var(--sb-fg-suave, #D9C7B4); border: 1px solid var(--sb-pilula-borda, #4A3321); opacity: 0; pointer-events: none; transition: opacity .15s ease, background .15s ease; }
-  .sidebar-slot.fixa .painel-fixar, .sidebar-slot > .sidebar:hover .painel-fixar, .sidebar-slot > .sidebar:focus-within .painel-fixar { opacity: 1; pointer-events: auto; }
+  .sidebar-slot.fixa .painel-fixar, .sidebar-slot > .sidebar:hover .painel-fixar, .sidebar-slot > .sidebar:has(:focus-visible) .painel-fixar { opacity: 1; pointer-events: auto; }
   .painel-fixar[aria-pressed='true'] { background: var(--sb-pilula-bg, #352416); color: var(--sb-fg, #F3E9DD); }
 }
 @media (max-width: 900px) {
@@ -818,4 +818,16 @@ dialog[data-saindo]::backdrop { animation: popup-fundo-sai .17s ease-in forwards
 }
 @media (prefers-reduced-motion: reduce) {
   .sidebar-slot, .sidebar-slot > .sidebar, .sidebar-slot > .sidebar * { transition: none !important; }
+}
+
+@media (min-width: 901px) {
+  /* Recolhido: cada item é um botão quadrado só com o ícone, centralizado na coluna (o realce do item ativo fica um quadrado). */
+  .sidebar-slot:not(.fixa) > .sidebar:not(:hover):not(:has(:focus-visible)) nav button { width: 44px; min-width: 0; padding: 11px 0; justify-content: center; }
+  .sidebar-slot:not(.fixa) > .sidebar:not(:hover):not(:has(:focus-visible)) nav { align-items: flex-start; }
+  .sidebar-slot:not(.fixa) > .sidebar:not(:hover):not(:has(:focus-visible)) nav button .nav-label { gap: 0; }
+  .sidebar-slot:not(.fixa) > .sidebar:not(:hover):not(:has(:focus-visible)) nav button .nav-texto { display: none; }
+  .sidebar-slot:not(.fixa) > .sidebar:not(:hover):not(:has(:focus-visible)) nav { min-width: 44px; }
+}
+@media (min-width: 901px) {
+  .sidebar-slot:not(.fixa) > .sidebar:not(:hover):not(:has(:focus-visible)) nav button .nav-count { display: none; }
 }
