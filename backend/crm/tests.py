@@ -4039,3 +4039,11 @@ class TendenciaComNaoProsseguiramTests(TestCase):
         # Com filtro de área as apagadas não existem mais como lead: não entram nem no total nem na tendência.
         r = resumo_dashboard(company, area="Qualquer")
         self.assertEqual(dict(r["por_mes"]).get(mes, 0), 0)
+
+    def test_resumo_traz_leads_por_temperatura(self):
+        from .services import resumo_dashboard
+        company = Company.objects.create(name="Temp Ltda")
+        for i, t in enumerate(["Quente", "Quente", "Frio", "", "Desconfiado"]):
+            Lead.objects.create(company=company, contact=f"+558590000800{i}", temperature=t)
+        r = resumo_dashboard(company)
+        self.assertEqual(r["por_temperatura"], {"Desqualificado": 0, "Desconfiado": 1, "Frio": 1, "Qualificado": 0, "Quente": 2})

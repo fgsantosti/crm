@@ -1930,6 +1930,7 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
     status = {"despachado": 0, "automatico": 0, "aguardando": 0, "equipe": 0, "desqualificado": 0, "especial": 0, "nao_prosseguiram": 0}
     desfechos = {"encerrado": 0, "comprometido": 0, "falha": 0, "bloqueado": 0}
     por_area, por_mes, por_owner = {}, {}, {}
+    por_temperatura = {t: 0 for t in URGENCIA_RANK}
     tz = timezone.get_current_timezone()
     for r in rows:
         status[_categoria_status(r)] += 1
@@ -1939,6 +1940,8 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
         por_area[chave_area] = por_area.get(chave_area, 0) + 1
         mes = timezone.localtime(r["created_at"], tz).strftime("%Y-%m")
         por_mes[mes] = por_mes.get(mes, 0) + 1
+        if r["temperature"] in por_temperatura:
+            por_temperatura[r["temperature"]] += 1
         if r["owner"]:
             o = por_owner.setdefault(r["owner"], {"owner_id": r["owner"], "owner": nomes.get(r["owner"], ""), "atendimentos": 0, "concluidos": 0, "sucesso": 0})
             o["atendimentos"] += 1
@@ -2000,6 +2003,8 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
         ],
         "por_area": sorted(por_area.items(), key=lambda kv: -kv[1]),
         "por_mes": sorted(por_mes.items()),
+        # Leads classificadas por temperatura (Desqualificado ... Quente) no recorte do Dashboard.
+        "por_temperatura": por_temperatura,
         "por_owner": sorted(por_owner.values(), key=lambda o: -o["atendimentos"]),
     }
 
