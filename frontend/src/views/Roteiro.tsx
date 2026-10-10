@@ -178,6 +178,28 @@ function TextoComPreview({ value, rows, onSave, variaveisRoteiro, disabled }: { 
   );
 }
 
+/** Texto como o contato verá, com dados de exemplo no lugar dos marcadores (só para a pré-visualização em conversa). */
+function textoDeExemplo(text: string, empresa: string, area?: string): string {
+  const exemplos: Record<string, string> = { empresa, nome: 'Maria', tema: 'cobrança indevida no benefício', especialidade: area || 'Previdenciário', impacto: 'ficou sem renda', interesse: 'sim' };
+  return text
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/\{([a-zA-Z_]+)\}/g, (_m, k: string) => exemplos[k] ?? `[${k}]`)
+    .trim();
+}
+
+function resumo(text: string, max = 110): string {
+  const limpo = text.replace(/<br\s*\/?>/gi, ' ').replace(/\s+/g, ' ').trim();
+  return limpo.length > max ? `${limpo.slice(0, max - 1)}…` : limpo;
+}
+
+function Chevron({ aberto }: { aberto: boolean }) {
+  return (
+    <svg className={`rot-chevron${aberto ? ' aberto' : ''}`} width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 const VOZES_TTS = [
   { id: 'pt-BR-FranciscaNeural', label: 'Francisca (feminina)' },
   { id: 'pt-BR-AntonioNeural', label: 'Antonio (masculina)' },
@@ -211,6 +233,10 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
   const [vrCheckboxOverride, setVrCheckboxOverride] = useState<Record<number, boolean>>({});
   // Lista de perguntas exibida: 'fixas' ou o id de uma Área (lista "{Área}-SPIN").
   const [lista, setLista] = useState<'fixas' | number>('fixas');
+  // Cartões em acordeão: um aberto por vez, o resto fica numa linha só (texto resumido + etiquetas).
+  const [abertaQ, setAbertaQ] = useState<number | null>(null);
+  const [abertaF, setAbertaF] = useState<string | null>(null);
+  const [novaAberta, setNovaAberta] = useState(false);
 
   const isOffflow = (q: Question) => (OFFFLOW_IDS as readonly string[]).includes(q.question_id);
   // Ordena por `ordem` (não pela posição no array): o reorder só atualiza o campo, então sem isso
@@ -375,6 +401,7 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
       });
       setQuestions((v) => [...v, created]);
       setNewQ({ question_id: '', text: '', variavel: '' });
+      setNovaAberta(false);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -532,37 +559,42 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
         </p>
       )}
 
-      <Legenda areas={areas} variaveis={variaveis} variaveisRoteiro={variaveisRoteiro} />
+      <details className="rot-legenda">
+        <summary>
+          <span>Marcadores e variáveis disponíveis</span>
+          <small>{'{empresa}'} · {'{nome}'} · {'<br>'} · áreas e variáveis do roteiro</small>
+          <Chevron aberto={false} />
+        </summary>
+        <Legenda areas={areas} variaveis={variaveis} variaveisRoteiro={variaveisRoteiro} />
+      </details>
 
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
-        <button type="button" className={tab === 'perguntas' ? '' : 'secondary'} onClick={() => setTab('perguntas')}>
-          Perguntas do roteiro
-        </button>
-        <button type="button" className={tab === 'fora-do-fluxo' ? '' : 'secondary'} onClick={() => setTab('fora-do-fluxo')}>
-          Textos fora do fluxo
-        </button>
-        <button type="button" className={tab === 'variaveis' ? '' : 'secondary'} onClick={() => setTab('variaveis')}>
-          Variáveis
-        </button>
-        <button type="button" className={tab === 'opcoes-agente' ? '' : 'secondary'} onClick={() => setTab('opcoes-agente')}>
-          Opções do Agente
-        </button>
-        <button type="button" className={tab === 'classificacoes' ? '' : 'secondary'} onClick={() => setTab('classificacoes')}>
-          Classificações
-        </button>
+      <div className="rot-tabs" role="tablist" aria-label="Seções do roteiro">
+        {([
+          ['perguntas', 'Perguntas do roteiro', questions.filter((q) => !isOffflow(q)).length],
+          ['fora-do-fluxo', 'Textos fora do fluxo', null],
+          ['variaveis', 'Variáveis', variaveis.length],
+          ['opcoes-agente', 'Opções do Agente', null],
+          ['classificacoes', 'Classificações', null],
+        ] as const).map(([k, nome, n]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'ativa' : ''} onClick={() => setTab(k)}>
+            {nome}
+            {n !== null && <span className="rot-contagem">{n}</span>}
+          </button>
+        ))}
       </div>
 
       {busy && !questions.length && !variaveis.length && <SkeletonCards count={4} height={92} />}
 
       {tab === 'perguntas' && (
-        <section className="section">
+        <section className="section rot-grade">
+          <div className="rot-lista">
           <div className="spin-seletor" role="tablist" aria-label="Lista de perguntas">
             <button type="button" role="tab" aria-selected={lista === 'fixas'} className={lista === 'fixas' ? '' : 'secondary'} onClick={() => setLista('fixas')}>
-              Perguntas fixas
+              Perguntas fixas <span className="rot-contagem">{questions.filter((q) => !isOffflow(q) && (q.area ?? null) === null).length}</span>
             </button>
             {areas.map((a) => (
               <button type="button" role="tab" key={a.id} aria-selected={lista === a.id} className={lista === a.id ? '' : 'secondary'} onClick={() => setLista(a.id)}>
-                {a.name}-SPIN
+                {a.name}-SPIN <span className="rot-contagem">{questions.filter((q) => !isOffflow(q) && q.area === a.id).length}</span>
               </button>
             ))}
           </div>
@@ -580,7 +612,8 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
           {flowQuestions.map((q, index) => (
             <article
               key={q.id}
-              className="step-card"
+              className={`step-card rot-card${abertaQ === q.id ? ' aberta' : ''}`}
+              id={`rot-q-${q.id}`}
               onDragOver={(e) => canEdit && e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
@@ -593,7 +626,19 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
               }}
               style={{ opacity: dragId === q.id ? 0.5 : 1 }}
             >
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+              <div
+                className="rot-linha"
+                role="button"
+                tabIndex={0}
+                aria-expanded={abertaQ === q.id}
+                onClick={() => setAbertaQ(abertaQ === q.id ? null : q.id)}
+                onKeyDown={(e) => {
+                  if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                    e.preventDefault();
+                    setAbertaQ(abertaQ === q.id ? null : q.id);
+                  }
+                }}
+              >
                 {canEdit && (
                   // Só o "pegador" é draggable (não o card inteiro): o card tem textarea/select por
                   // dentro, e arrastar a partir deles nunca inicia o drag nativo do navegador --
@@ -611,17 +656,25 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
                     onDragEnd={() => setDragId(null)}
                     className="step-handle"
                     title="Arraste para reordenar"
+                    onClick={(e) => e.stopPropagation()}
                   >
                     <span className="step-number">{index + 1}</span>
                     <span aria-hidden>⠿</span>
                   </span>
                 )}
+                {!canEdit && <span className="step-number">{index + 1}</span>}
                 <span className="step-tag">{MANDATORY_LABELS[q.question_id] || q.question_id}</span>
-                {q.etapa_spin && <span className="chip chip-neutral">{ETAPAS_SPIN.find((et) => et.value === q.etapa_spin)?.label}</span>}
-                {q.obrigatoria && <span className="chip chip-neutral">padrão</span>}
-                {q.envio_obrigatorio && <span className="chip chip-neutral">envio obrigatório</span>}
-                {q.audio_gravado && <span className="chip chip-neutral">áudio gravado</span>}
+                <span className={`rot-previa${q.text.trim() ? '' : ' vazio'}`}>{q.text.trim() ? resumo(q.text) : 'Sem texto cadastrado'}</span>
+                <span className="rot-etiquetas">
+                  {q.etapa_spin && <span className="chip chip-neutral">{ETAPAS_SPIN.find((et) => et.value === q.etapa_spin)?.label}</span>}
+                  {q.envio_obrigatorio && <span className="chip chip-neutral">envio obrigatório</span>}
+                  {q.audio_gravado && <span className="chip chip-neutral">áudio gravado</span>}
+                  {variaveis.find((v) => v.id === q.variavel) && <span className="chip chip-neutral">peso {variaveis.find((v) => v.id === q.variavel)?.peso}</span>}
+                </span>
+                <Chevron aberto={abertaQ === q.id} />
               </div>
+              {abertaQ === q.id && (
+              <div className="rot-corpo">
               {canEdit ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <label style={{ margin: 0 }}>
@@ -732,13 +785,20 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
               {company.allow_transcription && (
                 <AudioDaPergunta api={api} companyId={company.id} question={q} canEdit={canEdit} onChange={atualizarPergunta} />
               )}
+              </div>
+              )}
             </article>
           ))}
           </div>
           {!busy && !flowQuestions.length && <div className="empty">{areaSelecionada ? `Nenhuma pergunta na lista ${areaSelecionada.name}-SPIN ainda.` : 'Nenhuma pergunta cadastrada para esta empresa ainda.'}</div>}
 
-          {canEdit && (
-            <form onSubmit={createQuestion} className="step-card" style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
+          {canEdit && !novaAberta && (
+            <button type="button" className="rot-adicionar" onClick={() => setNovaAberta(true)}>
+              + Nova pergunta {areaSelecionada ? `em ${areaSelecionada.name}-SPIN` : 'fixa'}
+            </button>
+          )}
+          {canEdit && novaAberta && (
+            <form onSubmit={createQuestion} className="step-card rot-nova" style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
               <strong style={{ fontSize: 14 }}>Nova pergunta {areaSelecionada ? `em ${areaSelecionada.name}-SPIN` : 'fixa'}</strong>
               <small style={{ color: 'var(--muted)' }}>
                 Perguntas além das 3 obrigatórias (nome, situação, demanda) entram no campo de observação do lead.
@@ -772,11 +832,42 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
               {!variaveis.length && (
                 <small style={{ color: 'var(--warn)' }}>Cadastre uma variável na aba "Variáveis do agente" antes de criar uma pergunta nova.</small>
               )}
-              <button disabled={savingQ === 'new' || !variaveis.length} style={{ alignSelf: 'flex-start' }}>
-                {savingQ === 'new' && <Spinner />}+ Adicionar pergunta
-              </button>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button disabled={savingQ === 'new' || !variaveis.length}>
+                  {savingQ === 'new' && <Spinner />}+ Adicionar pergunta
+                </button>
+                <button type="button" className="secondary" onClick={() => setNovaAberta(false)}>
+                  Cancelar
+                </button>
+              </div>
             </form>
           )}
+          </div>
+
+          <aside className="rot-chat" aria-label="Pré-visualização da conversa">
+            <div className="rot-chat-topo">
+              <strong>Como o contato vê</strong>
+              <small>{areaSelecionada ? `${areaSelecionada.name}-SPIN` : 'Perguntas fixas'} · dados de exemplo</small>
+            </div>
+            <div className="rot-chat-corpo">
+              {flowQuestions.map((q, i) => (
+                <button
+                  key={q.id}
+                  type="button"
+                  className={`rot-bolha${abertaQ === q.id ? ' ativa' : ''}${q.text.trim() ? '' : ' vazia'}`}
+                  onClick={() => {
+                    setAbertaQ(q.id);
+                    window.setTimeout(() => document.getElementById(`rot-q-${q.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+                  }}
+                >
+                  <span className="rot-bolha-n">{i + 1}</span>
+                  {q.text.trim() ? textoDeExemplo(q.text, company.name, areaSelecionada?.name) : 'Sem texto cadastrado'}
+                </button>
+              ))}
+              {!flowQuestions.length && <p className="dash-nota">Nenhuma pergunta nesta lista ainda.</p>}
+            </div>
+            <small className="rot-chat-nota">Clique em uma mensagem para editar a pergunta. {company.mensagens_audio && company.allow_transcription ? 'Com áudio ligado, o contato recebe estas mensagens em voz.' : ''}</small>
+          </aside>
         </section>
       )}
 
@@ -791,16 +882,32 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
             const q = offflowQuestions.find((x) => x.question_id === id);
             const label = OFFFLOW_LABELS[id];
             return (
-              <article key={id} className="step-card">
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 6 }}>
+              <article key={id} className={`step-card rot-card${abertaF === id ? ' aberta' : ''}`}>
+                <div
+                  className="rot-linha"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={abertaF === id}
+                  onClick={() => setAbertaF(abertaF === id ? null : id)}
+                  onKeyDown={(e) => {
+                    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                      e.preventDefault();
+                      setAbertaF(abertaF === id ? null : id);
+                    }
+                  }}
+                >
                   <span className="step-tag">{label.title}</span>
+                  <span className={`rot-previa${q?.text.trim() ? '' : ' vazio'}`}>{q?.text.trim() ? resumo(q.text) : 'Sem texto cadastrado'}</span>
                   {q && (
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+                    <label className="rot-liga" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }} onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" style={{ width: 'auto' }} checked={q.habilitada && !(etapaInicial && (id === 'necessidade_humana' || id === 'especial_acompanhamento'))} disabled={!canEdit || savingQ === q.id || (etapaInicial && (id === 'necessidade_humana' || id === 'especial_acompanhamento'))} onChange={(e) => saveQuestion(q, { habilitada: e.target.checked })} />
                       Permitir envio pelo agente
                     </label>
                   )}
+                  <Chevron aberto={abertaF === id} />
                 </div>
+                {abertaF === id && (
+                <div className="rot-corpo">
                 <small style={{ display: 'block', color: 'var(--muted)', marginBottom: 10 }}>{label.help}</small>
                 {etapaInicial && id === 'necessidade_humana' && <p style={{ color: 'var(--muted)', fontSize: 13 }}>Pedido de atendimento humano desabilitado durante o início por SPIN. O agente segue a triagem e encaminha a lead após classificá-la.</p>}
                 {etapaInicial && id === 'especial_acompanhamento' && <p style={{ color: 'var(--muted)', fontSize: 13 }}>Com “Etapa Inicial?” marcada o agente não responde ao cliente: o lead vai para “Outras situações” em silêncio.</p>}
@@ -856,6 +963,8 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
                 )}
                 {q && company.allow_transcription && (
                   <AudioDaPergunta api={api} companyId={company.id} question={q} canEdit={canEdit} onChange={atualizarPergunta} />
+                )}
+                </div>
                 )}
               </article>
             );
