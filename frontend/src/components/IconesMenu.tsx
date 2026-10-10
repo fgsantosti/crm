@@ -14,6 +14,7 @@ const ICONES: Record<string, ReactNode> = {
   painel: <><rect x="2" y="3" width="12" height="10" rx="2" /><path d="M5 7l2 2-2 2M9 11h2" strokeLinecap="round" strokeLinejoin="round" /></>,
   gestores: <><circle cx="8" cy="5.5" r="2.5" /><path d="M3 13.5c.8-2.4 2.7-3.6 5-3.6s4.2 1.2 5 3.6" strokeLinecap="round" /></>,
   faturamento: <><circle cx="8" cy="8" r="6" /><path d="M8 4.5v7M10 6.2c-.5-.6-1.2-.9-2-.9-1.1 0-2 .6-2 1.5s.9 1.3 2 1.5 2 .6 2 1.5-.9 1.5-2 1.5c-.8 0-1.5-.3-2-.9" strokeLinecap="round" /></>,
+  notificacoes: <><path d="M4 11V7a4 4 0 018 0v4l1 1.5H3z" strokeLinejoin="round" /><path d="M6.5 14a1.7 1.7 0 003 0" strokeLinecap="round" /></>,
   cobrancas: <><path d="M2.5 8.5V3.5h5l6 6-5 5z" strokeLinejoin="round" /><circle cx="5.5" cy="6.5" r=".9" fill="currentColor" stroke="none" /></>,
   identidade: <><circle cx="8" cy="8" r="6" /><circle cx="6" cy="6.5" r=".6" /><circle cx="10" cy="6.5" r=".6" /><circle cx="8" cy="10.5" r=".6" /></>,
 };

@@ -6,7 +6,7 @@ import { useConfirmar } from '../components/ConfirmDialog';
 
 // Painel Admin → Gestores: o cliente que paga e as empresas dele (base do faturamento).
 const FORMAS = [['pix', 'PIX'], ['boleto', 'Boleto'], ['cartao', 'Cartão'], ['outro', 'Outro']] as const;
-const VAZIO = { nome: '', email: '', dia_vencimento: 10, forma_pagamento: 'pix', contrato_inicio: '', indice_reajuste: 'IPCA', notas: '' };
+const VAZIO = { nome: '', email: '', dia_vencimento: 10, forma_pagamento: 'pix', contrato_inicio: '', indice_reajuste: 'IPCA', openai_projeto: '', openai_chave_final: '', openai_limite_mensal: '', notas: '' };
 const dataBr = (iso: string | null | undefined) => (iso ? iso.slice(0, 10).split('-').reverse().join('/') : '—');
 
 export function AdminGestores({ api }: { api: Api }) {
@@ -47,7 +47,7 @@ export function AdminGestores({ api }: { api: Api }) {
     setSaving(true);
     setError('');
     try {
-      const corpo = { ...form.dados, contrato_inicio: form.dados.contrato_inicio || null };
+      const corpo = { ...form.dados, contrato_inicio: form.dados.contrato_inicio || null, openai_limite_mensal: form.dados.openai_limite_mensal === '' ? null : form.dados.openai_limite_mensal };
       const g: Gestor = await api(form.id ? `/admin-gestores/${form.id}/` : '/admin-gestores/', { method: form.id ? 'PATCH' : 'POST', body: JSON.stringify(corpo) });
       if (form.id) trocar(g);
       else setGestores((v) => [...v, g].sort((a, b) => a.nome.localeCompare(b.nome)));
@@ -156,6 +156,24 @@ export function AdminGestores({ api }: { api: Api }) {
               </select>
             </label>
           </div>
+          <fieldset className="gestor-openai">
+            <legend>Chave da OpenAI do gestor</legend>
+            <p className="dash-nota">O gestor paga o modelo. Guardamos só a referência; a chave em si fica no gateway de cada agente.</p>
+            <div className="cob-campos">
+              <label>
+                Projeto na OpenAI
+                <input value={form.dados.openai_projeto} onChange={(e) => campo('openai_projeto', e.target.value)} />
+              </label>
+              <label>
+                Final da chave
+                <input value={form.dados.openai_chave_final} maxLength={8} placeholder="ex.: 7f3a" onChange={(e) => campo('openai_chave_final', e.target.value)} />
+              </label>
+              <label>
+                Limite mensal combinado (R$)
+                <input type="number" min={0} step={10} value={form.dados.openai_limite_mensal} onChange={(e) => campo('openai_limite_mensal', e.target.value)} />
+              </label>
+            </div>
+          </fieldset>
           <label>
             Notas internas (só você vê)
             <textarea rows={3} value={form.dados.notas} onChange={(e) => campo('notas', e.target.value)} />
@@ -183,7 +201,7 @@ export function AdminGestores({ api }: { api: Api }) {
                 </small>
               </div>
               <div className="cob-acoes-linha">
-                <button type="button" className="secondary" onClick={() => setForm({ id: g.id, dados: { nome: g.nome, email: g.email, dia_vencimento: g.dia_vencimento, forma_pagamento: g.forma_pagamento, contrato_inicio: g.contrato_inicio ?? '', indice_reajuste: g.indice_reajuste, notas: g.notas } })}>
+                <button type="button" className="secondary" onClick={() => setForm({ id: g.id, dados: { nome: g.nome, email: g.email, dia_vencimento: g.dia_vencimento, forma_pagamento: g.forma_pagamento, contrato_inicio: g.contrato_inicio ?? '', indice_reajuste: g.indice_reajuste, openai_projeto: g.openai_projeto, openai_chave_final: g.openai_chave_final, openai_limite_mensal: g.openai_limite_mensal ?? '', notas: g.notas } })}>
                   Editar
                 </button>
                 <button type="button" className="secondary" onClick={() => implantacao(g)}>

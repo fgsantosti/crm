@@ -284,6 +284,9 @@ export type Gestor = {
   forma_pagamento: 'pix' | 'boleto' | 'cartao' | 'outro';
   contrato_inicio: string | null;
   indice_reajuste: string;
+  openai_projeto: string;
+  openai_chave_final: string;
+  openai_limite_mensal: string | null;
   notas: string;
   empresas: GestorEmpresa[];
 };
@@ -308,4 +311,21 @@ export type Faturamento = {
   pagamentos: { id: number; data: string; gestor: string; referencia: string; valor: string; forma: string; comprovante: string; por: string }[];
   contratos: { gestor_id: number; gestor: string; contrato_inicio: string | null; indice: string; proximo_reajuste: string | null; dias_para_reajuste: number | null; alerta_reajuste: boolean; desconto_por_tempo_pct: number; implantacao: string; em_teste: boolean }[];
   recorrente: { mes: string; valor: string; projecao: boolean }[];
+};
+
+
+export type ConfigNotificacao = {
+  remetente: string; cc: string; lembrete_cobranca_ativo: boolean; lembrete_dias_antes: number; teste_ativo: boolean; teste_dias_avisos: number[];
+  atraso_f1: boolean; atraso_f2: boolean; atraso_f3: boolean; chave_ativo: boolean; chave_dias_avisos: number[];
+  texto_cobranca: string; texto_teste: string; texto_atraso: string; texto_desligamento: string; texto_chave: string;
+};
+export type NotificacaoItem = { id: number; quando: string; gestor: string; para: string; tipo: string; tipo_rotulo: string; assunto: string; estado: string; erro: string };
+export type ChavesGestor = {
+  gestor_id: number; gestor: string; email: string;
+  agentes: { agente: string; empresa: string; chave: string | null; expira_em: string | null; dias: number | null; situacao: 'valida' | 'expira' | 'expirada' | 'sem_chave' | 'sem_validade' }[];
+  openai: { projeto: string; chave_final: string; limite_mensal: string | null };
+};
+export type RegraCobranca = {
+  prorata_ativo: boolean; descontos: [number, number][]; abater_piloto: boolean; abatimento_pct: number; indice_padrao: string;
+  alerta_reajuste_dias: number; faixa_atraso_curta: number; faixa_atraso_media: number; aviso_desligamento_dias: number;
 };

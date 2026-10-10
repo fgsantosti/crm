@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchTodasAsPaginas, type Api } from '../api';
-import type { AdminCompany, PrecoItem, TabelaPrecos } from '../types';
+import type { AdminCompany, PrecoItem, RegraCobranca, TabelaPrecos } from '../types';
 import { Spinner } from '../components/Skeleton';
 import { useConfirmar } from '../components/ConfirmDialog';
 
@@ -29,14 +29,18 @@ export function AdminCobrancas({ api }: { api: Api }) {
   const [escopo, setEscopo] = useState('novos');
   const [saving, setSaving] = useState(false);
   const [agindo, setAgindo] = useState<number | null>(null);
+  const [regras, setRegras] = useState<RegraCobranca | null>(null);
+  const [salvandoRegras, setSalvandoRegras] = useState(false);
+  const [avisoRegras, setAvisoRegras] = useState('');
 
   const carregar = useCallback(() => {
     setBusy(true);
     setError('');
-    Promise.all([api('/admin-precos/'), fetchTodasAsPaginas<AdminCompany>(api, '/admin-companies/')])
-      .then(([t, e]) => {
+    Promise.all([api('/admin-precos/'), fetchTodasAsPaginas<AdminCompany>(api, '/admin-companies/'), api('/admin-regras-cobranca/')])
+      .then(([t, e, r]) => {
         setTabela(t);
         setEmpresas(e);
+        setRegras(r);
       })
       .catch((e) => setError(e.message))
       .finally(() => setBusy(false));
@@ -84,6 +88,22 @@ export function AdminCobrancas({ api }: { api: Api }) {
       setSaving(false);
     }
   }
+
+  async function salvarRegras() {
+    if (!regras) return;
+    setSalvandoRegras(true);
+    setError('');
+    setAvisoRegras('');
+    try {
+      setRegras(await api('/admin-regras-cobranca/', { method: 'PATCH', body: JSON.stringify(regras) }));
+      setAvisoRegras('Regras salvas. Valem para as próximas cobranças emitidas.');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSalvandoRegras(false);
+    }
+  }
+  const mudarRegra = <K extends keyof RegraCobranca>(k: K, v: RegraCobranca[K]) => setRegras((r) => (r ? { ...r, [k]: v } : r));
 
   async function agirNoTeste(empresa: AdminCompany, acao: 'ligar' | 'desligar' | 'prorrogar' | 'converter') {
     if (acao === 'converter' && !(await confirmar({ titulo: `Converter ${empresa.name} em contrato?`, mensagem: 'A empresa sai da fase de teste e passa a cobrar a mensalidade. O valor do piloto é abatido da implantação.', icone: 'pessoa', confirmar: 'Converter em contrato' }))) return;
@@ -233,6 +253,77 @@ export function AdminCobrancas({ api }: { api: Api }) {
           <p className="dash-nota">Nenhuma alteração registrada.</p>
         )}
       </section>
+
+      {regras && (
+        <section className="dash-card" aria-labelledby="cob-regras">
+          <div>
+            <h2 id="cob-regras">Regras de cobrança</h2>
+            <small>Valem para as próximas cobranças emitidas; as já emitidas não mudam.</small>
+          </div>
+          <div className="cob-regras-grade">
+            <article>
+              <label className="cob-regra-linha">
+                <input type="checkbox" checked={regras.prorata_ativo} onChange={(e) => mudarRegra('prorata_ativo', e.target.checked)} />
+                <strong>Pro-rata no mês de entrada</strong>
+              </label>
+              <small>No mês de início do contrato cobra só os dias de uso, até o fim do mês.</small>
+            </article>
+            <article>
+              <label className="cob-regra-linha">
+                <input type="checkbox" checked={regras.abater_piloto} onChange={(e) => mudarRegra('abater_piloto', e.target.checked)} />
+                <strong>Abatimento do piloto na implantação</strong>
+              </label>
+              <small>
+                Abater <input className="notif-num" type="number" min={0} max={100} value={regras.abatimento_pct} onChange={(e) => mudarRegra('abatimento_pct', Number(e.target.value))} />% do piloto pago.
+              </small>
+            </article>
+            <article>
+              <strong>Desconto por tempo de contrato</strong>
+              {regras.descontos.map(([m, p], i) => (
+                <small key={i} className="cob-desconto">
+                  Após <input className="notif-num" type="number" min={1} value={m} onChange={(e) => mudarRegra('descontos', regras.descontos.map((d, j) => (j === i ? [Number(e.target.value), d[1]] : d)) as [number, number][])} /> meses:
+                  <input className="notif-num" type="number" min={1} max={100} value={p} onChange={(e) => mudarRegra('descontos', regras.descontos.map((d, j) => (j === i ? [d[0], Number(e.target.value)] : d)) as [number, number][])} />%
+                  <button type="button" className="secondary" aria-label="Remover faixa de desconto" onClick={() => mudarRegra('descontos', regras.descontos.filter((_, j) => j !== i))}>×</button>
+                </small>
+              ))}
+              <button type="button" className="secondary" onClick={() => mudarRegra('descontos', [...regras.descontos, [(regras.descontos.at(-1)?.[0] ?? 0) + 12, 5]])}>
+                + Faixa de desconto
+              </button>
+            </article>
+            <article>
+              <strong>Reajuste anual</strong>
+              <small>
+                Índice padrão{' '}
+                <select value={regras.indice_padrao} onChange={(e) => mudarRegra('indice_padrao', e.target.value)}>
+                  {['IPCA', 'IGP-M', 'Percentual fixo'].map((i) => (
+                    <option key={i}>{i}</option>
+                  ))}
+                </select>
+              </small>
+              <small>
+                Alertar <input className="notif-num" type="number" min={0} value={regras.alerta_reajuste_dias} onChange={(e) => mudarRegra('alerta_reajuste_dias', Number(e.target.value))} /> dias antes da renovação.
+              </small>
+            </article>
+            <article>
+              <strong>Inadimplência</strong>
+              <small>
+                Faixa curta até <input className="notif-num" type="number" min={1} value={regras.faixa_atraso_curta} onChange={(e) => mudarRegra('faixa_atraso_curta', Number(e.target.value))} /> dias; média até{' '}
+                <input className="notif-num" type="number" min={2} value={regras.faixa_atraso_media} onChange={(e) => mudarRegra('faixa_atraso_media', Number(e.target.value))} /> dias; acima disso, atraso longo.
+              </small>
+              <small>
+                Avisar o gestor <input className="notif-num" type="number" min={0} value={regras.aviso_desligamento_dias} onChange={(e) => mudarRegra('aviso_desligamento_dias', Number(e.target.value))} /> dias antes de desligar os agentes.
+              </small>
+            </article>
+          </div>
+          <div className="cob-acoes">
+            {avisoRegras && <span role="status" className="classif-aviso">{avisoRegras}</span>}
+            <button type="button" disabled={salvandoRegras} onClick={salvarRegras}>
+              {salvandoRegras && <Spinner />}
+              Salvar regras
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="dash-card dash-card-tabela" aria-labelledby="cob-testes">
         <div className="dash-card-topo">

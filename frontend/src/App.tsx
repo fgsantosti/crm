@@ -20,6 +20,7 @@ import { AdminEquipe } from './views/AdminEquipe';
 import { AdminCobrancas } from './views/AdminCobrancas';
 import { AdminGestores } from './views/AdminGestores';
 import { AdminFaturamento } from './views/AdminFaturamento';
+import { AdminNotificacoes } from './views/AdminNotificacoes';
 import { TrocarSenhaObrigatoria } from './views/TrocarSenhaObrigatoria';
 import { TrocarEmailPagina } from './views/TrocarEmailPagina';
 import { TrocarSenhaPagina } from './views/TrocarSenhaPagina';
@@ -182,6 +183,7 @@ export function App() {
             {adminView === 'gestores' && <AdminGestores api={api} />}
             {adminView === 'faturamento' && <AdminFaturamento api={api} />}
             {adminView === 'cobrancas' && <AdminCobrancas api={api} />}
+            {adminView === 'notificacoes' && <AdminNotificacoes api={api} />}
           </div>
         </main>
       </div>
