@@ -5,6 +5,9 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.utils import timezone
 
+def default_cortes_classificacao():
+    return [3, 5, 7, 9]
+
 class Company(models.Model):
     name = models.CharField(max_length=160)
     members = models.ManyToManyField(settings.AUTH_USER_MODEL, related_name="companies")
@@ -12,6 +15,8 @@ class Company(models.Model):
     allow_transcription = models.BooleanField(default=False)
     # Portão do Admin: com ele ligado, o CRM guarda as mensagens do cliente (e transcrições de áudio) de cada
     # lead, da primeira até a que o classificou, para a equipe consultar em "Histórico de conversa".
+    classificacao_cortes = models.JSONField(default=default_cortes_classificacao, blank=True, help_text="4 notas (0-10, crescentes) onde terminam Desqualificado, Desconfiado, Frio e Qualificado; a partir da última é Quente. Padrão [3,5,7,9]; ver services.faixas_da_empresa.")
+    classificacao_regra = models.TextField(blank=True, default="", max_length=1500, help_text="Critério em texto que o agente lê antes de dar as notas (tela Roteiro, aba Classificações). A temperatura final continua sendo calculada pelo CRM.")
     coletar_historico_conversa = models.BooleanField(default=False)
     # Identidade visual da empresa (barra lateral): vazio = padrão Conecta (logo e nome do produto).
     # Só a conta Empresa edita; as duas cores formam o gradiente de fundo e são obrigatórias juntas.

@@ -1386,6 +1386,33 @@ FAIXAS_URGENCIA = [
     (9, None, "Quente"),
 ]
 URGENCIA_RANK = {temp: i for i, (_, _, temp) in enumerate(FAIXAS_URGENCIA)}
+NOMES_CLASSIFICACAO = [temp for _, _, temp in FAIXAS_URGENCIA]
+CORTES_PADRAO = [3, 5, 7, 9]
+MAX_REGRA_CLASSIFICACAO = 1500
+
+def validar_cortes(cortes):
+    """4 notas de 0 a 10, estritamente crescentes (mín. 0,1 entre elas), em passos de 0,1. Devolve a lista limpa
+    ou levanta ValueError com a mensagem para a tela."""
+    if not isinstance(cortes, (list, tuple)) or len(cortes) != 4:
+        raise ValueError("Informe os 4 cortes das faixas de classificação.")
+    try:
+        valores = [round(float(c), 1) for c in cortes]
+    except (TypeError, ValueError):
+        raise ValueError("Os cortes precisam ser números.")
+    if any(v < 0 or v > 10 for v in valores):
+        raise ValueError("Os cortes ficam entre 0 e 10.")
+    if any(b - a < 0.099 for a, b in zip(valores, valores[1:])) or valores[0] < 0.1 or valores[-1] > 9.9:
+        raise ValueError("Cada faixa precisa ter ao menos 0,1 de largura: os cortes devem ser crescentes.")
+    return valores
+
+def faixas_da_empresa(company=None):
+    """Mesma estrutura de FAIXAS_URGENCIA, mas com os cortes da empresa (padrão 3/5/7/9)."""
+    try:
+        cortes = validar_cortes(getattr(company, "classificacao_cortes", None) or CORTES_PADRAO)
+    except ValueError:
+        cortes = CORTES_PADRAO
+    limites = [0, *cortes, None]
+    return [(limites[i], limites[i + 1], NOMES_CLASSIFICACAO[i]) for i in range(5)]
 PRIORIDADE_POR_TEMPERATURA = {"Quente": "Alta", "Qualificado": "Média"}
 
 # O agente manda TODOS os leads pro CRM, até os desqualificados/desconfiados
@@ -1397,17 +1424,18 @@ PODE_ASSUMIR_A_PARTIR_DE = "Frio"
 # Comprometido e Falha também são conclusões, mas não de sucesso.
 DESFECHO_SUCESSO = "encerrado"
 
-def calcular_urgencia(notas, pesos):
+def calcular_urgencia(notas, pesos, faixas=None):
     """score = Σ(nota × peso) / Σ(peso), só sobre os question_id que têm peso.
     Retorna (score, temperatura) ou None se nenhuma nota tiver peso conhecido."""
     usados = [(float(notas[qid]), pesos[qid]) for qid in notas if qid in pesos and pesos[qid]]
     if not usados:
         return None
     score = sum(nota * peso for nota, peso in usados) / sum(peso for _, peso in usados)
-    for minimo, maximo_exclusivo, temperatura in FAIXAS_URGENCIA:
+    faixas = faixas or FAIXAS_URGENCIA
+    for minimo, maximo_exclusivo, temperatura in faixas:
         if score >= minimo and (maximo_exclusivo is None or score < maximo_exclusivo):
             return score, temperatura
-    return score, FAIXAS_URGENCIA[0][2]
+    return score, faixas[0][2]
 
 # Chave do Detalhamento em Lead.urgencia_detalhe["notas"/"pesos"] (não é um question_id).
 CHAVE_DETALHAMENTO = "_detalhamento"
@@ -1477,7 +1505,7 @@ def _aplicar_notas_urgencia(lead, company, fields):
         usados[CHAVE_DETALHAMENTO] = calcular_detalhamento(lead, fields)
         pesos[CHAVE_DETALHAMENTO] = detalhamento.peso
         nomes[CHAVE_DETALHAMENTO] = detalhamento.name
-    score, temperatura = calcular_urgencia(usados, pesos)
+    score, temperatura = calcular_urgencia(usados, pesos, faixas_da_empresa(company))
     fields = {**fields, "temperatura": temperatura}
     if not fields.get("prioridade"):
         fields["prioridade"] = PRIORIDADE_POR_TEMPERATURA.get(temperatura, "Baixa")
@@ -1852,8 +1880,10 @@ def contexto_agente(company):
         ],
         "faixas_urgencia": [
             {"min": minimo, "max_exclusivo": maximo, "temperatura": temperatura}
-            for minimo, maximo, temperatura in FAIXAS_URGENCIA
+            for minimo, maximo, temperatura in faixas_da_empresa(company)
         ],
+        # Critério em texto da empresa para o agente dar as notas ("" = sem regra); o CRM calcula a classificação.
+        "regra_classificacao": (company.classificacao_regra or "").strip(),
     }
 
 def _categoria_status(lead):

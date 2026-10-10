@@ -4070,3 +4070,50 @@ class NotasSoDaSpinDaAreaTests(TestCase):
         _, erro = _aplicar_notas_urgencia(outro, company, {"notas": {"trab_situacao": 9}})
         self.assertIsNone(erro)
         self.assertEqual(outro.urgencia_detalhe, {})
+
+
+class ClassificacaoCortesERegraTests(TestCase):
+    def setUp(self):
+        self.company = Company.objects.create(name="Cortes Ltda")
+        seed_roteiro_padrao(self.company)
+        self.staff = get_user_model().objects.create_user("emp-cortes", password="x", is_staff=True)
+        self.company.members.add(self.staff)
+        self.api = APIClient(); self.api.force_authenticate(self.staff)
+        self.url = f"/api/companies/{self.company.pk}/"
+
+    def test_faixas_padrao_e_cortes_da_empresa(self):
+        from .services import faixas_da_empresa, calcular_urgencia
+        self.assertEqual([(a, b) for a, b, _ in faixas_da_empresa(self.company)], [(0, 3), (3, 5), (5, 7), (7, 9), (9, None)])
+        self.company.classificacao_cortes = [2, 4, 6, 8]
+        faixas = faixas_da_empresa(self.company)
+        # Mesma média 8,5: no padrão é Qualificado; com cortes flexíveis é Quente.
+        self.assertEqual(calcular_urgencia({"a": 8.5}, {"a": 5})[1], "Qualificado")
+        self.assertEqual(calcular_urgencia({"a": 8.5}, {"a": 5}, faixas)[1], "Quente")
+
+    def test_patch_valida_e_grava_cortes_e_regra(self):
+        r = self.api.patch(self.url, {"classificacao_cortes": [2, 4, 6, 8.5], "classificacao_regra": "  Prazo judicial pesa mais.  "}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.company.refresh_from_db()
+        self.assertEqual(self.company.classificacao_cortes, [2.0, 4.0, 6.0, 8.5])
+        self.assertEqual(self.company.classificacao_regra, "Prazo judicial pesa mais.")
+        for ruim in ([5, 4, 6, 8], [1, 2, 3], [0, 3, 5, 7], [3, 5, 7, 10], ["a", 2, 3, 4], [3, 3.05, 7, 9]):
+            self.assertEqual(self.api.patch(self.url, {"classificacao_cortes": ruim}, format="json").status_code, 400, ruim)
+        self.assertEqual(self.api.patch(self.url, {"classificacao_regra": "x" * 1501}, format="json").status_code, 400)
+
+    def test_contexto_do_agente_traz_faixas_da_empresa_e_a_regra(self):
+        Company.objects.filter(pk=self.company.pk).update(classificacao_cortes=[2, 4, 6, 8], classificacao_regra="Benefício cortado = nota alta.")
+        self.company.refresh_from_db()
+        ctx = contexto_agente(self.company)
+        self.assertEqual([(f["min"], f["max_exclusivo"]) for f in ctx["faixas_urgencia"]], [(0, 2), (2, 4), (4, 6), (6, 8), (8, None)])
+        self.assertEqual(ctx["regra_classificacao"], "Benefício cortado = nota alta.")
+
+    def test_classificado_usa_os_cortes_da_empresa(self):
+        from .services import _aplicar_notas_urgencia
+        Variavel.objects.filter(company=self.company, builtin=True).update(peso=0)
+        q = Question.objects.get(company=self.company, question_id="situacao")
+        Company.objects.filter(pk=self.company.pk).update(classificacao_cortes=[2, 4, 6, 8])
+        self.company.refresh_from_db()
+        lead = Lead.objects.create(company=self.company, contact="+5585900009100")
+        fields, erro = _aplicar_notas_urgencia(lead, self.company, {"notas": {"situacao": 8.5}})
+        self.assertIsNone(erro)
+        self.assertEqual(fields["temperatura"], "Quente")

@@ -22,10 +22,22 @@ class CompanySerializer(serializers.ModelSerializer):
         }
     class Meta:
         model = Company
-        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional", "mensagens_audio", "voz_tts", "etapa_inicial", "spin_inicial", "spins_iniciais", "coletar_historico_conversa", "identidade_visual"]
+        fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "agente_conversacional", "mensagens_audio", "voz_tts", "etapa_inicial", "spin_inicial", "spins_iniciais", "coletar_historico_conversa", "classificacao_cortes", "classificacao_regra", "identidade_visual"]
         # Só as opções do agente (tela Roteiro, aba "Opções do Agente") são editáveis
         # por aqui -- os demais campos de Company continuam no Painel Admin.
         read_only_fields = ["id", "name", "initial_state", "allow_transcription", "numero_agente", "coletar_historico_conversa"]
+    def validate_classificacao_cortes(self, valor):
+        from .services import validar_cortes
+        try:
+            return validar_cortes(valor)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
+    def validate_classificacao_regra(self, valor):
+        from .services import MAX_REGRA_CLASSIFICACAO
+        valor = (valor or "").strip()
+        if len(valor) > MAX_REGRA_CLASSIFICACAO:
+            raise serializers.ValidationError(f"A regra pode ter até {MAX_REGRA_CLASSIFICACAO} caracteres.")
+        return valor
     def validate(self, attrs):
         # Compatibilidade: spin_inicial (uma só) equivale a spins_iniciais=[essa].
         if "spin_inicial" in attrs and "spins_iniciais" not in attrs:
