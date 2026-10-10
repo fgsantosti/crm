@@ -3927,6 +3927,13 @@ class LembreteDeContinuidadeTests(TestCase):
         self.assertEqual(self.reservar(), [])  # idempotente: um lembrete por lead
         self.assertEqual(lead.events.get(marker="LEMBRETE").delivery, "PENDING")
 
+    def test_lead_sem_nome_nao_gera_ola_virgula_exclamacao(self):
+        lead = self.lead()
+        Lead.objects.filter(pk=lead.pk).update(name="")
+        texto = self.reservar()[0]["mensagens"][0]["content"]
+        self.assertTrue(texto.startswith("Olá!"), texto)
+        self.assertNotIn(", !", texto)
+
     def test_horario_definido_pela_empresa_adia_para_a_primeira_ocorrencia(self):
         from datetime import time
         from .services import horario_do_lembrete

@@ -1595,7 +1595,10 @@ def reservar_lembretes(company, agora=None):
         referencia = lead.last_contact or lead.created_at
         if agora < horario_do_lembrete(referencia, config.horario_envio) or agora - referencia >= APAGAR_SEM_LEMBRETE_APOS:
             continue
-        mensagens = [{"question_id": "lembrete", "content": render_text(config.text, lead, company)}]
+        texto = render_text(config.text, lead, company)
+        if not (lead.name or "").strip():
+            texto = re.sub(r"\s*,\s*([!?.:])", r"\1", texto)  # sem nome: "Olá, !" vira "Olá!"
+        mensagens = [{"question_id": "lembrete", "content": texto}]
         pergunta = _pergunta_pendente_do_lembrete(company, lead)
         if pergunta:
             mensagens.append({"question_id": pergunta.question_id, "content": render_text(pergunta.text, lead, company)})
