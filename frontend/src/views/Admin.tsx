@@ -193,265 +193,235 @@ export function Admin({ api }: { api: Api }) {
     }
   }
 
-  const visible = companies.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()));
+  const visible = companies.filter((c) => `${c.name} ${c.gestor_nome ?? ''}`.toLowerCase().includes(search.toLowerCase()));
 
-  return (
-    <div className="admin-body">
-      <main className="admin-main">
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <small className="eyebrow">Plataforma</small>
-              <h1 style={{ fontSize: 30 }}>Empresas cadastradas</h1>
-              <p>Visível apenas para a equipe Axioma — nenhum cliente acessa esta tela.</p>
-            </div>
+  const formularioCriar = creating && (
+    <form onSubmit={createCompany} className="dash-card adm-form-nova">
+      <label>
+        Nome da empresa
+        <input name="name" required />
+      </label>
+      <label>
+        question_id inicial
+        <input name="initial_state" defaultValue="apresentacao" />
+      </label>
+      <label>
+        Número do agente (WhatsApp)
+        <input name="numero_agente" placeholder="+5586999999999" inputMode="tel" />
+        <small>Número conectado ao agente. Normalmente é o mesmo número em que a equipe faz os atendimentos.</small>
+      </label>
+      <label className="adm-check">
+        <input type="checkbox" name="allow_transcription" /> Habilitar áudio (transcrição/voz)
+      </label>
+      <label className="adm-check">
+        <input type="checkbox" name="coletar_historico_conversa" /> Permitir coleta de histórico de conversa
+      </label>
+      <div className="cob-acoes">
+        <button type="button" className="secondary" onClick={() => setCreating(false)}>
+          Cancelar
+        </button>
+        <button disabled={savingCompany}>
+          {savingCompany && <Spinner />}
+          Criar empresa
+        </button>
+      </div>
+    </form>
+  );
+
+  if (!selected) {
+    return (
+      <>
+        <header className="page-header" style={{ alignItems: 'flex-end' }}>
+          <div>
+            <small className="eyebrow">Plataforma</small>
+            <h1>Empresas</h1>
+            <p>Cada empresa com o gestor, o agente e a situação. Visível apenas para a equipe Axioma.</p>
+          </div>
+          <div className="adm-filtros">
+            <input placeholder="Buscar empresa ou gestor" aria-label="Buscar empresa" style={{ width: 260 }} value={search} onChange={(e) => setSearch(e.target.value)} />
             <button onClick={() => setCreating((v) => !v)}>{creating ? 'Cancelar' : '+ Nova empresa'}</button>
           </div>
-
-          {error && (
-            <p role="alert" className="error">
-              {error}
-            </p>
-          )}
-
-          {creating && (
-            <form onSubmit={createCompany} className="panel" style={{ padding: 20, display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
-              <label style={{ margin: 0, flex: '1 1 220px' }}>
-                Nome da empresa
-                <input name="name" required />
-              </label>
-              <label style={{ margin: 0, flex: '1 1 180px' }}>
-                question_id inicial
-                <input name="initial_state" defaultValue="apresentacao" />
-              </label>
-              <label style={{ margin: 0, flex: '1 1 180px' }}>
-                Número do agente (WhatsApp)
-                <input name="numero_agente" placeholder="+5586999999999" inputMode="tel" />
-                <small style={{ display: 'block', fontWeight: 400, color: 'var(--muted)', marginTop: 4 }}>Número conectado ao agente. Normalmente é o mesmo número em que a equipe faz os atendimentos.</small>
-              </label>
-              <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
-                <input type="checkbox" name="allow_transcription" style={{ width: 'auto' }} /> Habilitar áudio (transcrição/voz)
-              </label>
-              <label style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
-                <input type="checkbox" name="coletar_historico_conversa" style={{ width: 'auto' }} /> Permitir coleta de histórico de conversa
-              </label>
-              <button disabled={savingCompany}>
-                {savingCompany && <Spinner />}
-                Criar empresa
-              </button>
-            </form>
-          )}
-
-          <input placeholder="Buscar empresa" aria-label="Buscar empresa" style={{ maxWidth: 320 }} value={search} onChange={(e) => setSearch(e.target.value)} />
-
-          <section className="panel">
-            {busy && !companies.length ? (
-              <div style={{ padding: 20 }}>
-                <SkeletonCards count={3} height={60} />
-              </div>
-            ) : (
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Empresa</th>
-                      <th>Contas</th>
-                      <th>Agente</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visible.map((c) => (
-                      <tr
-                        key={c.id}
-                        className={c.id === selectedId ? 'company-row-active' : ''}
-                        onClick={() => setSelectedId(c.id)}
-                        style={{ cursor: 'pointer' }}
-                      >
-                        <td style={{ fontWeight: 600 }}>{c.name}</td>
-                        <td style={{ fontFamily: "'DM Mono',monospace" }}>{c.member_count}</td>
-                        <td>
-                          <span className={`badge ${c.tem_agente_ativo ? 'status-active' : 'status-pending'}`}>
-                            {c.tem_agente_ativo ? 'Ativo' : 'Sem agente'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {!visible.length && <div className="empty">Nenhuma empresa encontrada.</div>}
-              </div>
-            )}
-          </section>
-        </main>
-
-        <aside className="admin-detail">
-          {!selected ? (
-            <div className="empty">Selecione uma empresa na lista para ver os detalhes.</div>
-          ) : (
-            <div key={selected.id}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                <h2 style={{ fontSize: 21 }}>{selected.name}</h2>
-                <span className={`badge ${selected.tem_agente_ativo ? 'status-active' : 'status-pending'}`}>
-                  {selected.tem_agente_ativo ? 'Agente ativo' : 'Sem agente'}
+        </header>
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
+        {formularioCriar}
+        {busy && !companies.length ? (
+          <SkeletonCards count={3} height={110} />
+        ) : (
+          <section className="adm-empresas" aria-label="Empresas">
+            {visible.map((c) => (
+              <button key={c.id} type="button" className="dash-card adm-empresa" onClick={() => setSelectedId(c.id)}>
+                <span className="adm-empresa-topo">
+                  <strong>{c.name}</strong>
+                  <span className={`badge ${c.tem_agente_ativo ? 'status-active' : 'status-pending'}`}>{c.tem_agente_ativo ? 'Agente ativo' : 'Sem agente'}</span>
                 </span>
-              </div>
-              <p style={{ fontSize: '13.5px', marginBottom: 18 }}>{selected.member_count} conta(s) vinculada(s).</p>
-
-              <form onSubmit={saveCompany}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                <label>
-                  Nome
-                  <input name="name" defaultValue={selected.name} />
-                </label>
-                <label>
-                  question_id inicial
-                  <input name="initial_state" defaultValue={selected.initial_state} style={{ fontFamily: "'DM Mono',monospace", fontSize: 13 }} />
-                </label>
-                <label>
-                  Número do agente (WhatsApp)
-                  <input name="numero_agente" defaultValue={selected.numero_agente} placeholder="+5586999999999" inputMode="tel" />
-                  <small style={{ display: 'block', fontWeight: 400, color: 'var(--muted)', marginTop: 4 }}>Número conectado ao agente. Normalmente é o mesmo número em que a equipe faz os atendimentos.</small>
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 20 }}>
-                  <input type="checkbox" name="allow_transcription" defaultChecked={selected.allow_transcription} style={{ width: 'auto' }} /> Habilitar áudio (transcrição/voz)
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 20 }}>
-                  <input type="checkbox" name="coletar_historico_conversa" defaultChecked={selected.coletar_historico_conversa} style={{ width: 'auto' }} /> Permitir coleta de histórico de conversa
-                </label>
-              </div>
-              <button disabled={savingCompany} style={{ marginTop: 12 }}>
-                {savingCompany && <Spinner />}
-                Salvar
+                <small>{c.gestor_nome ? `Gestor: ${c.gestor_nome}` : 'Sem gestor vinculado'}</small>
+                <span className="adm-empresa-rodape">
+                  <span>{c.member_count} conta(s)</span>
+                  {c.teste?.em_teste && <span className="dash-selo" style={{ background: '#E3ECFD', color: '#1D4FBF' }}>Em teste · {c.teste.situacao}</span>}
+                  <span className="adm-link">Abrir →</span>
+                </span>
               </button>
-              </form>
+            ))}
+            {!visible.length && <div className="empty">Nenhuma empresa encontrada.</div>}
+          </section>
+        )}
+      </>
+    );
+  }
 
-              <div className="section-divider" />
+  return (
+    <div key={selected.id} className="adm-detalhe-empresa">
+      <nav className="adm-caminho" aria-label="Caminho">
+        <button type="button" className="adm-link" onClick={() => setSelectedId(null)}>Empresas</button>
+        <span aria-hidden="true">/</span>
+        <span>{selected.name}</span>
+      </nav>
 
-              <div>
-                <h3 style={{ fontSize: 17, marginBottom: 4 }}>Credenciais de integração</h3>
-                <p style={{ fontSize: 13, marginBottom: 14 }}>Usadas pelo agente Axioma desta empresa para autenticar no Conecta CRM.</p>
+      <section className="dash-card adm-cabecalho">
+        <div>
+          <div className="adm-titulo-linha">
+            <h1>{selected.name}</h1>
+            <span className={`badge ${selected.tem_agente_ativo ? 'status-active' : 'status-pending'}`}>{selected.tem_agente_ativo ? 'Agente ativo' : 'Sem agente'}</span>
+            {selected.teste?.em_teste && <span className="dash-selo" style={{ background: '#E3ECFD', color: '#1D4FBF' }}>Em teste · {selected.teste.situacao}</span>}
+          </div>
+          <p>{selected.member_count} conta(s) vinculada(s){selected.gestor_nome ? ` · gestor ${selected.gestor_nome}` : ' · sem gestor'}</p>
+        </div>
+      </section>
 
-                {agentError && <p className="error">{agentError}</p>}
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
 
-                {agentStatus?.existe && (
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
-                    <span className={`badge ${agentStatus.vinculada ? 'status-active' : 'status-pending'}`}>{agentStatus.vinculada ? 'Conta vinculada à empresa' : 'Conta SEM vínculo'}</span>
-                    <span className={`badge ${agentStatus.ativa ? 'status-active' : 'status-pending'}`}>{agentStatus.ativa ? 'Conta ativa' : 'Conta desativada'}</span>
-                    {!agentStatus.vinculada && (
-                      <button type="button" className="secondary" onClick={religarAgente} disabled={agentBusy}>
-                        Religar à empresa
-                      </button>
-                    )}
-                  </div>
-                )}
-                {agentStatus?.existe && !agentStatus.vinculada && (
-                  <p className="error" style={{ fontSize: 12.5 }}>Sem vínculo, o agente recebe 404 em todas as chamadas ao CRM, mesmo com a chave válida.</p>
-                )}
+      <div className="dash-duas">
+        <section className="dash-card" aria-labelledby="emp-agente">
+          <div>
+            <h2 id="emp-agente">Credenciais do agente</h2>
+            <small>Usadas pelo agente Axioma desta empresa para autenticar no Conecta CRM.</small>
+          </div>
+          {agentError && <p className="error">{agentError}</p>}
+          {agentStatus?.existe && (
+            <div className="adm-selos">
+              <span className={`badge ${agentStatus.vinculada ? 'status-active' : 'status-pending'}`}>{agentStatus.vinculada ? 'Conta vinculada à empresa' : 'Conta SEM vínculo'}</span>
+              <span className={`badge ${agentStatus.ativa ? 'status-active' : 'status-pending'}`}>{agentStatus.ativa ? 'Conta ativa' : 'Conta desativada'}</span>
+              {!agentStatus.vinculada && (
+                <button type="button" className="secondary" onClick={religarAgente} disabled={agentBusy}>
+                  Religar à empresa
+                </button>
+              )}
+            </div>
+          )}
+          {agentStatus?.existe && !agentStatus.vinculada && <p className="error">Sem vínculo, o agente recebe 404 em todas as chamadas ao CRM, mesmo com a chave válida.</p>}
 
-                {generatedKey ? (
-                  <div style={{ background: 'var(--warn-soft)', border: '1px solid var(--warn)', borderRadius: 10, padding: 14, marginBottom: 14 }}>
-                    <strong style={{ fontSize: 13 }}>Copie agora — essa chave não aparece de novo:</strong>
-                    <div className="api-key-row">
-                      <input readOnly value={generatedKey} onFocus={(e) => e.currentTarget.select()} />
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => navigator.clipboard?.writeText(generatedKey)}
-                      >
-                        Copiar
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <label>
-                    Chave de API
-                    <div className="api-key-row">
-                      <input readOnly value={agentStatus?.masked_key || 'Nenhuma chave gerada ainda'} />
-                    </div>
-                  </label>
-                )}
-
-                {agentStatus?.validade && (
-                  <p style={{ fontSize: 12.5, color: agentStatus.validade.expirado ? 'var(--danger)' : 'var(--muted)', marginTop: 4 }}>
-                    {agentStatus.validade.expirado ? 'Expirada em ' : 'Válida até '}
-                    {new Date(agentStatus.validade.expires_at).toLocaleDateString('pt-BR')}
-                  </p>
-                )}
-
-                <label style={{ marginTop: 10 }}>
-                  Validade da nova chave (dias)
-                  <input
-                    type="number"
-                    min={1}
-                    max={730}
-                    value={validadeDias}
-                    onChange={(e) => setValidadeDias(Number(e.target.value))}
-                    style={{ fontFamily: "'DM Mono',monospace" }}
-                  />
-                </label>
-                <small style={{ display: 'block', color: 'var(--muted)', marginBottom: 12 }}>Padrão 180 dias (6 meses) — máximo 730 (2 anos).</small>
-
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  <button type="button" onClick={gerarToken} disabled={agentBusy}>
-                    {agentBusy && <Spinner />}
-                    Gerar nova chave
-                  </button>
-                  <button type="button" className="danger-outline" onClick={revogarToken} disabled={agentBusy || !agentStatus?.masked_key}>
-                    Revogar
-                  </button>
-                </div>
-              </div>
-
-              <div className="section-divider" />
-
-              <AdminContas api={api} companyId={selected.id} companyName={selected.name} />
-
-              <div className="section-divider" />
-
-              <div>
-                <h3 style={{ fontSize: 15, marginBottom: 10 }}>Integração com a API</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
-                  <div className="kv-row">
-                    <span style={{ color: 'var(--muted)' }}>Usuário de serviço</span>
-                    <strong style={{ fontFamily: "'DM Mono',monospace" }}>{agentStatus?.username}</strong>
-                  </div>
-                  <div className="kv-row">
-                    <span style={{ color: 'var(--muted)' }}>Webhook (incoming)</span>
-                    <strong style={{ fontFamily: "'DM Mono',monospace", fontSize: '12.5px' }}>/api/companies/{selected.id}/incoming/</strong>
-                  </div>
-                  <div className="kv-row">
-                    <span style={{ color: 'var(--muted)' }}>Confirmação de entrega</span>
-                    <strong style={{ fontFamily: "'DM Mono',monospace", fontSize: '12.5px' }}>/api/companies/{selected.id}/delivery/</strong>
-                  </div>
-                </div>
-              </div>
-
-              <div className="section-divider" />
-
-              <div>
-                <h3 style={{ fontSize: 15, marginBottom: 4, color: 'var(--danger)' }}>Excluir empresa</h3>
-                <p style={{ fontSize: 13, marginBottom: 10 }}>
-                  Apaga a empresa e tudo que é dela: leads, histórico, roteiro, variáveis, áreas, dados da empresa e a chave do agente.
-                  Contas que pertencem só a esta empresa também são excluídas. Não dá para desfazer.
-                </p>
-                {deleteError && <p className="error">{deleteError}</p>}
-                <label>
-                  Digite <strong>{selected.name}</strong> para confirmar
-                  <input value={confirmDelete} onChange={(e) => setConfirmDelete(e.target.value)} autoComplete="off" />
-                </label>
-                <button
-                  type="button"
-                  className="danger-outline"
-                  onClick={excluirEmpresa}
-                  disabled={deleting || confirmDelete.trim() !== selected.name.trim()}
-                  style={{ marginTop: 10 }}
-                >
-                  {deleting && <Spinner />}
-                  Excluir empresa definitivamente
+          {generatedKey ? (
+            <div className="adm-chave-nova">
+              <strong>Copie agora — essa chave não aparece de novo:</strong>
+              <div className="api-key-row">
+                <input readOnly value={generatedKey} onFocus={(e) => e.currentTarget.select()} />
+                <button type="button" className="secondary" onClick={() => navigator.clipboard?.writeText(generatedKey)}>
+                  Copiar
                 </button>
               </div>
             </div>
+          ) : (
+            <label>
+              Chave de API do CRM
+              <div className="api-key-row">
+                <input readOnly value={agentStatus?.masked_key || 'Nenhuma chave gerada ainda'} />
+              </div>
+            </label>
           )}
-        </aside>
+          {agentStatus?.validade && (
+            <p className="dash-nota" style={{ color: agentStatus.validade.expirado ? 'var(--danger)' : undefined }}>
+              {agentStatus.validade.expirado ? 'Expirada em ' : 'Válida até '}
+              {new Date(agentStatus.validade.expires_at).toLocaleDateString('pt-BR')}
+            </p>
+          )}
+          <label>
+            Validade da nova chave (dias)
+            <input type="number" min={1} max={730} value={validadeDias} onChange={(e) => setValidadeDias(Number(e.target.value))} style={{ fontFamily: "'DM Mono',monospace" }} />
+            <small>Padrão 180 dias (6 meses) — máximo 730 (2 anos).</small>
+          </label>
+          <div className="cob-acoes" style={{ justifyContent: 'flex-start' }}>
+            <button type="button" onClick={gerarToken} disabled={agentBusy}>
+              {agentBusy && <Spinner />}
+              Gerar nova chave
+            </button>
+            <button type="button" className="danger-outline" onClick={revogarToken} disabled={agentBusy || !agentStatus?.masked_key}>
+              Revogar
+            </button>
+          </div>
+          <div className="adm-kv">
+            <div><span>Usuário de serviço</span><strong>{agentStatus?.username}</strong></div>
+            <div><span>Webhook (incoming)</span><strong>/api/companies/{selected.id}/incoming/</strong></div>
+            <div><span>Confirmação de entrega</span><strong>/api/companies/{selected.id}/delivery/</strong></div>
+          </div>
+        </section>
+
+        <section className="dash-card" aria-labelledby="emp-dados">
+          <div>
+            <h2 id="emp-dados">Dados e portões da empresa</h2>
+            <small>Os portões liberam recursos que a empresa pode ligar por conta própria.</small>
+          </div>
+          <form onSubmit={saveCompany} className="adm-form-dados">
+            <label>
+              Nome
+              <input name="name" defaultValue={selected.name} />
+            </label>
+            <label>
+              question_id inicial
+              <input name="initial_state" defaultValue={selected.initial_state} style={{ fontFamily: "'DM Mono',monospace", fontSize: 13 }} />
+            </label>
+            <label>
+              Número do agente (WhatsApp)
+              <input name="numero_agente" defaultValue={selected.numero_agente} placeholder="+5586999999999" inputMode="tel" />
+              <small>Mensagens deste número nunca abrem lead.</small>
+            </label>
+            <label className="adm-check">
+              <input type="checkbox" name="allow_transcription" defaultChecked={selected.allow_transcription} /> Habilitar áudio (transcrição/voz)
+            </label>
+            <label className="adm-check">
+              <input type="checkbox" name="coletar_historico_conversa" defaultChecked={selected.coletar_historico_conversa} /> Permitir coleta de histórico de conversa
+            </label>
+            <div className="cob-acoes">
+              <button disabled={savingCompany}>
+                {savingCompany && <Spinner />}
+                Salvar
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+
+      <section className="dash-card" aria-labelledby="emp-contas">
+        <h2 id="emp-contas" className="sr-only">Contas da empresa</h2>
+        <AdminContas api={api} companyId={selected.id} companyName={selected.name} />
+      </section>
+
+      <section className="dash-card adm-risco" aria-labelledby="emp-risco">
+        <div>
+          <h2 id="emp-risco" style={{ color: 'var(--danger)' }}>Zona de risco</h2>
+          <p className="dash-nota">
+            Excluir apaga a empresa e tudo que é dela: leads, histórico, roteiro, variáveis, áreas, dados da empresa e a chave do agente. Contas que pertencem só a esta empresa também são excluídas. Não dá para desfazer.
+          </p>
+        </div>
+        {deleteError && <p className="error">{deleteError}</p>}
+        <label>
+          Digite <strong>{selected.name}</strong> para confirmar
+          <input value={confirmDelete} onChange={(e) => setConfirmDelete(e.target.value)} autoComplete="off" />
+        </label>
+        <div className="cob-acoes" style={{ justifyContent: 'flex-start' }}>
+          <button type="button" className="danger-outline" onClick={excluirEmpresa} disabled={deleting || confirmDelete.trim() !== selected.name.trim()}>
+            {deleting && <Spinner />}
+            Excluir empresa definitivamente
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

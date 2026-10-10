@@ -208,6 +208,8 @@ export type AdminCompany = {
   tem_agente_ativo: boolean;
   /** Situação do teste (piloto) da empresa. */
   teste?: TesteSituacao;
+  gestor_id?: number | null;
+  gestor_nome?: string;
 };
 
 export type TesteSituacao = { em_teste: boolean; inicio: string | null; dias: number; fim: string | null; restam: number | null; situacao: string; convertido_em: string | null };
@@ -290,6 +292,8 @@ export type Gestor = {
   openai_limite_mensal: string | null;
   notas: string;
   empresas: GestorEmpresa[];
+  usuario_info: { username: string; email: string; ativo: boolean; criado_em: string; ultimo_acesso: string | null } | null;
+  resumo_comercial: { linhas: { descricao: string; valor: string }[]; total: string };
 };
 
 export type CobrancaItem = {
@@ -329,4 +333,22 @@ export type ChavesGestor = {
 export type RegraCobranca = {
   prorata_ativo: boolean; descontos: [number, number][]; abater_piloto: boolean; abatimento_pct: number; indice_padrao: string;
   alerta_reajuste_dias: number; faixa_atraso_curta: number; faixa_atraso_media: number; aviso_desligamento_dias: number;
+};
+
+export type AdminVisaoGeral = {
+  kpis: { mensalidade_estimada: string; gestores: number; gestores_sem_acesso: number; empresas: number; empresas_sem_gestor: number; agentes: number; agentes_adicionais: number; leads_30_dias: number };
+  alertas: { tipo: 'chave' | 'cobranca' | 'teste' | 'empresa' | 'gestor'; titulo: string; detalhe: string; gravidade: 'alta' | 'media' | 'baixa' }[];
+  volume: { empresa_id: number; empresa: string; leads: number }[];
+  faturamento: { gestor_id: number; gestor: string; empresas: number; extras: number; total: string | null }[];
+  atividade: { quando: string; texto: string }[];
+};
+
+export type AdminLeadsResumo = {
+  periodo: '30' | '90' | 'all';
+  resumo: { atendimentos: number; classificados: number; quentes: number; nao_prosseguiram: number };
+  tipos: { chave: string; rotulo: string; valor: number }[];
+  mensal: { mes: string; valor: number }[];
+  temperaturas: string[];
+  empresas: { empresa_id: number; empresa: string; gestor: string; total: number; temperaturas: Record<string, number>; nao_prosseguiram: number }[];
+  gestores: { id: number; nome: string }[];
 };

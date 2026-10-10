@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 // Ícones de traço da navegação (cor = texto do item, respeita a identidade visual da empresa).
 const ICONES: Record<string, ReactNode> = {
   dashboard: <><rect x="2" y="2" width="5" height="6" rx="1.5" /><rect x="9" y="2" width="5" height="4" rx="1.5" /><rect x="2" y="10" width="5" height="4" rx="1.5" /><rect x="9" y="8" width="5" height="6" rx="1.5" /></>,
+  tendencia: <><path d="M2 12l3.5-4 3 2.5L14 4" strokeLinecap="round" strokeLinejoin="round" /><path d="M10 4h4v4" strokeLinecap="round" strokeLinejoin="round" /></>,
   leads: <><rect x="2" y="2.5" width="3.2" height="11" rx="1" /><rect x="6.4" y="2.5" width="3.2" height="7" rx="1" /><rect x="10.8" y="2.5" width="3.2" height="9" rx="1" /></>,
   especiais: <><circle cx="8" cy="8" r="6" /><path d="M8 5v3l2 1.5" strokeLinecap="round" /></>,
   pendencias: <><path d="M8 2.5l5.5 10h-11z" strokeLinejoin="round" /><path d="M8 6.5v2.5" strokeLinecap="round" /></>,

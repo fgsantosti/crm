@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fetchTodasAsPaginas, type Api } from '../api';
-import type { AdminCompany, Gestor } from '../types';
+import type { AdminCompany, AdminContaEmpresa, Gestor } from '../types';
 import { Spinner } from '../components/Skeleton';
 import { useConfirmar } from '../components/ConfirmDialog';
+import { brl } from './AdminDashboard';
 
 // Painel Admin → Gestores: o cliente que paga e as empresas dele (base do faturamento).
 const VAZIO = { nome: '', email: '', dia_vencimento: 10, contrato_inicio: '', indice_reajuste: 'IPCA', openai_modo: 'chave', openai_projeto: '', openai_chave_final: '', openai_limite_mensal: '', notas: '' };
@@ -19,14 +20,17 @@ export function AdminGestores({ api }: { api: Api }) {
   const [form, setForm] = useState<{ id: number | null; dados: typeof VAZIO } | null>(null);
   const [saving, setSaving] = useState(false);
   const [vincular, setVincular] = useState<Record<number, string>>({});
+  const [abertos, setAbertos] = useState<Record<number, boolean>>({});
+  const [contas, setContas] = useState<AdminContaEmpresa[]>([]);
 
   const carregar = useCallback(() => {
     setBusy(true);
     setError('');
-    Promise.all([fetchTodasAsPaginas<Gestor>(api, '/admin-gestores/'), fetchTodasAsPaginas<AdminCompany>(api, '/admin-companies/')])
-      .then(([g, e]) => {
+    Promise.all([fetchTodasAsPaginas<Gestor>(api, '/admin-gestores/'), fetchTodasAsPaginas<AdminCompany>(api, '/admin-companies/'), api('/admin-companies/contas-empresa/')])
+      .then(([g, e, c]) => {
         setGestores(g);
         setEmpresas(e);
+        setContas(c);
       })
       .catch((e) => setError(e.message))
       .finally(() => setBusy(false));
@@ -35,6 +39,9 @@ export function AdminGestores({ api }: { api: Api }) {
 
   const comGestor = new Set(gestores.flatMap((g) => g.empresas.map((e) => e.id)));
   const livres = empresas.filter((e) => !comGestor.has(e.id));
+  const loginsDeGestor = new Set(gestores.map((g) => g.usuario_info?.username).filter(Boolean));
+  const contasSemGestor = contas.filter((c) => !loginsDeGestor.has(c.username));
+  const quando = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'nunca');
   const visiveis = gestores.filter((g) => `${g.nome} ${g.email} ${g.empresas.map((e) => e.name).join(' ')}`.toLowerCase().includes(busca.toLowerCase()));
 
   function trocar(g: Gestor) {
@@ -252,11 +259,85 @@ export function AdminGestores({ api }: { api: Api }) {
                 Vincular
               </button>
             </div>
+            <button type="button" className="adm-link" aria-expanded={!!abertos[g.id]} onClick={() => setAbertos((v) => ({ ...v, [g.id]: !v[g.id] }))}>
+              {abertos[g.id] ? 'Ocultar detalhes ▴' : 'Ver detalhes ▾'}
+            </button>
+            {abertos[g.id] && (
+              <div className="gestor-detalhe">
+                <section aria-label="Conta vinculada">
+                  <h3>Conta vinculada</h3>
+                  {g.usuario_info ? (
+                    <dl>
+                      <div><dt>Usuário (login)</dt><dd>{g.usuario_info.username}</dd></div>
+                      <div><dt>E-mail</dt><dd>{g.usuario_info.email || '—'}</dd></div>
+                      <div><dt>Situação</dt><dd>{g.usuario_info.ativo ? 'Ativa' : 'Inativa'}</dd></div>
+                      <div><dt>Criada em</dt><dd>{quando(g.usuario_info.criado_em)}</dd></div>
+                      <div><dt>Último acesso</dt><dd>{quando(g.usuario_info.ultimo_acesso)}</dd></div>
+                    </dl>
+                  ) : (
+                    <p className="dash-nota">Nenhuma conta Empresa vinculada a este gestor.</p>
+                  )}
+                </section>
+                <section aria-label="Resumo comercial">
+                  <h3>Resumo comercial (mês corrente)</h3>
+                  <table>
+                    <tbody>
+                      {g.resumo_comercial.linhas.map((l, i) => (
+                        <tr key={i}>
+                          <td>{l.descricao}</td>
+                          <td>{Number(l.valor) < 0 ? '−' : ''}{brl(Math.abs(Number(l.valor)))}</td>
+                        </tr>
+                      ))}
+                      {!g.resumo_comercial.linhas.length && (
+                        <tr><td colSpan={2} className="dash-nota">Nada a cobrar (sem empresa contratada).</td></tr>
+                      )}
+                      <tr><td><strong>Mensalidade estimada</strong></td><td><strong>{brl(g.resumo_comercial.total)}</strong></td></tr>
+                    </tbody>
+                  </table>
+                </section>
+                <section aria-label="OpenAI">
+                  <h3>Uso da OpenAI</h3>
+                  <dl>
+                    <div><dt>Modo</dt><dd>{g.openai_modo === 'plano' ? 'Plano gerido pela Axioma' : 'Chave de API do gestor'}</dd></div>
+                    <div><dt>{g.openai_modo === 'plano' ? 'Plano / conta' : 'Projeto'}</dt><dd>{g.openai_projeto || '—'}</dd></div>
+                    {g.openai_modo !== 'plano' && <div><dt>Final da chave</dt><dd>{g.openai_chave_final ? `sk-••••${g.openai_chave_final}` : '—'}</dd></div>}
+                    <div><dt>Limite mensal</dt><dd>{g.openai_limite_mensal ? brl(g.openai_limite_mensal) : '—'}</dd></div>
+                  </dl>
+                </section>
+              </div>
+            )}
             {g.notas && <p className="dash-nota">Notas: {g.notas}</p>}
           </article>
         ))}
         {!busy && !visiveis.length && <div className="empty">Nenhum gestor cadastrado.</div>}
       </section>
+
+      {contasSemGestor.length > 0 && (
+        <section className="dash-card dash-card-tabela" aria-labelledby="g-sem">
+          <div>
+            <h2 id="g-sem">Contas Empresa sem gestor</h2>
+            <small>Logins de empresa que ainda não estão ligados a nenhum gestor. Atendentes ficam na Equipe de dentro de cada empresa.</small>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Nome</th><th>Usuário</th><th>E-mail</th><th>Empresa(s)</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                {contasSemGestor.map((c) => (
+                  <tr key={c.id}>
+                    <td><strong>{c.display_name || '—'}</strong></td>
+                    <td style={{ fontFamily: "'DM Mono',monospace" }}>{c.username}</td>
+                    <td>{c.email || '—'}</td>
+                    <td>{c.companies.join(', ') || '—'}</td>
+                    <td><span className={`badge ${c.is_active ? 'status-active' : 'status-suspended'}`}>{c.is_active ? 'Ativa' : 'Inativa'}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </>
   );
 }

@@ -16,10 +16,10 @@ import { DadosEmpresa } from './views/DadosEmpresa';
 import { Equipe } from './views/Equipe';
 import { Admin } from './views/Admin';
 import { AdminDashboard } from './views/AdminDashboard';
-import { AdminEquipe } from './views/AdminEquipe';
 import { AdminCobrancas } from './views/AdminCobrancas';
 import { AdminGestores } from './views/AdminGestores';
 import { AdminFaturamento } from './views/AdminFaturamento';
+import { AdminLeads } from './views/AdminLeads';
 import { AdminNotificacoes } from './views/AdminNotificacoes';
 import { TrocarSenhaObrigatoria } from './views/TrocarSenhaObrigatoria';
 import { TrocarEmailPagina } from './views/TrocarEmailPagina';
@@ -177,12 +177,12 @@ export function App() {
         />
         <main className="main">
           <div key={adminView} className="view-enter">
-            {adminView === 'dashboard' && <AdminDashboard api={api} />}
-            {adminView === 'equipe' && <AdminEquipe api={api} />}
+            {adminView === 'dashboard' && <AdminDashboard api={api} onNavigate={setAdminView} />}
             {adminView === 'painel' && <Admin api={api} />}
             {adminView === 'gestores' && <AdminGestores api={api} />}
             {adminView === 'faturamento' && <AdminFaturamento api={api} />}
             {adminView === 'cobrancas' && <AdminCobrancas api={api} />}
+            {adminView === 'leads' && <AdminLeads api={api} />}
             {adminView === 'notificacoes' && <AdminNotificacoes api={api} />}
           </div>
         </main>

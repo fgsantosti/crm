@@ -943,3 +943,79 @@ dialog[data-saindo]::backdrop { animation: popup-fundo-sai .17s ease-in forwards
 .notif-anexos ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .notif-anexos li { background: var(--line-soft); border-radius: 999px; padding: 4px 6px 4px 12px; display: flex; align-items: center; gap: 6px; }
 .notif-anexos li button { padding: 0 8px; font-size: 15px; line-height: 1.4; }
+/* Painel Admin: Visão geral, Leads, Empresas, detalhes de Gestor */
+.adm-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 14px; margin-bottom: 18px; }
+.adm-kpis .dash-card { gap: 6px; padding: 18px 20px; }
+.adm-kpis strong { font-family: 'Neuton', serif; font-size: 32px; font-weight: 800; line-height: 1.1; }
+.adm-kpis small { color: var(--muted); font-size: 12.5px; }
+.adm-topo { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.adm-lista { list-style: none; margin: 8px 0 0; padding: 0; }
+.adm-lista li { display: flex; align-items: center; gap: 14px; padding: 13px 0; border-top: 1px solid var(--line-soft); }
+.adm-lista li > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.adm-lista small { color: var(--muted); font-size: 12.5px; }
+.adm-sigla { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; flex: none; }
+.adm-link { background: none; border: 0; box-shadow: none; padding: 0; color: var(--accent-ink, #A83E12); font-weight: 600; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.adm-link:hover { text-decoration: underline; background: none; }
+.adm-atividade li { gap: 12px; font-size: 13.5px; }
+.adm-barras { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.adm-barras li { display: grid; grid-template-columns: minmax(110px, 1.2fr) 3fr auto; align-items: center; gap: 12px; font-size: 13.5px; }
+.adm-barra { height: 10px; background: var(--line-soft); border-radius: 999px; overflow: hidden; display: block; }
+.adm-barra > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .5s cubic-bezier(.2,.8,.2,1); }
+.adm-filtros { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.adm-seg { display: flex; background: var(--line-soft); border-radius: 12px; padding: 4px; gap: 2px; }
+.adm-seg button { border: 0; border-radius: 9px; padding: 9px 14px; font-size: 13px; font-weight: 600; background: transparent; color: var(--muted); box-shadow: none; }
+.adm-seg button.ativo { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(36, 26, 18, .12); }
+.adm-pizza-linha { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; }
+.adm-pizza { width: 170px; height: 170px; border-radius: 50%; flex: none; -webkit-mask: radial-gradient(circle 52px, transparent 98%, #000 100%); mask: radial-gradient(circle 52px, transparent 98%, #000 100%); transition: background .4s; }
+.adm-legenda { list-style: none; margin: 0; padding: 0; flex: 1; min-width: 210px; display: flex; flex-direction: column; gap: 9px; font-size: 13.5px; }
+.adm-legenda li { display: flex; align-items: center; gap: 9px; }
+.adm-legenda li > span { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.adm-legenda strong { margin-left: auto; }
+.adm-legenda small { width: 38px; text-align: right; color: var(--muted); }
+.adm-colunas { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; height: 250px; }
+.adm-colunas > div { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; font-size: 12.5px; }
+.adm-coluna { width: 100%; max-width: 54px; border-radius: 8px 8px 3px 3px; display: block; transition: height .5s cubic-bezier(.2,.8,.2,1); }
+.adm-colunas small { color: var(--muted); }
+.adm-th-temp { display: inline-flex; align-items: center; gap: 6px; }
+.adm-th-temp > span { width: 8px; height: 8px; border-radius: 50%; }
+.adm-mini { display: flex; width: 120px; height: 8px; border-radius: 999px; overflow: hidden; background: var(--line-soft); }
+.adm-mini > span { display: block; height: 100%; }
+@media (prefers-reduced-motion: reduce) { .adm-barra > span, .adm-coluna, .adm-pizza { transition: none; } }
+.gestor-detalhe { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 14px; margin-top: 4px; }
+.gestor-detalhe section { border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
+.gestor-detalhe h3 { font-size: 15px; margin: 0 0 10px; }
+.gestor-detalhe dl { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.gestor-detalhe dl > div { display: flex; justify-content: space-between; gap: 12px; font-size: 13.5px; }
+.gestor-detalhe dt { color: var(--muted); }
+.gestor-detalhe dd { margin: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+.gestor-detalhe table { width: 100%; font-size: 13.5px; }
+.gestor-detalhe td:last-child { text-align: right; white-space: nowrap; }
+.adm-empresas { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 14px; }
+.adm-empresa { text-align: left; color: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 10px; transition: transform .15s, box-shadow .15s; }
+.adm-empresa:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(36, 26, 18, .1); background: var(--surface, #fff); }
+.adm-empresa-topo { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.adm-empresa-topo strong { font-family: 'Neuton', serif; font-size: 20px; }
+.adm-empresa small { color: var(--muted); font-size: 13px; }
+.adm-empresa-rodape { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.adm-empresa-rodape .adm-link { margin-left: auto; }
+.adm-caminho { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); margin-bottom: 14px; }
+.adm-cabecalho { margin-bottom: 18px; }
+.adm-titulo-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.adm-titulo-linha h1 { margin: 0; font-size: 32px; }
+.adm-selos { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.adm-chave-nova { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 12px; padding: 14px; }
+.adm-kv { display: flex; flex-direction: column; gap: 8px; font-size: 13px; border-top: 1px solid var(--line-soft); padding-top: 12px; }
+.adm-kv > div { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.adm-kv span { color: var(--muted); }
+.adm-kv strong { font-family: 'DM Mono', monospace; font-size: 12.5px; overflow-wrap: anywhere; }
+.adm-form-dados, .adm-form-nova { display: flex; flex-direction: column; gap: 14px; }
+.adm-form-nova { margin-bottom: 18px; }
+.adm-form-dados label, .adm-form-nova label { margin: 0; }
+.adm-form-dados small, .adm-form-nova small { display: block; font-weight: 400; color: var(--muted); margin-top: 4px; }
+.adm-check { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+.adm-check input { width: auto; margin: 0; }
+.adm-risco { margin-top: 18px; border-color: #F0C9C3; gap: 14px; }
+.adm-detalhe-empresa > section { margin-bottom: 18px; }
+.adm-detalhe-empresa > .dash-duas { margin-bottom: 18px; }
+.dash-card-tabela > div:first-child:not(.table-wrap) { padding: 22px 26px 14px; }
+nav.adm-caminho { flex-direction: row; justify-content: flex-start; align-items: center; padding: 0; gap: 8px; }

@@ -6,16 +6,16 @@ import type { Api } from '../api';
 import type { Me } from '../types';
 import { confirmarSaida, useConfirmar } from './ConfirmDialog';
 
-export type AdminView = 'dashboard' | 'equipe' | 'painel' | 'gestores' | 'faturamento' | 'cobrancas' | 'notificacoes';
+export type AdminView = 'dashboard' | 'painel' | 'gestores' | 'leads' | 'faturamento' | 'cobrancas' | 'notificacoes';
 
-const ITEMS: { key: AdminView; label: string }[] = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'equipe', label: 'Equipe' },
-  { key: 'painel', label: 'Painel admin interno' },
-  { key: 'gestores', label: 'Gestores' },
-  { key: 'faturamento', label: 'Faturamento' },
-  { key: 'cobrancas', label: 'Cobranças' },
-  { key: 'notificacoes', label: 'Notificações' },
+const ITEMS: { key: AdminView; label: string; icone: string }[] = [
+  { key: 'dashboard', label: 'Visão geral', icone: 'tendencia' },
+  { key: 'gestores', label: 'Gestores', icone: 'gestores' },
+  { key: 'painel', label: 'Empresas', icone: 'dados-empresa' },
+  { key: 'leads', label: 'Leads', icone: 'leads' },
+  { key: 'faturamento', label: 'Faturamento', icone: 'faturamento' },
+  { key: 'cobrancas', label: 'Cobranças', icone: 'cobrancas' },
+  { key: 'notificacoes', label: 'Notificações', icone: 'notificacoes' },
 ];
 
 /**
@@ -65,7 +65,7 @@ export function AdminSidebar({
         {ITEMS.map((it) => (
           <button key={it.key} type="button" className={view === it.key ? 'nav-active' : ''} onClick={() => onNavigate(it.key)}>
             <span className="nav-label">
-              <IconeMenu nome={it.key} />
+              <IconeMenu nome={it.icone} />
               <span className="nav-texto">{it.label}</span>
             </span>
           </button>
