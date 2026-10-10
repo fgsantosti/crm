@@ -1946,6 +1946,12 @@ def resumo_dashboard(company, dias=None, area="", busca="", data_inicio=None, da
                 o["concluidos"] += 1
             if r["desfecho"] == DESFECHO_SUCESSO:
                 o["sucesso"] += 1
+    # Tendência por mês também conta as triagens que não prosseguiram (apagadas, no mês em que nasceram).
+    if not sem_contagem:
+        for dia, qtd in contagens.values_list("data", "nao_prosseguiram"):
+            if qtd:
+                chave = dia.strftime("%Y-%m")
+                por_mes[chave] = por_mes.get(chave, 0) + qtd
 
     # Triagens abandonadas que o Celery apagou: não existem mais como lead, mas fazem parte do total.
     nao_prosseguiram = 0 if sem_contagem else (totais["nao"] or 0)

@@ -4022,3 +4022,20 @@ class LembreteDeContinuidadeTests(TestCase):
         self.api.post(f"/api/companies/{self.company.pk}/delivery/", {"event_id": evento_id, "status": "SENT"}, format="json")
         textos = [m["texto"] for m in historico_da_conversa(lead) if m["quem"] == "agente"]
         self.assertEqual(len(textos), 2)
+
+
+class TendenciaComNaoProsseguiramTests(TestCase):
+    def test_atendimentos_por_mes_somam_os_que_nao_prosseguiram(self):
+        from .models import ContagemDiaria
+        from .services import resumo_dashboard
+        company = Company.objects.create(name="Tendência Ltda")
+        hoje = timezone.localdate()
+        Lead.objects.create(company=company, contact="+5585900007001", name="A")
+        ContagemDiaria.objects.create(company=company, data=hoje, novas=1, nao_prosseguiram=3)
+        mes = hoje.strftime("%Y-%m")
+        r = resumo_dashboard(company)
+        self.assertEqual(dict(r["por_mes"])[mes], 4)
+        self.assertEqual(r["total"], 4)
+        # Com filtro de área as apagadas não existem mais como lead: não entram nem no total nem na tendência.
+        r = resumo_dashboard(company, area="Qualquer")
+        self.assertEqual(dict(r["por_mes"]).get(mes, 0), 0)
