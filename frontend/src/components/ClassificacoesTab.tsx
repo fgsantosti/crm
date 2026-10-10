@@ -39,7 +39,8 @@ const iguais = (a: number[], b: number[]) => a.length === b.length && a.every((v
 
 export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api; company: Company; canEdit: boolean; onSalvo: (c: Company) => void }) {
   const inicial = (company.classificacao_cortes?.length === 4 ? company.classificacao_cortes : PADRAO).map(arredonda);
-  const kanbanInicial = Math.min(4, Math.max(0, company.classificacao_kanban_a_partir_de ?? 2));
+  // Desqualificado nunca vai para o Kanban: o limite começa em 1 (a classificação mais baixa fica sempre desmarcada).
+  const kanbanInicial = Math.min(4, Math.max(1, company.classificacao_kanban_a_partir_de ?? 2));
   const [cortes, setCortes] = useState<number[]>(inicial);
   const [regra, setRegra] = useState(company.classificacao_regra ?? '');
   const [salvo, setSalvo] = useState({ cortes: inicial, regra: company.classificacao_regra ?? '', kanbanDe: kanbanInicial });
@@ -100,7 +101,7 @@ export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api
 
   // Marcar uma classificação marca também todas acima dela; desmarcar desmarca também todas abaixo (a fila é contínua).
   function alternarKanban(i: number) {
-    setKanbanDe(i >= kanbanDe ? Math.min(4, i + 1) : i);
+    setKanbanDe(Math.max(1, i >= kanbanDe ? Math.min(4, i + 1) : i));
     setAviso('');
   }
 
@@ -162,7 +163,7 @@ export function ClassificacoesTab({ api, company, canEdit, onSalvo }: { api: Api
                 {nome}
               </span>
               <label className="classif-kanban">
-                <input type="checkbox" checked={i >= kanbanDe} disabled={!canEdit || i === 4} onChange={() => alternarKanban(i)} />
+                <input type="checkbox" checked={i >= kanbanDe} disabled={!canEdit || i === 0 || i === 4} onChange={() => alternarKanban(i)} />
                 Vai para o Kanban
               </label>
               <span className="classif-faixa">

@@ -113,7 +113,7 @@ function Legenda({ areas, variaveis, variaveisRoteiro }: { areas: Area[]; variav
           <span className="token-tag token-tag-dado">{'{nome}'}</span> dado já coletado do lead
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-          <span className="token-tag token-tag-html">{'<br>'}</span> quebra de linha (HTML)
+          <span className="token-tag token-tag-html">{'<br>'}</span> quebra de linha
         </span>
       </div>
       <small style={{ color: 'var(--muted)' }}>Esses marcadores são resolvidos automaticamente pelo CRM antes de enviar — nunca edite o texto dentro das chaves.</small>
