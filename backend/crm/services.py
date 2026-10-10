@@ -2155,28 +2155,30 @@ def calcular_impacto_classificacao(company, cortes, kanban_a_partir_de):
     """Simulação (não grava nada): o que mudaria nos leads de Classificados se a empresa adotasse estes cortes e este
     limite do Kanban. Só Classificados pode perder leads (em espera, em negociação, despacho e concluídos nunca são
     tocados). Lead com média guardada (urgencia_detalhe.score) é reclassificada pelas faixas novas; sem média, só vale
-    a classificação atual contra o novo limite. Devolve {"afetadas": [...], "reclassificadas": n}: afetadas = leads que
-    estão no Kanban hoje e sairiam dele (concluem como desqualificadas)."""
+    a classificação atual contra o novo limite. Devolve {"afetadas": [...], "alteradas": [...], "reclassificadas": n}: afetadas =
+    leads que estão no Kanban hoje e sairiam dele (concluem como desqualificadas); alteradas = leads que continuam no
+    Kanban mas trocariam de classificação."""
     cortes = validar_cortes(cortes)
     kanban_a_partir_de = min(4, max(0, int(kanban_a_partir_de)))
     faixas_novas = _faixas_com_cortes(cortes)
     fora_atual = fora_do_kanban(company)
     fora_novo = set(NOMES_CLASSIFICACAO[:kanban_a_partir_de])
-    afetadas, reclassificadas = [], 0
+    afetadas, alteradas = [], []
     for lead in _classificados_da_empresa(company).order_by("-created_at"):
         if lead.temperature in fora_atual:
             continue  # já fora do Kanban hoje (lead preso de uma configuração anterior): não é "afetada" por esta mudança
         score = (lead.urgencia_detalhe or {}).get("score")
         nova = temperatura_do_score(float(score), faixas_novas) if isinstance(score, (int, float)) else lead.temperature
+        item = {
+            "id": str(lead.pk), "name": lead.name, "contact": lead.contact, "especialidade": lead.especialidade,
+            "media": round(float(score), 2) if isinstance(score, (int, float)) else None,
+            "de": lead.temperature, "para": nova,
+        }
         if nova in fora_novo:
-            afetadas.append({
-                "id": str(lead.pk), "name": lead.name, "contact": lead.contact, "especialidade": lead.especialidade,
-                "media": round(float(score), 2) if isinstance(score, (int, float)) else None,
-                "de": lead.temperature, "para": nova,
-            })
+            afetadas.append(item)
         elif nova != lead.temperature:
-            reclassificadas += 1
-    return {"afetadas": afetadas, "reclassificadas": reclassificadas}
+            alteradas.append(item)
+    return {"afetadas": afetadas, "alteradas": alteradas, "reclassificadas": len(alteradas)}
 
 @transaction.atomic
 def aplicar_classificacao_aos_leads(company):

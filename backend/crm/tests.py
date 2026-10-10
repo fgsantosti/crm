@@ -4224,7 +4224,9 @@ class ImpactoDaClassificacaoTests(TestCase):
         r = self.impacto(classificacao_cortes=[3, 6, 8, 9])  # Frio vira Desconfiado (média 5,8 < 6): sai do Kanban
         self.assertEqual(r.status_code, 200, r.content)
         dados = r.json()
-        self.assertEqual(dados["total"], 1)
+        self.assertEqual(dados["total"], 2)  # 1 sai do Kanban + 1 troca de classificação e continua
+        self.assertEqual([a["name"] for a in dados["alteradas"]], ["L2"])
+        self.assertEqual((dados["alteradas"][0]["de"], dados["alteradas"][0]["para"]), ("Qualificado", "Frio"))
         item = dados["afetadas"][0]
         self.assertEqual((item["name"], item["de"], item["para"], item["media"]), ("L3", "Frio", "Desconfiado", 5.8))
         self.assertEqual(dados["reclassificadas"], 1)  # Qualificado (7,6) vira Frio: continua no Kanban
@@ -4240,9 +4242,10 @@ class ImpactoDaClassificacaoTests(TestCase):
     def test_limite_do_kanban_tambem_afeta(self):
         r = self.impacto(classificacao_cortes=[3, 5, 7, 9], classificacao_kanban_a_partir_de=3)  # Frio sai
         self.assertEqual([a["name"] for a in r.json()["afetadas"]], ["L3"])
+        self.assertEqual(r.json()["alteradas"], [])
 
     def test_sem_efeito_retorna_vazio_e_valida_entrada(self):
-        self.assertEqual(self.impacto(classificacao_cortes=[3, 5, 7, 9]).json()["total"], 0)
+        self.assertEqual(self.impacto(classificacao_cortes=[3, 5, 7, 9]).json()["total"], 0)  # nada muda: sem alerta
         self.assertEqual(self.impacto(classificacao_cortes=[5, 4, 6, 8]).status_code, 400)
         self.assertEqual(self.impacto().status_code, 400)
         atendente = APIClient(); atendente.force_authenticate(self.atendente)

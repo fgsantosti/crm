@@ -260,7 +260,7 @@ class CompanyViewSet(viewsets.ModelViewSet):
             )
         except (ValueError, TypeError) as exc:
             return Response({"detail": str(exc) or "Informe os cortes e o limite do Kanban."}, status=400)
-        return Response({**impacto, "total": len(impacto["afetadas"])})
+        return Response({**impacto, "total": len(impacto["afetadas"]) + len(impacto["alteradas"])})
     @action(detail=True, methods=["post"], parser_classes=[MultiPartParser, FormParser, JSONParser])
     def identidade(self, request, pk=None):
         """Identidade visual da empresa: nome e logo exibidos na barra lateral e as duas cores do gradiente
