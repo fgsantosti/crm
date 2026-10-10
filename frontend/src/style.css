@@ -852,3 +852,12 @@ dialog[data-saindo]::backdrop { animation: popup-fundo-sai .17s ease-in forwards
 .impacto-para { color: #93251B; }
 @media (max-width: 560px) { .impacto-lista li { grid-template-columns: 1fr; } .impacto-fab { right: 16px; bottom: 16px; } }
 @media (prefers-reduced-motion: reduce) { .impacto-fab { animation: none; transition: none; } }
+.impacto-grupo { display: flex; flex-direction: column; gap: 8px; }
+.impacto-grupo h3 { font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 700; }
+.impacto-grupo p { margin: 0; font-size: 13px; color: var(--muted); }
+.impacto-dialog .confirm-corpo { max-height: calc(100vh - 160px); overflow-y: auto; }
+.impacto-dialog { max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
+.impacto-dialog[open] { display: flex; }
+.impacto-dialog .confirm-faixa { flex: none; height: 72px; }
+.impacto-dialog .confirm-corpo { max-height: none; overflow: hidden; min-height: 0; padding-top: 42px; }
+.impacto-grupo .impacto-lista { max-height: 150px; }

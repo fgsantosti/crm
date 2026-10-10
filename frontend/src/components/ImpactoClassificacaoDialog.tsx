@@ -14,8 +14,11 @@ export const ICONE_ALERTA = (
 const fmt = (n: number | null) => (n === null ? '—' : (Math.round(n * 10) / 10).toFixed(1).replace('.', ','));
 
 /** Popup de aviso: leads de Classificados que sairiam do Kanban com as faixas em edição. Mesmo padrão das confirmações (faixa Conecta). */
-export function ImpactoClassificacaoDialog({ afetadas, cores, saving, onVoltar, onSalvar }: {
+export function ImpactoClassificacaoDialog({ afetadas, alteradas, cores, saving, onVoltar, onSalvar }: {
+  /** Saem do Kanban (concluem como desqualificadas). */
   afetadas: LeadAfetada[];
+  /** Continuam no Kanban, mas trocam de classificação. */
+  alteradas: LeadAfetada[];
   cores: Record<string, string>;
   saving: boolean;
   onVoltar: () => void;
@@ -37,7 +40,25 @@ export function ImpactoClassificacaoDialog({ afetadas, cores, saving, onVoltar, 
     };
   }, []);
 
-  const n = afetadas.length;
+  const n = afetadas.length + alteradas.length;
+  const linhas = (lista: LeadAfetada[], fora: boolean) => (
+    <ul className="impacto-lista">
+      {lista.map((l) => (
+        <li key={l.id}>
+          <div className="impacto-id">
+            <strong>{l.name || 'Sem nome informado'}</strong>
+            <small>{l.contact}</small>
+          </div>
+          <span className="impacto-media">média {fmt(l.media)}</span>
+          <span className="impacto-troca">
+            <span><span className="classif-cor" style={{ background: cores[l.de] }} aria-hidden="true" />{l.de}</span>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M9 4l4 4-4 4" stroke="#6E5F4F" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            <span className={fora ? 'impacto-para' : undefined}><span className="classif-cor" style={{ background: cores[l.para] }} aria-hidden="true" />{l.para}{fora ? ' (fora do Kanban)' : ''}</span>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
   return (
     <dialog
       ref={ref}
@@ -59,27 +80,24 @@ export function ImpactoClassificacaoDialog({ afetadas, cores, saving, onVoltar, 
         </div>
       </div>
       <div className="confirm-corpo">
-        <h2 id="impacto-titulo">{n} lead{n === 1 ? ' classificada sairia' : 's classificadas sairiam'} do Kanban</h2>
+        <h2 id="impacto-titulo">{n} lead{n === 1 ? ' seria afetada' : 's seriam afetadas'} pelas novas faixas</h2>
         <p className="confirm-mensagem">
-          Estas leads estão em Classificados agora e sairiam do Kanban com as faixas que você ajustou: elas concluiriam sozinhas como desqualificadas e o número seria liberado.
-          Leads em espera ou em negociação não são afetadas.
+          Só leads em Classificados são reavaliadas pela média que já têm. Leads em espera, em negociação ou concluídas não mudam.
         </p>
-        <ul className="impacto-lista">
-          {afetadas.map((l) => (
-            <li key={l.id}>
-              <div className="impacto-id">
-                <strong>{l.name || 'Sem nome informado'}</strong>
-                <small>{l.contact}</small>
-              </div>
-              <span className="impacto-media">média {fmt(l.media)}</span>
-              <span className="impacto-troca">
-                <span><span className="classif-cor" style={{ background: cores[l.de] }} aria-hidden="true" />{l.de}</span>
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M9 4l4 4-4 4" stroke="#6E5F4F" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                <span className="impacto-para"><span className="classif-cor" style={{ background: cores[l.para] }} aria-hidden="true" />{l.para} (fora do Kanban)</span>
-              </span>
-            </li>
-          ))}
-        </ul>
+        {afetadas.length > 0 && (
+          <section className="impacto-grupo">
+            <h3>{afetadas.length} sa{afetadas.length === 1 ? 'i' : 'em'} do Kanban</h3>
+            <p>Concluem sozinhas como desqualificadas e o número é liberado.</p>
+            {linhas(afetadas, true)}
+          </section>
+        )}
+        {alteradas.length > 0 && (
+          <section className="impacto-grupo">
+            <h3>{alteradas.length} muda{alteradas.length === 1 ? '' : 'm'} de classificação e continua{alteradas.length === 1 ? '' : 'm'} no Kanban</h3>
+            <p>A temperatura (e a prioridade, se era a padrão) é atualizada.</p>
+            {linhas(alteradas, false)}
+          </section>
+        )}
         <div className="confirm-acoes">
           <span className="confirm-dica"><kbd>Esc</kbd> volta</span>
           <div className="confirm-botoes">
