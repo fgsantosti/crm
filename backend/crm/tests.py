@@ -4454,3 +4454,99 @@ class FaturamentoDoAdminTests(TestCase):
         self.api.delete(f"/api/admin-gestores/{gid}/")
         self.empresas[1].refresh_from_db()
         self.assertIsNone(self.empresas[1].gestor_id)
+
+
+class NotificacoesDoAdminTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import Group
+        self.admin = get_user_model().objects.create_superuser("adm-not", password="x")
+        self.api = APIClient(); self.api.force_authenticate(self.admin)
+        self.g = self.api.post("/api/admin-gestores/", {"nome": "Paulo", "email": "paulo@menezes.example", "dia_vencimento": 15, "contrato_inicio": "2026-10-01"}, format="json").json()
+        self.company = Company.objects.create(name="Menezes A")
+        self.api.post(f"/api/admin-gestores/{self.g['id']}/vincular/", {"company_id": self.company.pk}, format="json")
+        self.agente = get_user_model().objects.create_user("agente.menezes", password="x")
+        self.agente.groups.add(Group.objects.get_or_create(name="agente")[0]); self.company.members.add(self.agente)
+
+    def test_so_superusuario(self):
+        comum = APIClient(); comum.force_authenticate(get_user_model().objects.create_user("emp-not", password="x", is_staff=True))
+        for url in ("config/", "historico/", "chaves/"):
+            self.assertEqual(comum.get(f"/api/admin-notificacoes/{url}").status_code, 403, url)
+        self.assertEqual(comum.post("/api/admin-notificacoes/enviar/", {}, format="json").status_code, 403)
+
+    def test_config_valida_e_grava(self):
+        r = self.api.patch("/api/admin-notificacoes/config/", {"remetente": "cobranca@conecta.example", "cc": "fin@conecta.example", "teste_dias_avisos": [1, 7, 3, 7], "lembrete_dias_antes": 3}, format="json")
+        self.assertEqual((r.status_code, r.json()["teste_dias_avisos"]), (200, [7, 3, 1]))
+        for ruim in ({"remetente": "sem-arroba"}, {"teste_dias_avisos": ["x"]}, {"chave_dias_avisos": [999]}, {"lembrete_dias_antes": 99}):
+            self.assertEqual(self.api.patch("/api/admin-notificacoes/config/", ruim, format="json").status_code, 400, ruim)
+
+    def test_envio_manual_substitui_variavel_e_registra(self):
+        from django.core import mail
+        mail.outbox.clear()
+        r = self.api.post("/api/admin-notificacoes/enviar/", {"gestores": [self.g["id"]], "assunto": "Aviso", "mensagem": "Olá, {gestor}! Teremos manutenção."}, format="json")
+        self.assertEqual((r.status_code, r.json()["enviados"]), (201, 1))
+        self.assertEqual((mail.outbox[0].to, mail.outbox[0].body), (["paulo@menezes.example"], "Olá, Paulo! Teremos manutenção."))
+        h = self.api.get("/api/admin-notificacoes/historico/").json()["itens"]
+        self.assertEqual((h[0]["tipo"], h[0]["estado"], h[0]["gestor"]), ("manual", "enviado", "Paulo"))
+        self.assertEqual(self.api.post("/api/admin-notificacoes/enviar/", {"gestores": [self.g["id"]], "assunto": "", "mensagem": "x"}, format="json").status_code, 400)
+        self.assertEqual(self.api.post("/api/admin-notificacoes/enviar/", {"gestores": [], "assunto": "a", "mensagem": "b"}, format="json").status_code, 400)
+
+    def test_gestor_sem_email_registra_falha(self):
+        from .models import Gestor
+        sem = Gestor.objects.create(nome="Sem e-mail")
+        r = self.api.post("/api/admin-notificacoes/enviar/", {"gestores": [sem.pk], "assunto": "a", "mensagem": "b"}, format="json")
+        self.assertEqual((r.json()["enviados"], r.json()["resultado"][0]["estado"]), (0, "falhou"))
+
+    def test_lembrete_de_cobranca_n_dias_antes_uma_unica_vez(self):
+        from datetime import date
+        from django.core import mail
+        from .notifications import processar_automaticas
+        from .models import NotificacaoEnviada
+        self.api.get("/api/admin-faturamento/?mes=2026-10")  # emite a mensalidade (vence 15/10)
+        mail.outbox.clear()
+        antes = date(2026, 10, 10)  # 5 dias antes
+        self.assertEqual(processar_automaticas(antes)["cobranca"], 1)
+        self.assertIn("vence em 15/10/2026", mail.outbox[0].subject)
+        self.assertEqual(processar_automaticas(antes)["cobranca"], 0)  # não repete
+        self.assertEqual(processar_automaticas(date(2026, 10, 9))["cobranca"], 0)  # outro dia: nada
+        self.assertEqual(NotificacaoEnviada.objects.filter(tipo="cobranca").count(), 1)
+
+    def test_aviso_de_fim_de_teste_nos_dias_configurados(self):
+        from datetime import date
+        from .notifications import processar_automaticas
+        self.api.post(f"/api/admin-companies/{self.company.pk}/teste/", {"em_teste": True, "inicio": "2026-10-12", "dias": 30}, format="json")  # fim 11/11
+        self.assertEqual(processar_automaticas(date(2026, 11, 4))["teste"], 1)  # 7 dias antes
+        self.assertEqual(processar_automaticas(date(2026, 11, 5))["teste"], 0)
+        self.assertEqual(processar_automaticas(date(2026, 11, 11))["teste"], 1)  # no dia
+
+    def test_atraso_por_faixa_e_aviso_de_desligamento_no_atraso_longo(self):
+        from datetime import date
+        from .notifications import processar_automaticas
+        self.api.get("/api/admin-faturamento/?mes=2026-10")
+        venc = date(2026, 10, 15)
+        from datetime import timedelta
+        r1 = processar_automaticas(venc + timedelta(days=3))
+        self.assertEqual((r1["atraso"], r1["desligamento"]), (1, 0))  # faixa 1
+        r2 = processar_automaticas(venc + timedelta(days=9))
+        self.assertEqual(r2["atraso"], 1)  # entrou na faixa 2
+        r3 = processar_automaticas(venc + timedelta(days=20))
+        self.assertEqual((r3["atraso"], r3["desligamento"]), (1, 1))  # faixa 3 + aviso de desligamento
+        self.assertEqual(processar_automaticas(venc + timedelta(days=21))["desligamento"], 0)
+
+    def test_aviso_de_chave_expirando_e_painel_de_chaves(self):
+        from datetime import date, datetime, timedelta, timezone as tz
+        from rest_framework.authtoken.models import Token
+        from .models import AgentTokenExpiry
+        from .notifications import processar_automaticas
+        token = Token.objects.create(user=self.agente)
+        AgentTokenExpiry.objects.create(token=token, expires_at=datetime(2026, 11, 8, 12, 0, tzinfo=tz.utc))
+        self.assertEqual(processar_automaticas(date(2026, 11, 1))["chave"], 1)  # 7 dias antes
+        painel = self.api.get("/api/admin-notificacoes/chaves/").json()["gestores"][0]
+        self.assertEqual(painel["agentes"][0]["agente"], "agente.menezes")
+        self.assertIn(painel["agentes"][0]["situacao"], ("valida", "expira", "expirada"))
+
+    def test_desligar_um_tipo_nao_envia(self):
+        from datetime import date
+        from .notifications import processar_automaticas
+        self.api.patch("/api/admin-notificacoes/config/", {"lembrete_cobranca_ativo": False}, format="json")
+        self.api.get("/api/admin-faturamento/?mes=2026-10")
+        self.assertEqual(processar_automaticas(date(2026, 10, 10))["cobranca"], 0)

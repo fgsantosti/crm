@@ -85,6 +85,7 @@ CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
+from celery.schedules import crontab
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
@@ -93,6 +94,11 @@ CELERY_BEAT_SCHEDULE = {
     "apagar-triagens-abandonadas": {
         "task": "crm.tasks.apagar_triagens_abandonadas_task",
         "schedule": 30 * 60,
+    },
+    # Avisos aos gestores (cobrança, teste, atraso, chave de API): uma vez por dia, 09:00 em Fortaleza (UTC-3).
+    "processar-notificacoes": {
+        "task": "crm.tasks.processar_notificacoes_task",
+        "schedule": crontab(hour=12, minute=0),
     },
 }
 CHANNEL_LAYERS = {"default": {"BACKEND": "channels_redis.core.RedisChannelLayer", "CONFIG": {"hosts": [os.getenv("CHANNEL_REDIS_URL", "redis://localhost:6379/2")]}}}

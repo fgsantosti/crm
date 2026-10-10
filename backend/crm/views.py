@@ -14,9 +14,9 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, Toke
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from . import billing
-from .models import Cobranca, Gestor, Pagamento, Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, VariavelRoteiro, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
-from .serializers import GestorSerializer, RegraCobrancaSerializer, BlacklistSerializer, CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer, VariavelRoteiroSerializer
+from . import billing, notifications
+from .models import ConfigNotificacao, NotificacaoEnviada, Cobranca, Gestor, Pagamento, Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Profile, Variavel, VariavelRoteiro, MANDATORY_QUESTION_IDS, MANDATORY_OFFFLOW_QUESTION_IDS
+from .serializers import ConfigNotificacaoSerializer, GestorSerializer, RegraCobrancaSerializer, BlacklistSerializer, CompanySerializer, LeadSerializer, QuestionSerializer, CompanyInfoSerializer, IncomingSerializer, EventSerializer, DeliverySerializer, AreaSerializer, AtendenteInviteSerializer, AdminCompanySerializer, VariavelSerializer, VariavelRoteiroSerializer
 from .services import (
     aplicar_audio,
     assumir_situacao_especial as assumir_situacao_especial_service,
@@ -1007,3 +1007,50 @@ class AdminRegrasCobrancaView(APIView):
         ser.is_valid(raise_exception=True)
         ser.save()
         return Response(ser.data)
+
+
+class AdminNotificacoesConfigView(APIView):
+    """Configuração dos e-mails aos gestores (remetente, cópia, lembretes automáticos e textos)."""
+    permission_classes = [IsSuperUser]
+    def get(self, request):
+        return Response(ConfigNotificacaoSerializer(notifications.config()).data)
+    def patch(self, request):
+        ser = ConfigNotificacaoSerializer(notifications.config(), data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        return Response(ser.data)
+
+class AdminNotificacoesEnviarView(APIView):
+    """POST {"gestores": [ids] | "todos", "assunto", "mensagem"}: e-mail avulso (variáveis {gestor}). Devolve o resultado por gestor."""
+    permission_classes = [IsSuperUser]
+    def post(self, request):
+        assunto = str(request.data.get("assunto") or "").strip()
+        mensagem = str(request.data.get("mensagem") or "").strip()
+        if not assunto or not mensagem:
+            return Response({"detail": "Informe o assunto e a mensagem."}, status=400)
+        alvo = request.data.get("gestores")
+        gestores = Gestor.objects.all() if alvo == "todos" else Gestor.objects.filter(pk__in=alvo if isinstance(alvo, list) else [])
+        if not gestores:
+            return Response({"detail": "Escolha ao menos um gestor."}, status=400)
+        resultado = []
+        for g in gestores:
+            r = notifications.enviar_manual(g, assunto, mensagem, request.user)
+            resultado.append({"gestor": g.nome, "estado": r.estado, "erro": r.erro})
+        return Response({"resultado": resultado, "enviados": sum(1 for x in resultado if x["estado"] == "enviado")}, status=201)
+
+class AdminNotificacoesHistoricoView(APIView):
+    permission_classes = [IsSuperUser]
+    def get(self, request):
+        itens = [{"id": n.pk, "quando": n.criado_em, "gestor": n.gestor_nome, "para": n.para, "tipo": n.tipo, "tipo_rotulo": dict(NotificacaoEnviada.TIPOS).get(n.tipo, n.tipo), "assunto": n.assunto, "estado": n.estado, "erro": n.erro} for n in NotificacaoEnviada.objects.all()[:100]]
+        return Response({"itens": itens})
+
+class AdminNotificacoesChavesView(APIView):
+    permission_classes = [IsSuperUser]
+    def get(self, request):
+        return Response({"gestores": notifications.painel_de_chaves()})
+
+class AdminNotificacoesProcessarView(APIView):
+    """POST: roda agora a verificação diária dos avisos automáticos (a mesma tarefa agendada). Idempotente."""
+    permission_classes = [IsSuperUser]
+    def post(self, request):
+        return Response(notifications.processar_automaticas())

@@ -14,7 +14,7 @@ def servir_media(request, path):
     return serve(request, path, document_root=settings.MEDIA_ROOT)
 from rest_framework.routers import DefaultRouter
 from crm.views import (
-    AdminPrecosView, AdminGestorViewSet, AdminFaturamentoView, AdminPagamentoView, AdminRegrasCobrancaView,
+    AdminPrecosView, AdminGestorViewSet, AdminFaturamentoView, AdminPagamentoView, AdminRegrasCobrancaView, AdminNotificacoesConfigView, AdminNotificacoesEnviarView, AdminNotificacoesHistoricoView, AdminNotificacoesChavesView, AdminNotificacoesProcessarView,
     CompanyViewSet, LeadViewSet, QuestionViewSet, CompanyInfoViewSet, AreaViewSet, AtendenteInviteViewSet, BlacklistViewSet, AdminCompanyViewSet, VariavelViewSet, VariavelRoteiroViewSet,
     me, avatar, validar_convite, trocar_senha, trocar_email_solicitar, trocar_email_confirmar, excluir_conta,
     redefinir_senha_atendente_view, desligar_atendente,
@@ -53,6 +53,11 @@ urlpatterns = [
     path("api/admin-precos/", AdminPrecosView.as_view()),
     path("api/admin-faturamento/", AdminFaturamentoView.as_view()),
     path("api/admin-regras-cobranca/", AdminRegrasCobrancaView.as_view()),
+    path("api/admin-notificacoes/config/", AdminNotificacoesConfigView.as_view()),
+    path("api/admin-notificacoes/enviar/", AdminNotificacoesEnviarView.as_view()),
+    path("api/admin-notificacoes/historico/", AdminNotificacoesHistoricoView.as_view()),
+    path("api/admin-notificacoes/chaves/", AdminNotificacoesChavesView.as_view()),
+    path("api/admin-notificacoes/processar/", AdminNotificacoesProcessarView.as_view()),
     path("api/admin-cobrancas/<int:cobranca_id>/pagamentos/", AdminPagamentoView.as_view()),
     path("api/admin-pagamentos/<int:pagamento_id>/", AdminPagamentoView.as_view()),
     path("api/", include(router.urls)),

@@ -453,6 +453,9 @@ class Gestor(models.Model):
     forma_pagamento = models.CharField(max_length=10, choices=FORMAS, default="pix")
     contrato_inicio = models.DateField(null=True, blank=True, help_text="Início do contrato: base do pro-rata, do desconto por tempo e do reajuste anual.")
     indice_reajuste = models.CharField(max_length=20, default="IPCA")
+    openai_projeto = models.CharField(max_length=120, blank=True, default="", help_text="Nome do projeto da OpenAI do gestor (a chave em si fica no gateway de cada agente).")
+    openai_chave_final = models.CharField(max_length=8, blank=True, default="", help_text="Últimos caracteres da chave, só para conferência.")
+    openai_limite_mensal = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Limite de consumo mensal combinado, em R$.")
     notas = models.TextField(blank=True, default="")
     criado_em = models.DateTimeField(auto_now_add=True)
     class Meta:
@@ -496,3 +499,46 @@ class Pagamento(models.Model):
     criado_em = models.DateTimeField(auto_now_add=True)
     class Meta:
         ordering = ["-data", "-id"]
+
+
+TEXTO_COBRANCA = "Olá, {gestor}! Sua mensalidade de {valor} vence em {vencimento}. Qualquer dúvida é só responder este e-mail."
+TEXTO_TESTE = "Olá, {gestor}! O teste de {empresa} termina em {fim_do_teste}. Se quiser continuar, é só confirmar por aqui: o valor do piloto é abatido da implantação."
+TEXTO_ATRASO = "Olá, {gestor}! Não identificamos o pagamento de {valor}, vencido em {vencimento}. Se já pagou, envie o comprovante respondendo este e-mail."
+TEXTO_DESLIGAMENTO = "Olá, {gestor}! A cobrança de {valor}, vencida em {vencimento}, segue em aberto. Os agentes serão desligados em {dias_desligamento} dias se o pagamento não for regularizado."
+TEXTO_CHAVE = "Olá, {gestor}! A chave de API do agente {agente} (empresa {empresa}) expira em {chave_expira_em}. Podemos gerar uma nova quando você preferir; é só responder este e-mail."
+
+class ConfigNotificacao(models.Model):
+    """Configuração dos e-mails da plataforma aos gestores (uma linha só): remetente, cópia, lembretes automáticos e textos."""
+    remetente = models.CharField(max_length=160, blank=True, default="", help_text="E-mail remetente; vazio = DEFAULT_FROM_EMAIL do servidor.")
+    cc = models.CharField(max_length=160, blank=True, default="", help_text="Cópia (financeiro) nos e-mails de cobrança.")
+    lembrete_cobranca_ativo = models.BooleanField(default=True)
+    lembrete_dias_antes = models.PositiveSmallIntegerField(default=5)
+    teste_ativo = models.BooleanField(default=True)
+    teste_dias_avisos = models.JSONField(default=list, blank=True, help_text="Dias antes do fim do teste (0 = no dia). Ex.: [7, 3, 1, 0].")
+    atraso_f1 = models.BooleanField(default=True)
+    atraso_f2 = models.BooleanField(default=True)
+    atraso_f3 = models.BooleanField(default=True)
+    chave_ativo = models.BooleanField(default=True)
+    chave_dias_avisos = models.JSONField(default=list, blank=True, help_text="Dias antes de a chave de API do agente expirar. Ex.: [30, 7].")
+    texto_cobranca = models.TextField(default=TEXTO_COBRANCA)
+    texto_teste = models.TextField(default=TEXTO_TESTE)
+    texto_atraso = models.TextField(default=TEXTO_ATRASO)
+    texto_desligamento = models.TextField(default=TEXTO_DESLIGAMENTO)
+    texto_chave = models.TextField(default=TEXTO_CHAVE)
+
+class NotificacaoEnviada(models.Model):
+    """Histórico de e-mails enviados a gestores (manuais e automáticos). `chave` impede reenviar o mesmo aviso automático."""
+    TIPOS = [("manual", "Manual"), ("cobranca", "Lembrete de cobrança"), ("teste", "Fim do teste"), ("atraso", "Cobrança em atraso"), ("desligamento", "Aviso de desligamento"), ("chave", "Chave de API")]
+    gestor = models.ForeignKey(Gestor, null=True, blank=True, on_delete=models.SET_NULL, related_name="notificacoes")
+    gestor_nome = models.CharField(max_length=160, blank=True, default="")
+    para = models.CharField(max_length=200, blank=True, default="")
+    tipo = models.CharField(max_length=14, choices=TIPOS, default="manual")
+    assunto = models.CharField(max_length=250)
+    corpo = models.TextField(blank=True, default="")
+    chave = models.CharField(max_length=120, blank=True, default="", db_index=True)
+    estado = models.CharField(max_length=10, default="enviado")
+    erro = models.CharField(max_length=300, blank=True, default="")
+    criado_em = models.DateTimeField(auto_now_add=True)
+    criado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    class Meta:
+        ordering = ["-criado_em", "-id"]

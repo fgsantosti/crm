@@ -1,7 +1,7 @@
 import re
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Gestor, RegraCobranca, Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, VariavelRoteiro, MANDATORY_OFFFLOW_QUESTION_IDS, MANDATORY_QUESTION_IDS, SITUACOES_ESPECIAIS
+from .models import ConfigNotificacao, Gestor, RegraCobranca, Blacklist, Company, Lead, Question, CompanyInfo, Event, Area, AtendenteInvite, Variavel, VariavelRoteiro, MANDATORY_OFFFLOW_QUESTION_IDS, MANDATORY_QUESTION_IDS, SITUACOES_ESPECIAIS
 
 # Obrigatórias que nunca entram numa lista SPIN (a área só é conhecida depois delas).
 FIXED_QUESTION_IDS = {"nome", "situacao"}
@@ -434,7 +434,7 @@ class GestorSerializer(serializers.ModelSerializer):
     usuario_email = serializers.SerializerMethodField()
     class Meta:
         model = Gestor
-        fields = ["id", "nome", "email", "usuario", "usuario_email", "dia_vencimento", "forma_pagamento", "contrato_inicio", "indice_reajuste", "notas", "empresas", "criado_em"]
+        fields = ["id", "nome", "email", "usuario", "usuario_email", "dia_vencimento", "forma_pagamento", "contrato_inicio", "indice_reajuste", "openai_projeto", "openai_chave_final", "openai_limite_mensal", "notas", "empresas", "criado_em"]
         read_only_fields = ["id", "empresas", "usuario_email", "criado_em"]
     def get_empresas(self, obj):
         return [{"id": c.pk, "name": c.name, "em_teste": c.em_teste} for c in obj.empresas.order_by("id")]
@@ -469,3 +469,31 @@ class RegraCobrancaSerializer(serializers.ModelSerializer):
         if curta < 1 or media <= curta:
             raise serializers.ValidationError({"faixa_atraso_media": "A 2ª faixa precisa terminar depois da 1ª."})
         return attrs
+
+
+class ConfigNotificacaoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConfigNotificacao
+        fields = ["id", "remetente", "cc", "lembrete_cobranca_ativo", "lembrete_dias_antes", "teste_ativo", "teste_dias_avisos", "atraso_f1", "atraso_f2", "atraso_f3", "chave_ativo", "chave_dias_avisos", "texto_cobranca", "texto_teste", "texto_atraso", "texto_desligamento", "texto_chave"]
+        read_only_fields = ["id"]
+    def _email(self, valor):
+        valor = (valor or "").strip()
+        if valor and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", valor):
+            raise serializers.ValidationError("E-mail inválido.")
+        return valor
+    def validate_remetente(self, valor): return self._email(valor)
+    def validate_cc(self, valor): return self._email(valor)
+    def _dias(self, valor):
+        try:
+            dias = sorted({int(d) for d in valor}, reverse=True)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError("Use uma lista de números de dias.")
+        if any(d < 0 or d > 365 for d in dias):
+            raise serializers.ValidationError("Cada prazo fica entre 0 e 365 dias.")
+        return dias
+    def validate_teste_dias_avisos(self, valor): return self._dias(valor)
+    def validate_chave_dias_avisos(self, valor): return self._dias(valor)
+    def validate_lembrete_dias_antes(self, valor):
+        if valor < 0 or valor > 60:
+            raise serializers.ValidationError("Entre 0 e 60 dias.")
+        return valor
