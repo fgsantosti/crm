@@ -256,6 +256,8 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
     .filter((q) => !isOffflow(q) && (q.area ?? null) === areaDaLista)
     .sort((a, b) => a.ordem - b.ordem || a.id - b.id);
   const offflowQuestions = questions.filter(isOffflow);
+  // Detalhamento (do sistema) sempre no topo; as demais seguem a ordem de cadastro.
+  const variaveisOrdenadas = [...variaveis].sort((a, b) => Number(!!b.builtin) - Number(!!a.builtin));
   const pesoTotal = variaveis.reduce((t, v) => t + v.peso, 0) || 1;
 
   function load() {
@@ -1018,8 +1020,8 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
             </div>
             {variaveis.length > 0 && (
               <div className="var-influencia" aria-label="Influência de cada variável na classificação">
-                <div className="var-barra" role="img" aria-label={variaveis.map((v) => `${v.name} ${Math.round((v.peso / pesoTotal) * 100)}%`).join(', ')}>
-                  {variaveis.map((v, i) => (
+                <div className="var-barra" role="img" aria-label={variaveisOrdenadas.map((v) => `${v.name} ${Math.round((v.peso / pesoTotal) * 100)}%`).join(', ')}>
+                  {variaveisOrdenadas.map((v, i) => (
                     <span key={v.id} style={{ flex: `${v.peso} 1 0`, background: COR_VAR[i % COR_VAR.length] }} title={`${v.name}: ${Math.round((v.peso / pesoTotal) * 100)}%`} />
                   ))}
                 </div>
@@ -1029,12 +1031,14 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
             <details className="var-ajuda">
               <summary>Como funciona</summary>
               <p>
-                O CRM calcula a média ponderada das notas que o agente dá em cada variável e define a urgência do lead a partir dela. <strong>Detalhamento</strong> é uma variável
+                O agente dá a nota (0 a 10) de cada variável <strong>pelo sentido do nome</strong>: ele verifica se o que o nome descreve foi atingido na conversa e
+                pontua a partir disso. Por isso use nomes explicativos (“Cliente informou o valor dos descontos” orienta melhor que “Descontos”). O CRM calcula a média ponderada
+                dessas notas e define a urgência do lead a partir dela. <strong>Detalhamento</strong> é uma variável
                 obrigatória do sistema: o CRM mede o quanto o cliente contou (demanda, observações, impacto e dados extras) e só o peso dela pode ser alterado.
               </p>
             </details>
             <div className="var-lista">
-              {variaveis.map((v, i) => {
+              {variaveisOrdenadas.map((v, i) => {
                 const usos = questions.filter((q) => q.variavel === v.id).length;
                 const pct = Math.round((v.peso / pesoTotal) * 100);
                 return (
@@ -1072,7 +1076,7 @@ export function Roteiro({ api, company, canEdit, onCompanyChange }: { api: Api; 
                       ))}
                       <strong>{v.peso}</strong>
                     </div>
-                    {!v.builtin && canEdit && (
+                    {v.builtin || !canEdit ? <span className="var-espaco" aria-hidden="true" /> : (
                       <button type="button" className="danger-outline" onClick={() => removeVariavel(v)} disabled={savingV === v.id || usos > 0} title={usos > 0 ? 'Troque a variável das perguntas antes de remover' : 'Remover variável'}>
                         {savingV === v.id && <Spinner />}
                         Remover

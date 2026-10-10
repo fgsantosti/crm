@@ -1133,3 +1133,7 @@ nav.adm-caminho { flex-direction: row; justify-content: flex-start; align-items:
 .classif-alca::-webkit-slider-thumb { transition: transform .12s, box-shadow .12s; }
 .classif-alca:active::-webkit-slider-thumb { transform: scale(1.12); box-shadow: 0 4px 12px rgba(36, 26, 18, .35); }
 @media (prefers-reduced-motion: reduce) { .rot-aba, .classif-card, .classif-legenda li, .classif-kanban-chip, .classif-aviso, .rot-fora { animation: none; } .classif-trechos > span, .classif-balao, .classif-marcador, .var-barra > span { transition: none; } }
+.var-card { display: grid; grid-template-columns: 12px minmax(160px, 1fr) auto 104px; align-items: center; gap: 14px; }
+.var-card .danger-outline, .var-espaco { width: 104px; justify-self: end; }
+.var-espaco { height: 1px; display: block; }
+@media (max-width: 760px) { .var-card { grid-template-columns: 12px 1fr; } .var-card .var-peso { grid-column: 2; } .var-card .danger-outline { grid-column: 2; justify-self: start; } .var-espaco { display: none; } }
