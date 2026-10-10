@@ -4047,3 +4047,26 @@ class TendenciaComNaoProsseguiramTests(TestCase):
             Lead.objects.create(company=company, contact=f"+558590000800{i}", temperature=t)
         r = resumo_dashboard(company)
         self.assertEqual(r["por_temperatura"], {"Desqualificado": 0, "Desconfiado": 1, "Frio": 1, "Qualificado": 0, "Quente": 2})
+
+
+class NotasSoDaSpinDaAreaTests(TestCase):
+    def test_fluxo_classico_ignora_notas_de_spin_de_outra_area(self):
+        from .services import _aplicar_notas_urgencia
+        company = Company.objects.create(name="Spin Área Ltda")
+        seed_roteiro_padrao(company)
+        consumidor = Area.objects.create(company=company, name="Consumidor")
+        trabalhista = Area.objects.create(company=company, name="Trabalhista")
+        alta = Variavel.objects.create(company=company, name="Alta", peso=10)
+        baixa = Variavel.objects.create(company=company, name="Baixa", peso=2)
+        Question.objects.create(company=company, question_id="cons_situacao", area=consumidor, text="?", variavel=baixa, etapa_spin="situacao")
+        Question.objects.create(company=company, question_id="trab_situacao", area=trabalhista, text="?", variavel=alta, etapa_spin="situacao")
+        Question.objects.create(company=company, question_id="fixa_renda", text="?", variavel=baixa)
+        lead = Lead.objects.create(company=company, contact="+5585900008001", especialidade="Consumidor")
+        fields, erro = _aplicar_notas_urgencia(lead, company, {"notas": {"cons_situacao": 8, "trab_situacao": 0, "fixa_renda": 6}})
+        self.assertIsNone(erro)
+        self.assertEqual(set(lead.urgencia_detalhe["notas"]) - {"_detalhamento"}, {"cons_situacao", "fixa_renda"})
+        # Só nota de outra área: nada para calcular.
+        outro = Lead.objects.create(company=company, contact="+5585900008002", especialidade="Consumidor")
+        _, erro = _aplicar_notas_urgencia(outro, company, {"notas": {"trab_situacao": 9}})
+        self.assertIsNone(erro)
+        self.assertEqual(outro.urgencia_detalhe, {})

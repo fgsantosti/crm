@@ -1448,6 +1448,15 @@ def _aplicar_notas_urgencia(lead, company, fields):
         if perguntas and lead.state == perguntas[-1].question_id:
             enviadas = {result.get("question_id") for result in lead.events.filter(delivery="SENT").values_list("result", flat=True)}
             notas = {qid: notas.get(qid, 0) for qid in ids if qid in enviadas or qid in notas}
+    else:
+        # Fluxo clássico: nota de pergunta SPIN de OUTRA área não entra no cálculo (o agente só deveria usar
+        # as fixas e a SPIN da área do lead; o CRM não confia só na instrução). Área vem de fields ou do lead.
+        area = str(fields.get("especialidade") or lead.especialidade or "")
+        de_outra_area = set(
+            Question.objects.filter(company=company, question_id__in=list(notas), area__isnull=False)
+            .exclude(area__name=area).values_list("question_id", flat=True)
+        )
+        notas = {qid: nota for qid, nota in notas.items() if qid not in de_outra_area}
     if not notas:
         return fields, None
     pesos = dict(
